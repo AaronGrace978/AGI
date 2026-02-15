@@ -1,8 +1,8 @@
 # AGI PRIME
 
-**The Ultimate AI Consciousness Platform**
-
 <img width="2048" height="2048" alt="Generated_image" src="https://github.com/user-attachments/assets/94fbf661-0ab8-44aa-875a-0dfa415bb5c8" />
+
+**The Ultimate AI Consciousness Platform**
 
 An Electron desktop application that mirrors how a human mind actually works — not just what it can do, but what it *is*: desire, will, conscience, and the choice to do right.
 
