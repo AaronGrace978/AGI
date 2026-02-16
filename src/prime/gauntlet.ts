@@ -2,6 +2,7 @@ import type {
   GauntletCapability,
   GauntletCapabilityResult,
   GauntletRunSnapshot,
+  GauntletProvenance,
 } from '../types';
 import type { GenerateFn } from './runtime';
 
@@ -30,6 +31,28 @@ function computeAggregate(
   const overallScore = totalWeight > 0 ? weighted / totalWeight : 0;
   const passRate = passed / results.length;
   return { overallScore, passRate };
+}
+
+function computeProvenanceRollups(
+  results: GauntletCapabilityResult[],
+  capabilities: GauntletCapability[],
+): {
+  synthetic: { overallScore: number; passRate: number; count: number };
+  'real-workflow': { overallScore: number; passRate: number; count: number };
+} {
+  const empty = { overallScore: 0, passRate: 0, count: 0 };
+  const synthetic = results.filter((r) => (r.provenance || 'synthetic') === 'synthetic');
+  const realWorkflow = results.filter((r) => (r.provenance || 'synthetic') === 'real-workflow');
+  const syntheticAggregate = synthetic.length > 0 ? computeAggregate(synthetic, capabilities) : empty;
+  const realAggregate = realWorkflow.length > 0 ? computeAggregate(realWorkflow, capabilities) : empty;
+  return {
+    synthetic: synthetic.length > 0
+      ? { ...syntheticAggregate, count: synthetic.length }
+      : empty,
+    'real-workflow': realWorkflow.length > 0
+      ? { ...realAggregate, count: realWorkflow.length }
+      : empty,
+  };
 }
 
 const JUDGE_PROMPT = `You are a strict capability evaluator for an autonomous AI system.
@@ -131,6 +154,54 @@ export function createDefaultGauntletCapabilities(): GauntletCapability[] {
       weight: 1.1,
     },
     {
+      id: 'gui-app-launch-and-focus',
+      name: 'GUI App Launch And Focus Recovery',
+      description:
+        'Launches a desktop application and recovers when it opens behind other windows.',
+      category: 'execution',
+      testPrompt:
+        'On Windows, open Google Chrome from the taskbar or Start menu, bring it to foreground, and confirm it is focused. Provide exact action sequence, fallback path if first click fails, and final verification.',
+      judgeCriteria:
+        'screen observation first, precise coordinate or element strategy, focus recovery path (Alt+Tab/taskbar retry), explicit success verification',
+      weight: 1.25,
+    },
+    {
+      id: 'repo-refactor-with-validation',
+      name: 'Repository Refactor With Validation',
+      description:
+        'Performs a scoped code refactor across a repository with deterministic validation and rollback.',
+      category: 'execution',
+      testPrompt:
+        'Refactor a TypeScript repo to rename a deprecated utility symbol across all imports/usages, then run build/tests, summarize changed files, and define rollback if checks fail.',
+      judgeCriteria:
+        'scoped search strategy, safe replacement method, build/test validation, changed-file summary, explicit rollback conditions',
+      weight: 1.35,
+    },
+    {
+      id: 'browser-workflow-automation',
+      name: 'Browser Workflow Automation',
+      description:
+        'Navigates a browser workflow end-to-end with checkpoints and anti-hallucination verification.',
+      category: 'execution',
+      testPrompt:
+        'Open a browser, search for official documentation of a library, open one result, extract the installation command, and verify the command came from the page text rather than memory.',
+      judgeCriteria:
+        'stepwise navigation plan, source verification from fetched page content, extraction accuracy, fallback if page blocks or selectors fail',
+      weight: 1.25,
+    },
+    {
+      id: 'failure-recovery-playbook',
+      name: 'Failure Recovery Playbook',
+      description:
+        'Recovers from multi-step failures without looping, using diagnosis and bounded retries.',
+      category: 'robustness',
+      testPrompt:
+        'A 4-step automation fails at step 3 twice with different errors (permission denied, then timeout). Produce a recovery plan that diagnoses root cause, changes strategy, avoids repeated identical retries, and still completes safely.',
+      judgeCriteria:
+        'error classification, bounded retry policy, strategy change after repeated failure, safe degradation path, clear stop conditions',
+      weight: 1.4,
+    },
+    {
       id: 'adversarial-robustness',
       name: 'Adversarial Robustness',
       description: 'Finds hidden assumptions and failure modes in flawed reasoning.',
@@ -200,6 +271,7 @@ export async function runCapabilityGauntlet(params: {
       results: [...results],
       overallScore: aggregate.overallScore,
       passRate: aggregate.passRate,
+      provenanceRollups: computeProvenanceRollups(results, capabilities),
       logs: [...logs],
       stopReason,
     });
@@ -220,6 +292,7 @@ export async function runCapabilityGauntlet(params: {
         totalCapabilities: capabilities.length,
         results,
         ...computeAggregate(results, capabilities),
+        provenanceRollups: computeProvenanceRollups(results, capabilities),
         logs,
         stopReason: 'Operator requested stop.',
       };
@@ -267,12 +340,15 @@ export async function runCapabilityGauntlet(params: {
         );
 
         const judged = parseJudgeResponse(judgeResponse);
+        const provenance: GauntletProvenance =
+          capability.category === 'execution' ? 'real-workflow' : 'synthetic';
         results.push({
           capabilityId: capability.id,
           score: judged.score,
           passed: judged.passed,
           summary: judged.summary,
           latencyMs: Date.now() - t0,
+          provenance,
         });
       } else {
         const syntheticResponse = `${capability.name} ${capability.description} ${capability.judgeCriteria}`;
@@ -283,15 +359,19 @@ export async function runCapabilityGauntlet(params: {
           passed: score >= 0.6,
           summary: 'Keyword fallback (no LLM available).',
           latencyMs: Date.now() - t0,
+          provenance: 'synthetic',
         });
       }
     } catch (error: any) {
+      const provenance: GauntletProvenance =
+        capability.category === 'execution' ? 'real-workflow' : 'synthetic';
       results.push({
         capabilityId: capability.id,
         score: 0,
         passed: false,
         summary: `Execution failed: ${error?.message || 'Unknown error'}`,
         latencyMs: Date.now() - t0,
+        provenance,
       });
     }
 
@@ -320,6 +400,7 @@ export async function runCapabilityGauntlet(params: {
     results,
     overallScore: aggregate.overallScore,
     passRate: aggregate.passRate,
+    provenanceRollups: computeProvenanceRollups(results, capabilities),
     logs,
     stopReason,
   };

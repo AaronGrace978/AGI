@@ -37,6 +37,25 @@ export interface MemoryStats {
   byLayer?: Record<string, number>;
 }
 
+export interface LegacyMemorySnapshot {
+  facts?: unknown[];
+  conversations?: unknown[];
+  soul?: {
+    trust?: number;
+    intimacy?: number;
+    totalInteractions?: number;
+    birthTimestamp?: number;
+    name?: string;
+  };
+  consciousness?: {
+    currentEmotion?: string;
+    emotionIntensity?: number;
+    presenceState?: string;
+    insights?: unknown[];
+    lastDreamCycle?: number | null;
+  };
+}
+
 // ─── Memory Hierarchy Constants ─────────────────────────────────
 
 /** Working memory: lasts ~minutes, very fast access */
@@ -226,6 +245,72 @@ export async function getMemoryStats(): Promise<MemoryStats> {
   } catch {
     return { total: 0, byType: { episodic: 0, semantic: 0, procedural: 0, reflective: 0, autobiographical: 0 } };
   }
+}
+
+export async function listVectorMemories(options?: {
+  typeFilter?: MemoryType | null;
+  limit?: number;
+  offset?: number;
+  sortBy?: 'newest' | 'oldest' | 'importance';
+}): Promise<{ total: number; memories: VectorMemory[] }> {
+  if (!window.api?.memory?.listVectors) return { total: 0, memories: [] };
+  try {
+    const result = await window.api.memory.listVectors(options);
+    return {
+      total: result.total ?? 0,
+      memories: (result.memories || []).map((m) => ({
+        ...m,
+        type: m.type as MemoryType,
+      })),
+    };
+  } catch {
+    return { total: 0, memories: [] };
+  }
+}
+
+export async function getLegacyMemorySnapshot(): Promise<LegacyMemorySnapshot | null> {
+  if (!window.api?.memory?.get) return null;
+  try {
+    const snapshot = await window.api.memory.get();
+    return (snapshot || null) as LegacyMemorySnapshot | null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getLegacyMemorySummary(maxItems: number = 5): Promise<(LegacyMemorySnapshot & {
+  counts?: { facts: number; conversations: number; insights: number };
+}) | null> {
+  const capped = Math.max(1, Math.min(12, Number(maxItems) || 5));
+  // Prefer lightweight summary IPC when available (prevents loading huge conversation logs).
+  if (window.api?.memory?.getSummary) {
+    try {
+      const summary = await window.api.memory.getSummary({ maxItems: capped });
+      return (summary || null) as any;
+    } catch {
+      // fall back
+    }
+  }
+
+  const snapshot = await getLegacyMemorySnapshot();
+  if (!snapshot) return null;
+  const safeFacts = Array.isArray(snapshot.facts) ? snapshot.facts : [];
+  const safeConversations = Array.isArray(snapshot.conversations) ? snapshot.conversations : [];
+  const safeInsights = Array.isArray(snapshot.consciousness?.insights) ? snapshot.consciousness?.insights || [] : [];
+  return {
+    ...snapshot,
+    facts: safeFacts.slice(-capped),
+    conversations: safeConversations.slice(-capped),
+    consciousness: {
+      ...(snapshot.consciousness || {}),
+      insights: safeInsights.slice(-capped),
+    },
+    counts: {
+      facts: safeFacts.length,
+      conversations: safeConversations.length,
+      insights: safeInsights.length,
+    },
+  };
 }
 
 // ─── RAG-Enhanced Message Injection ────────────────────────────

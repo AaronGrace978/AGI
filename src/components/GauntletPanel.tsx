@@ -1,5 +1,6 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useStore } from '../store';
+import type { GauntletProvenance } from '../types';
 
 function msToDuration(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / 1000));
@@ -55,6 +56,10 @@ export default function GauntletPanel() {
     () => polylinePoints(trendRuns.map((run) => run.passRate), 280, 84),
     [trendRuns],
   );
+  const [provenanceFilter, setProvenanceFilter] = useState<GauntletProvenance | 'all'>('all');
+  const filteredResults = gauntlet.results.filter((result) =>
+    provenanceFilter === 'all' ? true : (result.provenance || 'synthetic') === provenanceFilter,
+  );
 
   return (
     <div className="forge-panel">
@@ -103,21 +108,40 @@ export default function GauntletPanel() {
 
         <section className="forge-card">
           <h3>Capability Results</h3>
-          {gauntlet.results.length === 0 ? (
+          <div className="forge-actions" style={{ marginBottom: 8 }}>
+            <button onClick={() => setProvenanceFilter('all')} disabled={provenanceFilter === 'all'}>All</button>
+            <button onClick={() => setProvenanceFilter('real-workflow')} disabled={provenanceFilter === 'real-workflow'}>Real Workflow</button>
+            <button onClick={() => setProvenanceFilter('synthetic')} disabled={provenanceFilter === 'synthetic'}>Synthetic</button>
+          </div>
+          {filteredResults.length === 0 ? (
             <p className="forge-empty">Run the gauntlet to score capabilities against your baseline suite.</p>
           ) : (
             <div className="forge-log">
-              {gauntlet.results.map((result) => (
+              {filteredResults.map((result) => (
                 <div key={`${result.capabilityId}-${result.latencyMs}`} className="forge-log-line">
                   <strong>{capNameById.get(result.capabilityId) ?? result.capabilityId}</strong>
                   {' — '}
                   {(result.score * 100).toFixed(1)}% {result.passed ? 'PASS' : 'FAIL'}
+                  {' — '}
+                  [{result.provenance || 'synthetic'}]
                   {' — '}
                   {result.summary}
                 </div>
               ))}
             </div>
           )}
+        </section>
+
+        <section className="forge-card">
+          <h3>Provenance Rollups</h3>
+          <div className="forge-metrics">
+            <div><span>Real workflow score</span><strong>{(gauntlet.provenanceRollups['real-workflow'].overallScore * 100).toFixed(1)}%</strong></div>
+            <div><span>Real workflow pass</span><strong>{(gauntlet.provenanceRollups['real-workflow'].passRate * 100).toFixed(1)}%</strong></div>
+            <div><span>Real workflow count</span><strong>{gauntlet.provenanceRollups['real-workflow'].count}</strong></div>
+            <div><span>Synthetic score</span><strong>{(gauntlet.provenanceRollups.synthetic.overallScore * 100).toFixed(1)}%</strong></div>
+            <div><span>Synthetic pass</span><strong>{(gauntlet.provenanceRollups.synthetic.passRate * 100).toFixed(1)}%</strong></div>
+            <div><span>Synthetic count</span><strong>{gauntlet.provenanceRollups.synthetic.count}</strong></div>
+          </div>
         </section>
 
         <section className="forge-card">

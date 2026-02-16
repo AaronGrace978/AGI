@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store';
 import type { AutonomyLevel } from '../prime/policy';
+import HardeningPanel from './HardeningPanel';
 
 const AUTONOMY_LEVELS: { id: AutonomyLevel; label: string; desc: string }[] = [
   { id: 'manual',      label: 'MANUAL',      desc: 'Every action requires approval' },
@@ -278,6 +279,9 @@ export default function SovereignPanel() {
             </div>
           </div>
         )}
+
+        {/* ─── Hardening Health ──────────────────────────── */}
+        <HardeningPanel />
 
         {/* ─── Live Log ───────────────────────────────────── */}
         <div className="sovereign-log">

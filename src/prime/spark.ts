@@ -19,6 +19,13 @@ import { createDefaultGenome } from './cognitive-genome';
 import { createDefaultMetabolism } from './autonomy-metabolism';
 import { createDefaultSocialState } from './social-sim';
 import { createDefaultEcology } from './embodied-ecology';
+import { createDefaultGauntletCapabilities, runCapabilityGauntlet } from './gauntlet';
+import { generateCounterfactualPredictions } from './causal-model';
+import {
+  decayWorldModelConfidence,
+  mergeWorldModelIncremental,
+  normalizeWorldModel,
+} from './world-model';
 import type {
   SparkState,
   SparkThermodynamics,
@@ -723,6 +730,38 @@ Output JSON:
   }
 }
 
+export async function recursivelyDecomposeGoal(
+  rootGoal: SparkGoal,
+  worldModel: { entities: WorldEntity[]; relations: WorldRelation[] },
+  generate: GenerateFn,
+  maxDepth: number = 2,
+  maxNodes: number = 18,
+): Promise<SparkGoal[]> {
+  if (maxDepth <= 0) return [];
+  const created: SparkGoal[] = [];
+  const queue: Array<{ goal: SparkGoal; depth: number }> = [{ goal: rootGoal, depth: 1 }];
+
+  while (queue.length > 0 && created.length < maxNodes) {
+    const node = queue.shift();
+    if (!node) break;
+
+    const children = await decomposeGoal(node.goal, worldModel, generate);
+    if (children.length === 0) continue;
+
+    const boundedChildren = children.slice(0, Math.max(1, 5 - node.depth));
+    node.goal.subgoals = boundedChildren.map((g) => g.id);
+    created.push(...boundedChildren);
+
+    if (node.depth < maxDepth) {
+      for (const child of boundedChildren) {
+        queue.push({ goal: child, depth: node.depth + 1 });
+      }
+    }
+  }
+
+  return created.slice(0, maxNodes);
+}
+
 /**
  * Updates goal progress based on subgoal completion.
  */
@@ -811,6 +850,29 @@ Be specific. Concrete changes only. No vague improvements.`;
   }
 }
 
+async function evaluateStrategyGate(
+  strategy: string,
+  generate: GenerateFn,
+): Promise<{ overallScore: number; passRate: number; notes: string }> {
+  const capabilities = createDefaultGauntletCapabilities().slice(0, 3);
+  const runId = `spark_gate_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  const result = await runCapabilityGauntlet({
+    runId,
+    capabilities,
+    systemPrompt: strategy,
+    championPrompt: null,
+    generate,
+    shouldStop: () => false,
+    onProgress: () => {},
+  });
+
+  return {
+    overallScore: result.overallScore,
+    passRate: result.passRate,
+    notes: `Gate score ${(result.overallScore * 100).toFixed(1)}%, pass ${(result.passRate * 100).toFixed(1)}%`,
+  };
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  7. TEMPORAL REASONER — Causal chains, prediction, learning
 // ═══════════════════════════════════════════════════════════════
@@ -866,8 +928,9 @@ KNOWN CAUSAL RELATIONSHIPS:
 ${causalRelations || 'None established'}
 
 Generate 2-3 predictions with confidence levels.
+Predictions can be language, numeric, categorical, or structured.
 Output JSON:
-[{"prediction": "...", "confidence": 0.0-1.0}]
+[{"prediction": "... | 42 | true | {...} | [...]", "kind": "language|numeric|categorical|structured", "confidence": 0.0-1.0}]
 
 Be specific. Grounded predictions only. No wild speculation.`;
 
@@ -890,6 +953,16 @@ Be specific. Grounded predictions only. No wild speculation.`;
     return (parsed || []).map((p: any) => ({
       id: uid('pred'),
       prediction: p.prediction,
+      kind:
+        p.kind === 'language' || p.kind === 'numeric' || p.kind === 'categorical' || p.kind === 'structured'
+          ? p.kind
+          : typeof p.prediction === 'number'
+            ? 'numeric'
+            : typeof p.prediction === 'boolean'
+              ? 'categorical'
+              : typeof p.prediction === 'object' && p.prediction !== null
+                ? 'structured'
+                : 'language',
       confidence: Math.min(1, Math.max(0, p.confidence || 0.5)),
       basedOn: recentEvents.slice(-3).map((e) => e.id),
       deadline: Date.now() + 3600000, // check in 1 hour
@@ -912,6 +985,18 @@ export function calculatePredictionAccuracy(
   if (resolved.length === 0) return 0;
   const correct = resolved.filter((p) => p.wasCorrect).length;
   return correct / resolved.length;
+}
+
+function predictionToText(prediction: TemporalPrediction['prediction']): string {
+  if (typeof prediction === 'string') return prediction;
+  if (typeof prediction === 'number' || typeof prediction === 'boolean') {
+    return String(prediction);
+  }
+  try {
+    return JSON.stringify(prediction);
+  } catch {
+    return '[unserializable prediction]';
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -941,7 +1026,15 @@ export function createDefaultSparkState(): SparkState {
     metabolism: createDefaultMetabolism(),
     social: createDefaultSocialState(),
     ecology: createDefaultEcology(),
-    worldModel: { entities: [], relations: [], lastUpdated: 0 },
+    worldModel: {
+      entities: [],
+      relations: [],
+      archivedEntities: [],
+      archivedRelations: [],
+      maxActiveEntities: 800,
+      maxActiveRelations: 3000,
+      lastUpdated: 0,
+    },
     curiosity: {
       questions: [],
       curiosityScore: 0.5,
@@ -1002,6 +1095,7 @@ export async function runSparkCycle(
   onLog: (msg: string) => void,
 ): Promise<SparkState> {
   const next: SparkState = JSON.parse(JSON.stringify(state));
+  next.worldModel = normalizeWorldModel(next.worldModel);
   next.cycleCount++;
   next.lastCycleAt = Date.now();
   next.active = true;
@@ -1024,11 +1118,11 @@ export async function runSparkCycle(
     const newEntities = entities.filter(
       (e) => !existingNames.has(e.name.toLowerCase()),
     );
-    next.worldModel = {
-      entities: [...next.worldModel.entities, ...newEntities].slice(-200),
-      relations: [...next.worldModel.relations, ...relations].slice(-500),
-      lastUpdated: Date.now(),
-    };
+    next.worldModel = mergeWorldModelIncremental({
+      current: next.worldModel,
+      incomingEntities: newEntities,
+      incomingRelations: relations,
+    });
     onLog(
       `  +${newEntities.length} entities, +${relations.length} relations → ${next.worldModel.entities.length}E / ${next.worldModel.relations.length}R total`,
     );
@@ -1186,6 +1280,7 @@ export async function runDeepThought(
   onLog: (msg: string) => void,
 ): Promise<SparkState> {
   const next: SparkState = JSON.parse(JSON.stringify(state));
+  next.worldModel = normalizeWorldModel(next.worldModel);
   next.cycleCount++;
   next.lastCycleAt = Date.now();
   next.active = true;
@@ -1220,12 +1315,34 @@ export async function runDeepThought(
     );
 
     if (mod) {
+      const baseline = await evaluateStrategyGate(next.selfmod.currentStrategy, generate);
+      const challenger = await evaluateStrategyGate(mod.after, generate);
+      mod.scoreBefore = baseline.overallScore;
+      mod.scoreAfter = challenger.overallScore;
+      mod.evaluationNotes = `${baseline.notes} -> ${challenger.notes}`;
+      mod.gatePassed =
+        challenger.overallScore >= baseline.overallScore + 0.03 &&
+        challenger.passRate >= baseline.passRate;
+      mod.applied = !!mod.gatePassed;
+
       next.selfmod = {
         ...next.selfmod,
         modifications: [...next.selfmod.modifications, mod].slice(-20),
         totalModifications: next.selfmod.totalModifications + 1,
+        successfulModifications:
+          next.selfmod.successfulModifications + (mod.gatePassed ? 1 : 0),
+        currentStrategy: mod.gatePassed ? mod.after : next.selfmod.currentStrategy,
       };
       onLog(`  Proposed: ${mod.description.slice(0, 120)}`);
+      if (mod.gatePassed) {
+        onLog(
+          `  ✓ Applied (gate passed): ${(mod.scoreBefore * 100).toFixed(1)}% -> ${(mod.scoreAfter * 100).toFixed(1)}%`,
+        );
+      } else {
+        onLog(
+          `  ✗ Rejected by gate: ${(mod.scoreBefore * 100).toFixed(1)}% -> ${(mod.scoreAfter * 100).toFixed(1)}%`,
+        );
+      }
     }
   } catch {
     onLog('  Self-modification proposal failed');
@@ -1239,15 +1356,28 @@ export async function runDeepThought(
       next.worldModel,
       generate,
     );
+    const anchors = next.temporal.events
+      .slice(-4)
+      .flatMap((evt) => evt.causalParents)
+      .filter(Boolean);
+    const counterfactuals = generateCounterfactualPredictions({
+      worldModel: next.worldModel,
+      anchorEntityIds: anchors.length > 0 ? anchors : next.worldModel.entities.slice(-3).map((e) => e.id),
+      maxPredictions: 2,
+    });
     next.temporal = {
       ...next.temporal,
       activePredictions: [
         ...next.temporal.activePredictions,
         ...predictions,
+        ...counterfactuals,
       ].slice(-20),
     };
     for (const p of predictions) {
-      onLog(`  → ${p.prediction} (${(p.confidence * 100).toFixed(0)}%)`);
+      onLog(`  → ${predictionToText(p.prediction)} (${(p.confidence * 100).toFixed(0)}%)`);
+    }
+    for (const p of counterfactuals) {
+      onLog(`  ↺ Counterfactual: ${predictionToText(p.prediction)} (${(p.confidence * 100).toFixed(0)}%)`);
     }
   } catch {
     onLog('  Prediction generation failed');
@@ -1358,13 +1488,9 @@ export function computeThermodynamics(state: SparkState): {
 export function runLightCycle(state: SparkState): SparkState {
   const next: SparkState = JSON.parse(JSON.stringify(state));
   const now = Date.now();
+  next.worldModel = decayWorldModelConfidence(normalizeWorldModel(next.worldModel), now);
 
-  // 1. Decay entity salience — what you don't think about fades
-  for (const entity of next.worldModel.entities) {
-    const age = now - entity.lastReferenced;
-    const decayFactor = Math.exp(-age / 3600000); // half-life ~1 hour
-    entity.salience = Math.max(0.05, entity.salience * decayFactor);
-  }
+  // 1. Confidence/salience decay is applied by world-model manager above.
 
   // 2. Check temporal predictions — any past deadline?
   for (const pred of next.temporal.activePredictions) {
@@ -1453,6 +1579,7 @@ export async function runMediumCycle(
   onLog: (msg: string) => void,
 ): Promise<SparkState> {
   const next: SparkState = JSON.parse(JSON.stringify(state));
+  next.worldModel = normalizeWorldModel(next.worldModel);
   const now = Date.now();
   next.cycleCount++;
   next.lastCycleAt = now;
@@ -1463,6 +1590,34 @@ export async function runMediumCycle(
   const unresolvedPreds = next.temporal.activePredictions.filter(
     (p) => p.resolved && p.wasCorrect === undefined,
   );
+  const expandableGoal = next.goals.goals.find(
+    (g) => g.status === 'active' && !g.parentGoal && g.subgoals.length === 0,
+  );
+
+  // Recursive planning: expand a top-level goal into a small tree.
+  if (expandableGoal && Math.random() < 0.35) {
+    onLog(`⟳ Medium: Expanding goal tree for "${expandableGoal.description.slice(0, 50)}..."`);
+    try {
+      const expanded = await recursivelyDecomposeGoal(
+        expandableGoal,
+        next.worldModel,
+        generate,
+        2,
+        14,
+      );
+      if (expanded.length > 0) {
+        const idToGoal = new Map(next.goals.goals.map((g) => [g.id, g]));
+        idToGoal.set(expandableGoal.id, expandableGoal);
+        for (const g of expanded) idToGoal.set(g.id, g);
+        next.goals.goals = [...idToGoal.values()];
+        onLog(`  Goal tree expanded: +${expanded.length} derived subgoal(s)`);
+      } else {
+        onLog('  No viable decomposition produced');
+      }
+    } catch {
+      onLog('  Goal decomposition failed');
+    }
+  }
 
   // Priority: answer existing questions > generate new ones > assess predictions
   if (openQuestions.length > 0 && Math.random() < 0.5) {
@@ -1514,10 +1669,11 @@ export async function runMediumCycle(
   } else if (unresolvedPreds.length > 0) {
     // Try to validate a prediction
     const pred = unresolvedPreds[0];
-    onLog(`⟳ Medium: Evaluating prediction "${pred.prediction.slice(0, 60)}..."`);
+    const predictionText = predictionToText(pred.prediction);
+    onLog(`⟳ Medium: Evaluating prediction "${predictionText.slice(0, 60)}..."`);
     try {
       const assessment = await assessConfidence(
-        pred.prediction,
+        predictionText,
         [],
         next.metacognition.calibrationScore,
         generate,

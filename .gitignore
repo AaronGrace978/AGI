@@ -27,6 +27,7 @@ node_modules/.vite/
 
 # Temp
 temp/
+~$*
 
 # Logs
 *.log

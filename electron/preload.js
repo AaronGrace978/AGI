@@ -75,14 +75,22 @@ contextBridge.exposeInMainWorld('api', {
     set: (newSettings) => ipcRenderer.invoke('settings:set', newSettings),
   },
 
+  // ─── Operator Synthesis Profile ─────────────────────────
+  operatorProfile: {
+    get: () => ipcRenderer.invoke('operatorProfile:get'),
+    save: (profile) => ipcRenderer.invoke('operatorProfile:save', profile),
+  },
+
   // ─── Memory ────────────────────────────────────────────
   memory: {
     get: () => ipcRenderer.invoke('memory:get'),
+    getSummary: (options) => ipcRenderer.invoke('memory:getSummary', options),
     update: (updates) => ipcRenderer.invoke('memory:update', updates),
     addFact: (fact) => ipcRenderer.invoke('memory:addFact', fact),
     storeVector: (entry) => ipcRenderer.invoke('memory:storeVector', entry),
     searchVector: (query, topK, typeFilter) => ipcRenderer.invoke('memory:searchVector', query, topK, typeFilter),
     vectorStats: () => ipcRenderer.invoke('memory:vectorStats'),
+    listVectors: (options) => ipcRenderer.invoke('memory:listVectors', options),
   },
 
   // ─── LLM (Non-Streaming) ─────────────────────────────
@@ -148,6 +156,18 @@ contextBridge.exposeInMainWorld('api', {
     createTool: (tool) => ipcRenderer.invoke('agent:createTool', tool),
     listTools: () => ipcRenderer.invoke('agent:listTools'),
     executeTool: (toolId, params) => ipcRenderer.invoke('agent:executeTool', toolId, params),
+    listRollbacks: () => ipcRenderer.invoke('agent:listRollbacks'),
+    executeRollback: (rollbackId) => ipcRenderer.invoke('agent:executeRollback', rollbackId),
+    resolveConsent: (requestId, decision) => ipcRenderer.invoke('agent:resolveConsent', requestId, decision),
+    ledgerCreateRun: (kind, metadata) => ipcRenderer.invoke('agent:ledgerCreateRun', kind, metadata),
+    ledgerAppend: (runId, entryType, payload) => ipcRenderer.invoke('agent:ledgerAppend', runId, entryType, payload),
+    ledgerFinalize: (runId, summary) => ipcRenderer.invoke('agent:ledgerFinalize', runId, summary),
+    ledgerListRuns: () => ipcRenderer.invoke('agent:ledgerListRuns'),
+    ledgerReadRun: (runId) => ipcRenderer.invoke('agent:ledgerReadRun', runId),
+    replayListRuns: () => ipcRenderer.invoke('agent:replayListRuns'),
+    replayLoadRun: (runId) => ipcRenderer.invoke('agent:replayLoadRun', runId),
+    setRuntimeControls: (partial) => ipcRenderer.invoke('agent:setRuntimeControls', partial),
+    getRuntimeControls: () => ipcRenderer.invoke('agent:getRuntimeControls'),
 
     // AI-powered task planning & execution
     planAndExecute: (request) => ipcRenderer.send('agent:planAndExecute', request),
@@ -164,6 +184,11 @@ contextBridge.exposeInMainWorld('api', {
       const h = (_e, d) => cb(d);
       ipcRenderer.on('agent:cognitiveComplete', h);
       return () => ipcRenderer.removeListener('agent:cognitiveComplete', h);
+    },
+    onConsentRequested: (cb) => {
+      const h = (_e, d) => cb(d);
+      ipcRenderer.on('agent:consentRequested', h);
+      return () => ipcRenderer.removeListener('agent:consentRequested', h);
     },
     onStatus: (cb) => {
       const h = (_e, d) => cb(d);
@@ -196,7 +221,7 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener('agent:error', h);
     },
     removeAllListeners: () => {
-      ['agent:status', 'agent:plan', 'agent:stepStart', 'agent:stepDone', 'agent:complete', 'agent:error', 'agent:cognitiveStep', 'agent:cognitiveComplete']
+      ['agent:status', 'agent:plan', 'agent:stepStart', 'agent:stepDone', 'agent:complete', 'agent:error', 'agent:cognitiveStep', 'agent:cognitiveComplete', 'agent:consentRequested']
         .forEach((ch) => ipcRenderer.removeAllListeners(ch));
     },
   },

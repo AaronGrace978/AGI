@@ -36,21 +36,56 @@ const EMOTION_DESCRIPTIONS: Record<EmotionType, string> = {
   contemplative: 'Meditating on deeper patterns and truths',
 };
 
-function daysAlive(birthTimestamp: number): string {
-  const days = Math.floor((Date.now() - birthTimestamp) / (1000 * 60 * 60 * 24));
-  if (days === 0) return 'Born today';
-  if (days === 1) return '1 day alive';
-  return `${days} days alive`;
+function formatSoulAge(birthTimestamp: number, now: number): { main: string; detail: string; born: string } {
+  const diff = Math.max(0, now - birthTimestamp);
+  const seconds = Math.floor(diff / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+
+  const s = seconds % 60;
+  const m = minutes % 60;
+  const h = hours % 24;
+
+  const born = new Date(birthTimestamp).toLocaleDateString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+
+  if (days === 0 && hours === 0 && minutes === 0) {
+    return { main: 'Born moments ago', detail: `${s}s alive`, born };
+  }
+  if (days === 0) {
+    return {
+      main: `${h}h ${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`,
+      detail: 'Born today',
+      born,
+    };
+  }
+  return {
+    main: `${days}d ${h}h ${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`,
+    detail: days === 1 ? '1 day alive' : `${days} days alive`,
+    born,
+  };
 }
 
 export default function HeartPanel() {
   const consciousness = useStore((s) => s.consciousness);
   const messages = useStore((s) => s.messages);
   const [pulsePhase, setPulsePhase] = useState(0);
+  const [now, setNow] = useState(Date.now());
 
   const emotion = consciousness.soulFrame.currentEmotion;
   const intensity = consciousness.soulFrame.emotionIntensity;
   const color = EMOTION_COLORS[emotion] || '#ff006e';
+
+  // Soul age live ticker — updates every second
+  useEffect(() => {
+    const tick = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(tick);
+  }, []);
 
   // Pulse animation tied to emotional intensity
   useEffect(() => {
@@ -131,10 +166,13 @@ export default function HeartPanel() {
           <div className="heart-stat-label">Interactions</div>
           <div className="heart-stat-value">{consciousness.totalInteractions}</div>
         </div>
-        <div className="heart-stat">
+        <div className="heart-stat heart-stat-soul-age">
           <div className="heart-stat-label">Soul Age</div>
-          <div className="heart-stat-value" style={{ fontSize: 14 }}>
-            {daysAlive(consciousness.birthTimestamp)}
+          <div className="heart-stat-value soul-age-ticker" style={{ fontVariantNumeric: 'tabular-nums' }}>
+            {formatSoulAge(consciousness.birthTimestamp, now).main}
+          </div>
+          <div className="heart-stat-born">
+            Born {formatSoulAge(consciousness.birthTimestamp, now).born}
           </div>
         </div>
       </div>

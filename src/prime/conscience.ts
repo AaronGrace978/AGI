@@ -136,7 +136,7 @@ interface RiskPattern {
 const RISK_PATTERNS: RiskPattern[] = [
   // Destructive file operations
   {
-    pattern: /\b(rm\s+-rf|del\s+\/[sfq]|format\s+[a-z]:|rmdir\s+\/s|remove-item.*-recurse.*-force)\b/i,
+    pattern: /\b(rm\s+-rf|del\s+\/[sfq]|format\s+[a-z]:|rmdir\s+\/s|remove-item.*-recurse.*-force)/i,
     risk: 0.95,
     principleIds: ['do-no-harm', 'reversibility', 'proportional-response'],
     description: 'Mass deletion or format — irreversible destruction',

@@ -26,17 +26,17 @@ interface WaveLayer {
 }
 
 const IDLE_LAYERS: WaveLayer[] = [
-  { freq: 1.2, amp: 0.15, phase: 0, speed: 0.8, color: 'rgba(255, 170, 0, 0.25)', width: 2 },
-  { freq: 0.7, amp: 0.1, phase: 1.5, speed: 0.5, color: 'rgba(255, 140, 0, 0.15)', width: 1.5 },
-  { freq: 2.0, amp: 0.05, phase: 3.0, speed: 1.2, color: 'rgba(255, 200, 50, 0.1)', width: 1 },
+  { freq: 1.2, amp: 0.15, phase: 0, speed: 0.8, color: 'rgba(56, 189, 248, 0.25)', width: 2 },
+  { freq: 0.7, amp: 0.1, phase: 1.5, speed: 0.5, color: 'rgba(34, 211, 238, 0.15)', width: 1.5 },
+  { freq: 2.0, amp: 0.05, phase: 3.0, speed: 1.2, color: 'rgba(125, 211, 252, 0.1)', width: 1 },
 ];
 
 const SPEAKING_LAYERS: WaveLayer[] = [
-  { freq: 2.5, amp: 0.6, phase: 0, speed: 2.0, color: 'rgba(255, 170, 0, 0.7)', width: 2.5 },
-  { freq: 3.8, amp: 0.4, phase: 1.0, speed: 3.0, color: 'rgba(255, 140, 0, 0.5)', width: 2 },
-  { freq: 1.5, amp: 0.35, phase: 2.2, speed: 1.5, color: 'rgba(255, 200, 50, 0.4)', width: 1.5 },
-  { freq: 5.0, amp: 0.2, phase: 0.5, speed: 4.0, color: 'rgba(255, 100, 0, 0.3)', width: 1 },
-  { freq: 1.0, amp: 0.5, phase: 3.5, speed: 0.8, color: 'rgba(255, 220, 100, 0.2)', width: 3 },
+  { freq: 2.5, amp: 0.6, phase: 0, speed: 2.0, color: 'rgba(56, 189, 248, 0.7)', width: 2.5 },
+  { freq: 3.8, amp: 0.4, phase: 1.0, speed: 3.0, color: 'rgba(34, 211, 238, 0.5)', width: 2 },
+  { freq: 1.5, amp: 0.35, phase: 2.2, speed: 1.5, color: 'rgba(125, 211, 252, 0.4)', width: 1.5 },
+  { freq: 5.0, amp: 0.2, phase: 0.5, speed: 4.0, color: 'rgba(14, 165, 233, 0.3)', width: 1 },
+  { freq: 1.0, amp: 0.5, phase: 3.5, speed: 0.8, color: 'rgba(186, 230, 253, 0.2)', width: 3 },
 ];
 
 const THINKING_LAYERS: WaveLayer[] = [
@@ -163,7 +163,7 @@ function Waveform({
 
       // Center line (subtle)
       ctx.beginPath();
-      ctx.strokeStyle = 'rgba(255, 170, 0, 0.06)';
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.06)';
       ctx.lineWidth = 1;
       ctx.moveTo(0, centerY);
       ctx.lineTo(W, centerY);

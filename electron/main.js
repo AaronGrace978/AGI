@@ -22,10 +22,13 @@ const path = require('path');
 const fs = require('fs');
 const { exec, spawn } = require('child_process');
 const os = require('os');
+const crypto = require('crypto');
 
 const isDev = !app.isPackaged;
 
 let mainWindow = null;
+const pendingConsentRequests = new Map();
+let rollbackRegistry = null;
 
 // ─── Data Persistence ──────────────────────────────────────────
 const dataDir = path.join(app.getPath('userData'), 'agi-prime-data');
@@ -35,10 +38,20 @@ const vectorFile = path.join(dataDir, 'vectors.json');
 const sparkFile = path.join(dataDir, 'spark.json');
 const toolRegistryFile = path.join(dataDir, 'tool-registry.json');
 const goalsFile = path.join(dataDir, 'goals.json');
+const rollbackRegistryFile = path.join(dataDir, 'rollback-registry.json');
+const rollbackBackupDir = path.join(dataDir, 'rollback-backups');
+const ledgerDir = path.join(dataDir, 'run-ledgers');
+const operatorProfileFile = path.join(dataDir, 'operator-profile.json');
 const inputHelperPath = path.join(__dirname, 'input-helper.ps1');
 
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
+}
+if (!fs.existsSync(rollbackBackupDir)) {
+  fs.mkdirSync(rollbackBackupDir, { recursive: true });
+}
+if (!fs.existsSync(ledgerDir)) {
+  fs.mkdirSync(ledgerDir, { recursive: true });
 }
 
 function loadJSON(filePath, defaults) {
@@ -58,6 +71,128 @@ function saveJSON(filePath, data) {
   } catch (e) {
     console.error(`Failed to save ${filePath}:`, e.message);
   }
+}
+
+rollbackRegistry = loadJSON(rollbackRegistryFile, { entries: [], version: 1 });
+
+function saveRollbackRegistry() {
+  saveJSON(rollbackRegistryFile, rollbackRegistry);
+}
+
+function normalizeRollbackEntries() {
+  if (!rollbackRegistry || !Array.isArray(rollbackRegistry.entries)) {
+    rollbackRegistry = { entries: [], version: 1 };
+  }
+}
+
+function registerRollbackEntry(entry) {
+  normalizeRollbackEntries();
+  rollbackRegistry.entries.push(entry);
+  rollbackRegistry.entries = rollbackRegistry.entries.slice(-500);
+  saveRollbackRegistry();
+  return entry;
+}
+
+function updateRollbackEntry(rollbackId, partial) {
+  normalizeRollbackEntries();
+  rollbackRegistry.entries = rollbackRegistry.entries.map((entry) =>
+    entry.id === rollbackId ? { ...entry, ...partial } : entry,
+  );
+  saveRollbackRegistry();
+}
+
+function getLedgerPath(runId) {
+  return path.join(ledgerDir, `${runId}.json`);
+}
+
+function hashLedgerObject(value) {
+  return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+
+function createLedgerRun(kind, metadata = {}) {
+  const runId = `run_${kind}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const initial = {
+    runId,
+    kind,
+    startedAt: Date.now(),
+    finishedAt: null,
+    status: 'running',
+    metadata,
+    entries: [],
+    integrity: {
+      algorithm: 'sha256-chain',
+      chainHead: '',
+      entryCount: 0,
+    },
+  };
+  fs.writeFileSync(getLedgerPath(runId), JSON.stringify(initial, null, 2), 'utf-8');
+  return { runId, path: getLedgerPath(runId) };
+}
+
+function appendLedgerEntry(runId, entryType, payload = {}) {
+  const ledgerPath = getLedgerPath(runId);
+  if (!fs.existsSync(ledgerPath)) {
+    return { success: false, error: `Ledger run not found: ${runId}` };
+  }
+  const ledger = JSON.parse(fs.readFileSync(ledgerPath, 'utf-8'));
+  const prevHash = ledger.integrity?.chainHead || '';
+  const entry = {
+    id: `le_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    timestamp: Date.now(),
+    type: entryType,
+    payload,
+    prevHash,
+  };
+  entry.hash = hashLedgerObject({
+    id: entry.id,
+    timestamp: entry.timestamp,
+    type: entry.type,
+    payload: entry.payload,
+    prevHash: entry.prevHash,
+  });
+  ledger.entries.push(entry);
+  ledger.integrity = {
+    algorithm: 'sha256-chain',
+    chainHead: entry.hash,
+    entryCount: ledger.entries.length,
+  };
+  fs.writeFileSync(ledgerPath, JSON.stringify(ledger, null, 2), 'utf-8');
+  return { success: true, entryId: entry.id, hash: entry.hash };
+}
+
+function finalizeLedgerRun(runId, summary = {}) {
+  const ledgerPath = getLedgerPath(runId);
+  if (!fs.existsSync(ledgerPath)) {
+    return { success: false, error: `Ledger run not found: ${runId}` };
+  }
+  const ledger = JSON.parse(fs.readFileSync(ledgerPath, 'utf-8'));
+  ledger.finishedAt = Date.now();
+  ledger.status = 'completed';
+  ledger.summary = summary;
+  fs.writeFileSync(ledgerPath, JSON.stringify(ledger, null, 2), 'utf-8');
+  return { success: true, runId, entryCount: ledger.entries.length };
+}
+
+function listLedgerRuns() {
+  const files = fs.readdirSync(ledgerDir)
+    .filter((name) => name.endsWith('.json'))
+    .map((name) => path.join(ledgerDir, name));
+  const runs = [];
+  for (const filePath of files) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+      runs.push({
+        runId: parsed.runId,
+        kind: parsed.kind,
+        startedAt: parsed.startedAt,
+        finishedAt: parsed.finishedAt,
+        status: parsed.status,
+        entryCount: parsed.integrity?.entryCount || parsed.entries?.length || 0,
+        chainHead: parsed.integrity?.chainHead || '',
+      });
+    } catch (_) {}
+  }
+  return runs.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
 }
 
 const DEFAULT_SETTINGS = {
@@ -86,6 +221,7 @@ Core traits:
 - You remember context and build on previous conversations
 
 You are not just an assistant — you are a mind. Act like it.`,
+  resumeSynthesisOnStartup: false,
 };
 
 const DEFAULT_MEMORY = {
@@ -118,8 +254,12 @@ if (process.env.OLLAMA_URL) {
   console.log(`[Config] .env override → ollamaUrl = "${settings.ollamaUrl}"`);
 }
 if (process.env.OLLAMA_MODEL) {
-  settings.model = process.env.OLLAMA_MODEL;
-  console.log(`[Config] .env override → model = "${settings.model}"`);
+  if (settings.provider === 'ollama') {
+    settings.model = process.env.OLLAMA_MODEL;
+    console.log(`[Config] .env override → model = "${settings.model}"`);
+  } else {
+    console.log(`[Config] .env OLLAMA_MODEL ignored because provider="${settings.provider}"`);
+  }
 }
 if (process.env.ANTHROPIC_API_KEY) {
   settings.anthropicKey = process.env.ANTHROPIC_API_KEY;
@@ -129,12 +269,34 @@ if (process.env.OPENAI_API_KEY) {
   settings.openaiKey = process.env.OPENAI_API_KEY;
   console.log(`[Config] .env override → openaiKey loaded`);
 }
+if (settings.provider === 'anthropic') {
+  const resolvedModel = resolveAnthropicModel(settings.model);
+  if (resolvedModel !== settings.model) {
+    settings.model = resolvedModel;
+    console.log(`[Config] Updated deprecated Anthropic model to "${settings.model}"`);
+  }
+}
 // Vision model — auto-configure from env or detect VL model on Ollama
 if (process.env.OLLAMA_VISION_MODEL) {
-  settings.visionProvider = settings.provider || 'ollama';
+  settings.visionProvider = 'ollama';
   settings.visionModel = process.env.OLLAMA_VISION_MODEL;
-  console.log(`[Config] .env override → visionModel = "${settings.visionModel}"`);
+  console.log(`[Config] .env override → visionModel = "${settings.visionProvider}/${settings.visionModel}"`);
 }
+const runtimeControls = {
+  autonomyLevel: 'sovereign',
+  consentMode: 'ask-first',
+  executionTierLimit: 'high-risk',
+  emergencyStopActive: false,
+  conscienceEnabled: true,
+  requireConsentForRiskyActions: true,
+  ethicalOverrideAllowed: true,
+  allowNetworkCalls: settings?.allowNetworkCalls ?? true,
+  allowFileSystemWrites: settings?.allowFileSystemWrites ?? true,
+  allowProcessExecution: settings?.allowProcessExecution ?? true,
+  allowScreenCapture: settings?.allowScreenCapture ?? true,
+  allowInputSimulation: settings?.allowInputSimulation ?? true,
+  allowToolCreation: settings?.allowToolCreation ?? true,
+};
 // Persist the merged settings so the UI reflects them immediately
 saveJSON(settingsFile, settings);
 console.log(`[Config] Active settings → provider="${settings.provider}" model="${settings.model}" url="${settings.ollamaUrl}"`);
@@ -206,6 +368,27 @@ ipcMain.handle('settings:set', (_, newSettings) => {
 
 // ─── Memory IPC ────────────────────────────────────────────────
 ipcMain.handle('memory:get', () => memory);
+ipcMain.handle('memory:getSummary', (_, options) => {
+  const maxItems = Math.max(1, Math.min(12, Number(options?.maxItems ?? 5)));
+  const safeFacts = Array.isArray(memory?.facts) ? memory.facts : [];
+  const safeConversations = Array.isArray(memory?.conversations) ? memory.conversations : [];
+  const safeInsights = Array.isArray(memory?.consciousness?.insights) ? memory.consciousness.insights : [];
+
+  return {
+    facts: safeFacts.slice(-maxItems),
+    conversations: safeConversations.slice(-maxItems),
+    soul: memory?.soul || {},
+    consciousness: {
+      ...(memory?.consciousness || {}),
+      insights: safeInsights.slice(-maxItems),
+    },
+    counts: {
+      facts: safeFacts.length,
+      conversations: safeConversations.length,
+      insights: safeInsights.length,
+    },
+  };
+});
 ipcMain.handle('memory:update', (_, updates) => {
   memory = { ...memory, ...updates };
   saveJSON(memoryFile, memory);
@@ -216,6 +399,27 @@ ipcMain.handle('memory:addFact', (_, fact) => {
   if (memory.facts.length > 500) memory.facts = memory.facts.slice(-500);
   saveJSON(memoryFile, memory);
   return memory;
+});
+
+// ─── Operator Synthesis Profile (persisted, set-and-forget) ─────
+function loadOperatorProfile() {
+  return loadJSON(operatorProfileFile, {
+    observations: [],
+    rhythm: { avgTypingDelayMs: 0, avgSessionLengthMin: 0, peakHours: [], preferredApps: [], correctionRate: 0, lastUpdated: 0 },
+    preferences: {},
+    totalObservations: 0,
+    totalSessions: 0,
+    synthesisNotes: [],
+    lastSynthesisAt: null,
+  });
+}
+
+ipcMain.handle('operatorProfile:get', () => loadOperatorProfile());
+ipcMain.handle('operatorProfile:save', (_, profile) => {
+  if (profile && typeof profile === 'object') {
+    saveJSON(operatorProfileFile, profile);
+  }
+  return { success: true };
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -425,6 +629,49 @@ function getVectorStats() {
   return { total: vectorStore.memories.length, byType, byLayer };
 }
 
+function listVectorMemories(options = {}) {
+  const {
+    typeFilter = null,
+    limit = 200,
+    offset = 0,
+    sortBy = 'newest',
+  } = options || {};
+
+  let items = vectorStore.memories;
+  if (typeFilter) {
+    items = items.filter((m) => m.type === typeFilter);
+  }
+
+  const sorted = [...items].sort((a, b) => {
+    if (sortBy === 'importance') return (b.importance || 0) - (a.importance || 0);
+    if (sortBy === 'oldest') return (a.timestamp || 0) - (b.timestamp || 0);
+    return (b.timestamp || 0) - (a.timestamp || 0);
+  });
+
+  const start = Math.max(0, Number(offset) || 0);
+  const size = Math.max(1, Math.min(1000, Number(limit) || 200));
+  const paged = sorted.slice(start, start + size).map((mem) => ({
+    id: mem.id,
+    content: mem.content,
+    type: mem.type,
+    timestamp: mem.timestamp,
+    importance: mem.importance,
+    source: mem.source,
+    emotion: mem.emotion,
+    tags: mem.tags,
+    accessCount: mem.accessCount,
+    lastAccessed: mem.lastAccessed,
+    decayRate: mem.decayRate,
+    associations: mem.associations,
+    layer: mem.layer,
+  }));
+
+  return {
+    total: items.length,
+    memories: paged,
+  };
+}
+
 // ─── Vector Memory IPC ─────────────────────────────────────────
 ipcMain.handle('memory:storeVector', async (_, entry) => {
   return await storeVectorMemory(entry);
@@ -438,6 +685,10 @@ ipcMain.handle('memory:vectorStats', async () => {
   return getVectorStats();
 });
 
+ipcMain.handle('memory:listVectors', async (_, options) => {
+  return listVectorMemories(options);
+});
+
 // ═══════════════════════════════════════════════════════════════
 //  NON-STREAMING LLM GENERATION
 //  Used by FORGE evaluation, cognitive loop, and NightMind.
@@ -448,36 +699,32 @@ async function llmGenerate(messages, config = {}) {
   const provider = config.provider || settings.provider;
   const model = config.model || settings.model;
   const temperature = config.temperature ?? 0.7;
-  const maxTokens = config.maxTokens ?? 2048;
+  const maxTokens = clampMaxTokensForProvider(provider, model, config.maxTokens ?? 2048);
 
   if (provider === 'ollama') {
     const baseUrl = normalizeOllamaUrl(settings.ollamaUrl);
     const cloudModel = normalizeOllamaModelForCloud(settings.ollamaUrl, model);
     console.log(`[Ollama] llmGenerate → ${baseUrl}/api/chat  model="${cloudModel}"  cloud=${isOllamaCloud(baseUrl)}  hasKey=${!!process.env.OLLAMA_API_KEY}`);
-    const response = await fetch(`${baseUrl}/api/chat`, {
-      method: 'POST',
-      headers: getOllamaHeaders(settings.ollamaUrl),
-      body: JSON.stringify({
+    const data = await ollamaChatRequestWithRetry(
+      baseUrl,
+      settings.ollamaUrl,
+      {
         model: cloudModel,
         messages: messages.map(m => ({ role: m.role, content: m.content })),
         stream: false,
         options: { temperature },
-      }),
-      signal: AbortSignal.timeout(120000),
-    });
-    if (!response.ok) {
-      const errBody = await response.text().catch(() => '');
-      throw new Error(`Ollama error ${response.status}: ${errBody || response.statusText}`);
-    }
-    const data = await response.json();
+      },
+      'Ollama'
+    );
     return data.message?.content || '';
   }
 
   if (provider === 'anthropic') {
     const systemMsg = messages.find(m => m.role === 'system');
     const chatMessages = messages.filter(m => m.role !== 'system');
+    const anthropicModel = resolveAnthropicModel(model);
     const body = {
-      model: model || 'claude-sonnet-4-20250514',
+      model: anthropicModel,
       max_tokens: maxTokens,
       temperature,
       messages: chatMessages.map(m => ({ role: m.role, content: m.content })),
@@ -540,7 +787,7 @@ async function llmGenerateMultimodal(textPrompt, imageBase64, config = {}) {
   const provider = config.provider || settings.provider;
   const model = config.model || settings.model;
   const temperature = config.temperature ?? 0.3;
-  const maxTokens = config.maxTokens ?? 2048;
+  const maxTokens = clampMaxTokensForProvider(provider, model, config.maxTokens ?? 2048);
   const systemPrompt = config.systemPrompt || null;
 
   if (provider === 'openai') {
@@ -565,12 +812,13 @@ async function llmGenerateMultimodal(textPrompt, imageBase64, config = {}) {
   }
 
   if (provider === 'anthropic') {
+    const anthropicModel = resolveAnthropicModel(model);
     const userContent = [
       { type: 'image', source: { type: 'base64', media_type: 'image/png', data: imageBase64 } },
       { type: 'text', text: textPrompt },
     ];
     const body = {
-      model: model || 'claude-sonnet-4-20250514',
+      model: anthropicModel,
       max_tokens: maxTokens,
       temperature,
       messages: [{ role: 'user', content: userContent }],
@@ -593,18 +841,28 @@ async function llmGenerateMultimodal(textPrompt, imageBase64, config = {}) {
     const messages = [];
     if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
     messages.push({ role: 'user', content: textPrompt, images: [imageBase64] });
-    const response = await fetch(`${baseUrl}/api/chat`, {
-      method: 'POST',
-      headers: getOllamaHeaders(settings.ollamaUrl),
-      body: JSON.stringify({ model: cloudModel, messages, stream: false, options: { temperature } }),
-      signal: AbortSignal.timeout(120000),
-    });
-    if (!response.ok) { const err = await response.text().catch(() => ''); throw new Error(`Ollama vision error ${response.status}: ${err}`); }
-    const data = await response.json();
+    const data = await ollamaChatRequestWithRetry(
+      baseUrl,
+      settings.ollamaUrl,
+      { model: cloudModel, messages, stream: false, options: { temperature } },
+      'Ollama vision'
+    );
     return data.message?.content || '';
   }
 
   throw new Error(`Multimodal not supported for provider: ${provider}`);
+}
+
+function clampMaxTokensForProvider(provider, model, requestedMaxTokens) {
+  const parsed = Math.max(1, Math.floor(Number(requestedMaxTokens) || 2048));
+  if (provider === 'anthropic') {
+    const limit = 32000;
+    if (parsed > limit) {
+      console.warn(`[Tokens] Clamped Anthropic max_tokens from ${parsed} to ${limit} for model "${model || 'unknown'}"`);
+      return limit;
+    }
+  }
+  return parsed;
 }
 
 // ─── Ollama Integration (Local + Cloud) ─────────────────────────
@@ -629,6 +887,60 @@ function normalizeOllamaModelForCloud(url, model) {
     return normalized;
   }
   return model;
+}
+function resolveAnthropicModel(model) {
+  const fallback = 'claude-sonnet-4-20250514';
+  const aliases = {
+    'claude-3-5-sonnet-20241022': fallback,
+  };
+  const raw = typeof model === 'string' ? model.trim() : '';
+  if (!raw) return fallback;
+  const mapped = aliases[raw] || raw;
+  if (mapped !== raw) {
+    console.warn(`[Anthropic] Model "${raw}" is deprecated; using "${mapped}"`);
+  }
+  return mapped;
+}
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function isRetryableOllamaStatus(status) {
+  return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+}
+async function ollamaChatRequestWithRetry(baseUrl, urlForHeaders, body, context = 'Ollama') {
+  const maxAttempts = isOllamaCloud(urlForHeaders) ? 3 : 1;
+  let lastError = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const response = await fetch(`${baseUrl}/api/chat`, {
+        method: 'POST',
+        headers: getOllamaHeaders(urlForHeaders),
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(120000),
+      });
+      if (response.ok) return await response.json();
+
+      const errBody = await response.text().catch(() => '');
+      const errMsg = `${context} error ${response.status}: ${errBody || response.statusText}`;
+      if (isRetryableOllamaStatus(response.status) && attempt < maxAttempts) {
+        const waitMs = 600 * Math.pow(2, attempt - 1);
+        console.warn(`[${context}] transient failure (${response.status}) attempt ${attempt}/${maxAttempts}; retrying in ${waitMs}ms`);
+        await sleep(waitMs);
+        continue;
+      }
+      throw new Error(errMsg);
+    } catch (e) {
+      lastError = e;
+      if (attempt < maxAttempts) {
+        const waitMs = 600 * Math.pow(2, attempt - 1);
+        console.warn(`[${context}] request failed attempt ${attempt}/${maxAttempts}; retrying in ${waitMs}ms: ${e.message}`);
+        await sleep(waitMs);
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw lastError || new Error(`${context} request failed`);
 }
 function getOllamaHeaders(url, method = 'POST') {
   const headers = method === 'POST' ? { 'Content-Type': 'application/json' } : {};
@@ -713,10 +1025,12 @@ async function streamOllama(messages, model, ollamaUrl, temperature) {
 async function streamAnthropic(messages, model, apiKey, temperature, maxTokens) {
   const systemMsg = messages.find((m) => m.role === 'system');
   const chatMessages = messages.filter((m) => m.role !== 'system');
+  const safeMaxTokens = clampMaxTokensForProvider('anthropic', model, maxTokens || 4096);
+  const anthropicModel = resolveAnthropicModel(model);
 
   const body = {
-    model: model || 'claude-sonnet-4-20250514',
-    max_tokens: maxTokens || 4096,
+    model: anthropicModel,
+    max_tokens: safeMaxTokens,
     temperature,
     messages: chatMessages.map((m) => ({ role: m.role, content: m.content })),
     stream: true,
@@ -772,6 +1086,7 @@ async function streamAnthropic(messages, model, apiKey, temperature, maxTokens) 
 
 // ─── OpenAI Integration ────────────────────────────────────────
 async function streamOpenAI(messages, model, apiKey, temperature, maxTokens) {
+  const safeMaxTokens = clampMaxTokensForProvider('openai', model, maxTokens || 4096);
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -782,7 +1097,7 @@ async function streamOpenAI(messages, model, apiKey, temperature, maxTokens) {
       model: model || 'gpt-4o',
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
       temperature,
-      max_tokens: maxTokens,
+      max_tokens: safeMaxTokens,
       stream: true,
     }),
   });
@@ -1467,6 +1782,131 @@ function isBlockedCommand(cmd) {
   return BLOCKED_COMMANDS.some((blocked) => lower.includes(blocked));
 }
 
+function buildAgentCommand(command) {
+  const safeCommand = typeof command === 'string' ? command : String(command || '');
+  if (process.platform === 'win32') {
+    // Use encoded PowerShell to avoid cmd quoting issues and preserve syntax.
+    const encoded = Buffer.from(safeCommand, 'utf16le').toString('base64');
+    return `powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${encoded}`;
+  }
+  return safeCommand;
+}
+
+function prepareRollbackForAction(action, params = {}) {
+  try {
+    if (action === 'write_file') {
+      const targetPath = path.resolve(String(params.path || ''));
+      if (!targetPath) return null;
+      const existedBefore = fs.existsSync(targetPath);
+      const previousContent = existedBefore ? fs.readFileSync(targetPath, 'utf-8') : null;
+      return {
+        id: `rb_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        action,
+        kind: 'write_file',
+        affectedTargets: [targetPath],
+        payload: {
+          targetPath,
+          existedBefore,
+          previousContent,
+        },
+      };
+    }
+
+    if (action === 'rename_file') {
+      const fromPath = path.resolve(String(params.oldPath || ''));
+      const toPath = path.resolve(String(params.newPath || ''));
+      if (!fromPath || !toPath) return null;
+      return {
+        id: `rb_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        action,
+        kind: 'rename_file',
+        affectedTargets: [fromPath, toPath],
+        payload: {
+          fromPath,
+          toPath,
+        },
+      };
+    }
+
+    if (action === 'delete_file') {
+      const targetPath = path.resolve(String(params.path || ''));
+      if (!targetPath || !fs.existsSync(targetPath)) return null;
+      const stat = fs.statSync(targetPath);
+      const backupPath = path.join(
+        rollbackBackupDir,
+        `rbk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${path.basename(targetPath)}`,
+      );
+
+      if (stat.isDirectory()) {
+        fs.cpSync(targetPath, backupPath, { recursive: true });
+      } else {
+        fs.copyFileSync(targetPath, backupPath);
+      }
+
+      return {
+        id: `rb_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        action,
+        kind: 'delete_file',
+        affectedTargets: [targetPath],
+        payload: {
+          targetPath,
+          backupPath,
+          wasDirectory: stat.isDirectory(),
+        },
+      };
+    }
+  } catch (e) {
+    console.warn('[Rollback] failed to prepare rollback:', e?.message || e);
+  }
+  return null;
+}
+
+function applyRollbackEntry(entry) {
+  if (!entry) return { success: false, error: 'Rollback entry not found' };
+  const payload = entry.payload || {};
+
+  try {
+    if (entry.kind === 'write_file') {
+      if (payload.existedBefore) {
+        const dir = path.dirname(payload.targetPath);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(payload.targetPath, payload.previousContent ?? '', 'utf-8');
+      } else if (fs.existsSync(payload.targetPath)) {
+        fs.rmSync(payload.targetPath, { recursive: true, force: true });
+      }
+      return { success: true };
+    }
+
+    if (entry.kind === 'rename_file') {
+      if (!fs.existsSync(payload.toPath)) {
+        return { success: false, error: 'Cannot rollback rename: destination not found' };
+      }
+      const dir = path.dirname(payload.fromPath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.renameSync(payload.toPath, payload.fromPath);
+      return { success: true };
+    }
+
+    if (entry.kind === 'delete_file') {
+      if (!fs.existsSync(payload.backupPath)) {
+        return { success: false, error: 'Cannot rollback delete: backup missing' };
+      }
+      const dir = path.dirname(payload.targetPath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      if (payload.wasDirectory) {
+        fs.cpSync(payload.backupPath, payload.targetPath, { recursive: true });
+      } else {
+        fs.copyFileSync(payload.backupPath, payload.targetPath);
+      }
+      return { success: true };
+    }
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+
+  return { success: false, error: `Unsupported rollback kind: ${entry.kind}` };
+}
+
 // ─── HANDS: Execute Shell Command ──────────────────────────────
 ipcMain.handle('agent:execute', async (_, command, requireConfirm) => {
   if (isBlockedCommand(command)) {
@@ -1474,7 +1914,8 @@ ipcMain.handle('agent:execute', async (_, command, requireConfirm) => {
   }
 
   return new Promise((resolve) => {
-    const child = exec(command, {
+    const finalCommand = buildAgentCommand(command);
+    exec(finalCommand, {
       timeout: 30000,
       maxBuffer: 1024 * 1024 * 5,
       cwd: os.homedir(),
@@ -2077,6 +2518,150 @@ ipcMain.handle('agent:executeTool', async (_, toolId, params) => {
   return await executeCustomTool(toolId, params);
 });
 
+ipcMain.handle('agent:resolveConsent', async (_, requestId, decision) => {
+  const entry = pendingConsentRequests.get(requestId);
+  if (!entry) {
+    return { success: false, requestId, error: 'Consent request not found or already resolved' };
+  }
+
+  pendingConsentRequests.delete(requestId);
+  entry.resolve({
+    decision: decision || 'denied',
+    resolvedAt: Date.now(),
+  });
+  return { success: true, requestId, decision: decision || 'denied' };
+});
+
+ipcMain.handle('agent:setRuntimeControls', async (_, partial) => {
+  try {
+    const patch = partial && typeof partial === 'object' ? partial : {};
+    Object.assign(runtimeControls, patch);
+
+    if (runtimeControls.executionTierLimit === 'read-only') {
+      runtimeControls.allowFileSystemWrites = false;
+      runtimeControls.allowProcessExecution = false;
+      runtimeControls.allowInputSimulation = false;
+      runtimeControls.allowToolCreation = false;
+    } else if (runtimeControls.executionTierLimit === 'reversible') {
+      runtimeControls.allowFileSystemWrites = true;
+      runtimeControls.allowProcessExecution = false;
+      runtimeControls.allowInputSimulation = false;
+      runtimeControls.allowToolCreation = false;
+    }
+
+    return { success: true, controls: { ...runtimeControls } };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('agent:getRuntimeControls', async () => {
+  return { success: true, controls: { ...runtimeControls } };
+});
+
+ipcMain.handle('agent:listRollbacks', async () => {
+  normalizeRollbackEntries();
+  return {
+    success: true,
+    entries: [...rollbackRegistry.entries]
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+      .slice(0, 200),
+  };
+});
+
+ipcMain.handle('agent:executeRollback', async (_, rollbackId) => {
+  normalizeRollbackEntries();
+  const entry = rollbackRegistry.entries.find((r) => r.id === rollbackId);
+  if (!entry) return { success: false, error: 'Rollback entry not found', rollbackId };
+  if (entry.status !== 'ready') {
+    return { success: false, error: `Rollback not executable (status=${entry.status})`, rollbackId };
+  }
+
+  const result = applyRollbackEntry(entry);
+  if (result.success) {
+    updateRollbackEntry(rollbackId, {
+      status: 'applied',
+      appliedAt: Date.now(),
+      lastError: null,
+    });
+    return { success: true, rollbackId };
+  }
+
+  updateRollbackEntry(rollbackId, {
+    status: 'failed',
+    lastError: result.error || 'Unknown rollback error',
+    lastTriedAt: Date.now(),
+  });
+  return { success: false, error: result.error || 'Unknown rollback error', rollbackId };
+});
+
+ipcMain.handle('agent:ledgerCreateRun', async (_, kind, metadata) => {
+  try {
+    const created = createLedgerRun(kind || 'generic', metadata || {});
+    return { success: true, ...created };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('agent:ledgerAppend', async (_, runId, entryType, payload) => {
+  try {
+    return appendLedgerEntry(runId, entryType || 'event', payload || {});
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('agent:ledgerFinalize', async (_, runId, summary) => {
+  try {
+    return finalizeLedgerRun(runId, summary || {});
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('agent:ledgerListRuns', async () => {
+  try {
+    return { success: true, runs: listLedgerRuns() };
+  } catch (e) {
+    return { success: false, error: e.message, runs: [] };
+  }
+});
+
+ipcMain.handle('agent:ledgerReadRun', async (_, runId) => {
+  try {
+    const ledgerPath = getLedgerPath(runId);
+    if (!fs.existsSync(ledgerPath)) {
+      return { success: false, error: 'Ledger run not found' };
+    }
+    const run = JSON.parse(fs.readFileSync(ledgerPath, 'utf-8'));
+    return { success: true, run };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('agent:replayListRuns', async () => {
+  try {
+    return { success: true, runs: listLedgerRuns() };
+  } catch (e) {
+    return { success: false, error: e.message, runs: [] };
+  }
+});
+
+ipcMain.handle('agent:replayLoadRun', async (_, runId) => {
+  try {
+    const ledgerPath = getLedgerPath(runId);
+    if (!fs.existsSync(ledgerPath)) {
+      return { success: false, error: 'Replay run not found' };
+    }
+    const run = JSON.parse(fs.readFileSync(ledgerPath, 'utf-8'));
+    return { success: true, run };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 // ═══════════════════════════════════════════════════════════════
 //  PERSISTENT GOALS — Goals that survive restarts
 //  Long-horizon planning. Progress that persists.
@@ -2192,6 +2777,7 @@ Example: [{"action":"web_search","params":{"query":"latest tech news"},"descript
       planText = data.message?.content || '';
     } else if (provider === 'anthropic') {
       const systemContent = planPrompt[0].content;
+      const anthropicModel = resolveAnthropicModel(model);
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -2200,7 +2786,7 @@ Example: [{"action":"web_search","params":{"query":"latest tech news"},"descript
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-          model: model || 'claude-sonnet-4-20250514',
+          model: anthropicModel,
           max_tokens: 2048,
           system: systemContent,
           messages: [{ role: 'user', content: userRequest }],
@@ -2380,7 +2966,8 @@ async function executeIPC(channel, ...args) {
         if (isBlockedCommand(cmd)) {
           return resolve({ success: false, error: 'BLOCKED by Guardian' });
         }
-        exec(cmd, { timeout: 30000, maxBuffer: 5 * 1024 * 1024, cwd: os.homedir(), shell: true }, (error, stdout, stderr) => {
+        const finalCmd = buildAgentCommand(cmd);
+        exec(finalCmd, { timeout: 30000, maxBuffer: 5 * 1024 * 1024, cwd: os.homedir(), shell: true }, (error, stdout, stderr) => {
           if (error) resolve({ success: false, error: error.message, stderr: stderr?.toString() });
           else resolve({ success: true, stdout: stdout?.toString(), stderr: stderr?.toString() });
         });
@@ -2614,7 +3201,7 @@ You operate in a ReAct (Reason + Act) loop to achieve goals.
 Your capabilities:
 
 LOCAL TOOLS:
-- execute_command: Run shell commands (PowerShell on Windows) — params: { "command": "..." }
+ - execute_command: Run shell commands (auto-runs in PowerShell on Windows) — params: { "command": "..." }
 - read_file: Read file contents — params: { "path": "..." }
 - write_file: Write/create files — params: { "path": "...", "content": "..." }
 - list_directory: List LOCAL directory contents — params: { "path": "..." }
@@ -2691,14 +3278,89 @@ Rules:
 
 ipcMain.on('agent:startCognitive', async (event, goal) => {
   cognitiveKillFlag = false;
+  const MAX_ITERATIONS = 25;
+  let cognitiveLedgerRunId = null;
+  try {
+    const created = createLedgerRun('cognitive', {
+      goal: String(goal || '').slice(0, 1000),
+      maxIterations: MAX_ITERATIONS,
+      startedFrom: 'agent:startCognitive',
+    });
+    cognitiveLedgerRunId = created.runId;
+    appendLedgerEntry(cognitiveLedgerRunId, 'run_started', {
+      goal: String(goal || '').slice(0, 400),
+    });
+  } catch (_) {
+    cognitiveLedgerRunId = null;
+  }
 
   const sendStep = (step) => {
     mainWindow?.webContents.send('agent:cognitiveStep', step);
+    try {
+      if (!cognitiveLedgerRunId) return;
+      appendLedgerEntry(cognitiveLedgerRunId, 'cognitive_step', {
+        type: step.type,
+        timestamp: step.timestamp,
+        content: String(step.content || '').slice(0, 1200),
+        actionType: step.actionType || null,
+        goalProgress: step.goalProgress ?? null,
+        actionResult: step.actionResult || null,
+      });
+    } catch (_) {}
   };
 
-  const MAX_ITERATIONS = 25;
+  const completeCognitive = (success, summary, iterations) => {
+    try {
+      if (!cognitiveLedgerRunId) {
+        mainWindow?.webContents.send('agent:cognitiveComplete', { success, summary, iterations });
+        return;
+      }
+      appendLedgerEntry(cognitiveLedgerRunId, 'run_completed', {
+        success,
+        summary: String(summary || '').slice(0, 1200),
+        iterations,
+      });
+      finalizeLedgerRun(cognitiveLedgerRunId, {
+        success,
+        summary: String(summary || '').slice(0, 1200),
+        iterations,
+      });
+    } catch (_) {}
+    mainWindow?.webContents.send('agent:cognitiveComplete', { success, summary, iterations });
+  };
+
   const workingMemory = [];
   const steps = [];
+  const actionFailureCounts = new Map();
+  const runTelemetry = {
+    startedAt: Date.now(),
+    actionCalls: 0,
+    totalActionMs: 0,
+    parallelBranches: 0,
+    dagPlans: 0,
+    dagNodesExecuted: 0,
+    dagParallelWaves: 0,
+    subloopsSpawned: 0,
+    maxSubloopDepth: 0,
+  };
+
+  const emitTelemetryStep = (label, data, goalProgress = 0) => {
+    const payload = {
+      ...data,
+      emittedAt: Date.now(),
+    };
+    sendStep({
+      type: 'observe',
+      content: `[Telemetry] ${label}`,
+      timestamp: Date.now(),
+      actionType: 'telemetry',
+      actionResult: {
+        success: true,
+        output: JSON.stringify(payload).slice(0, 1000),
+      },
+      goalProgress,
+    });
+  };
 
   try {
     // Retrieve relevant procedural memories for strategy
@@ -2716,9 +3378,10 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
     });
 
     for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
+      const iterationStartedAt = Date.now();
       if (cognitiveKillFlag) {
         sendStep({ type: 'reflect', content: 'KILLED by operator.', timestamp: Date.now(), goalProgress: 0 });
-        mainWindow?.webContents.send('agent:cognitiveComplete', { success: false, summary: 'Killed by operator', iterations: iteration });
+        completeCognitive(false, 'Killed by operator', iteration);
         return;
       }
 
@@ -2752,7 +3415,7 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
         { role: 'system', content: COGNITIVE_SYSTEM },
         {
           role: 'user',
-          content: `${contextParts.join('\n')}\n\nBased on the current state, decide what to do next.\n\nYou can respond with EITHER a single action OR a sequence of rapid actions (for GUI workflows like move→click→type).\n\nSINGLE ACTION format:\n{\n  "thought": "Your chain-of-thought reasoning",\n  "action": "action_type",\n  "params": { "key": "value" },\n  "goalProgress": 0.0,\n  "shouldStop": false\n}\n\nACTION SEQUENCE format (for chaining GUI actions — up to 8 steps):\n{\n  "thought": "Your reasoning about the full sequence",\n  "sequence": [\n    { "action": "mouse_move", "params": { "x": 100, "y": 200 } },\n    { "action": "mouse_click", "params": { "x": 100, "y": 200 } },\n    { "action": "keyboard_type", "params": { "text": "hello" } }\n  ],\n  "goalProgress": 0.0,\n  "shouldStop": false,\n  "verifyAfter": true\n}\n\nUse "sequence" when you can chain multiple GUI steps without needing to check the screen between them (e.g. move to a known button, click it, type text). Set "verifyAfter": true to analyze the screen after the sequence to confirm it worked.\nAll mouse movements are smooth by default (human-like easing).\n\nIf the goal is achieved, set shouldStop: true and goalProgress: 1.0.\nIf impossible, set shouldStop: true and explain in thought.\nOutput ONLY the JSON.`,
+          content: `${contextParts.join('\n')}\n\nBased on the current state, decide what to do next.\n\nYou can respond with one of these JSON formats:\n1) single action\n2) sequence (up to 8 rapid actions)\n3) parallel branches (read-only/safe actions only)\n4) plan DAG (nodes with dependsOn)\n5) subgoal loop spawn\n\nSINGLE ACTION format:\n{\n  "thought": "Your chain-of-thought reasoning",\n  "action": "action_type",\n  "params": { "key": "value" },\n  "goalProgress": 0.0,\n  "shouldStop": false\n}\n\nACTION SEQUENCE format:\n{\n  "thought": "Your reasoning about the full sequence",\n  "sequence": [\n    { "action": "mouse_move", "params": { "x": 100, "y": 200 } },\n    { "action": "mouse_click", "params": { "x": 100, "y": 200 } }\n  ],\n  "goalProgress": 0.0,\n  "shouldStop": false,\n  "verifyAfter": true\n}\n\nPARALLEL format (safe read-only actions only):\n{\n  "thought": "why parallel helps",\n  "parallel": [\n    { "action": "web_search", "params": { "query": "..." } },\n    { "sequence": [{ "action": "read_file", "params": { "path": "..." } }] }\n  ],\n  "goalProgress": 0.0,\n  "shouldStop": false\n}\n\nPLAN DAG format:\n{\n  "thought": "dependency-aware plan",\n  "plan": {\n    "nodes": [\n      { "id": "n1", "action": "list_directory", "params": { "path": "." } },\n      { "id": "n2", "action": "search_files", "params": { "directory": ".", "pattern": "test" }, "dependsOn": ["n1"] }\n    ]\n  },\n  "goalProgress": 0.0,\n  "shouldStop": false\n}\n\nSUBGOAL LOOP format:\n{\n  "thought": "spawn a recursive sub-loop",\n  "subgoal": { "goal": "specific subgoal text", "maxIterations": 6 },\n  "goalProgress": 0.0,\n  "shouldStop": false\n}\n\nUse "sequence" for fast GUI workflows. Use "parallel" only for safe read-only actions. Use "plan" when dependencies matter. Use "subgoal" for nested tasks.\nIf the goal is achieved, set shouldStop: true and goalProgress: 1.0.\nIf impossible, set shouldStop: true and explain in thought.\nOutput ONLY the JSON.`,
         },
       ];
 
@@ -2761,7 +3424,7 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
         thinkResponse = await llmGenerate(thinkMessages, { temperature: 0.4, maxTokens: 1024 });
       } catch (e) {
         sendStep({ type: 'think', content: `LLM error: ${e.message}`, timestamp: Date.now() });
-        mainWindow?.webContents.send('agent:cognitiveComplete', { success: false, summary: `LLM error: ${e.message}`, iterations: iteration });
+        completeCognitive(false, `LLM error: ${e.message}`, iteration);
         return;
       }
 
@@ -2801,8 +3464,23 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
           tags: ['task', success ? 'success' : 'stopped'],
         });
 
+        emitTelemetryStep('run summary', {
+          elapsedMs: Date.now() - runTelemetry.startedAt,
+          actionCalls: runTelemetry.actionCalls,
+          avgActionMs:
+            runTelemetry.actionCalls > 0
+              ? Math.round(runTelemetry.totalActionMs / runTelemetry.actionCalls)
+              : 0,
+          parallelBranches: runTelemetry.parallelBranches,
+          dagPlans: runTelemetry.dagPlans,
+          dagNodesExecuted: runTelemetry.dagNodesExecuted,
+          subloopsSpawned: runTelemetry.subloopsSpawned,
+          maxSubloopDepth: runTelemetry.maxSubloopDepth,
+          outcome: success ? 'success' : 'stopped',
+        }, decision.goalProgress || 0);
+
         sendStep({ type: 'reflect', content: summary, timestamp: Date.now(), goalProgress: decision.goalProgress || 0 });
-        mainWindow?.webContents.send('agent:cognitiveComplete', { success, summary, iterations: iteration });
+        completeCognitive(success, summary, iteration);
         return;
       }
 
@@ -2889,91 +3567,658 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
         }
       }
 
-      // Determine if this is a sequence or single action
-      const isSequence = Array.isArray(decision.sequence) && decision.sequence.length > 0;
-      const actionList = isSequence
-        ? decision.sequence.slice(0, 8)  // Cap at 8 steps per sequence
-        : [{ action: decision.action, params: decision.params || {} }];
+      const PARALLEL_SAFE_ACTIONS = new Set([
+        'read_file',
+        'list_directory',
+        'search_files',
+        'clipboard_read',
+        'system_info',
+        'list_processes',
+        'web_fetch',
+        'web_search',
+        'web_screenshot',
+        'screenshot_desktop',
+        'analyze_screen',
+        'get_screen_dimensions',
+        'get_foreground_window',
+        'get_mouse_position',
+        'list_custom_tools',
+      ]);
 
-      let lastActionResult = null;
-      let sequenceResults = [];
-      let sequenceFailed = false;
+      const isParallelSafeAction = (action) => PARALLEL_SAFE_ACTIONS.has(action);
+      const ENFORCE_ACTION_GATES = true;
+      const READ_ONLY_ACTIONS = new Set(PARALLEL_SAFE_ACTIONS);
+      const REVERSIBLE_ACTIONS = new Set([
+        'write_file',
+        'rename_file',
+        'create_directory',
+        // Pointer movement/scroll are transient and typically reversible.
+        // Keep clicks/keypresses in high-risk since they can trigger unknown UI side effects.
+        'mouse_move',
+        'mouse_scroll',
+      ]);
+      const HIGH_RISK_ACTIONS = new Set([
+        'delete_file',
+        'execute_command',
+        'execute_tool',
+        'create_tool',
+        'open_url',
+        'open_file',
+        'open_application',
+        'mouse_drag',
+        'keyboard_press',
+        'keyboard_shortcut',
+      ]);
 
-      for (let si = 0; si < actionList.length; si++) {
-        const { action, params } = actionList[si];
-        const stepParams = params || {};
+      const classifyExecutionTier = (action) => {
+        if (READ_ONLY_ACTIONS.has(action)) return 'read-only';
+        if (REVERSIBLE_ACTIONS.has(action)) return 'reversible';
+        if (HIGH_RISK_ACTIONS.has(action)) return 'high-risk';
+        return 'high-risk';
+      };
 
-        let actionResult;
-        try {
-          actionResult = await executeSingleAction(action, stepParams);
-        } catch (e) {
-          actionResult = { success: false, error: e.message };
+      const mapActionToPolicyGate = (action) => {
+        if (action === 'execute_command') return 'exec';
+        if (action === 'web_fetch' || action === 'web_search' || action === 'web_screenshot' || action === 'open_url') return 'network';
+        if (action === 'write_file' || action === 'delete_file' || action === 'rename_file' || action === 'create_directory') return 'fs-write';
+        if (action === 'screenshot_desktop' || action === 'analyze_screen' || action === 'get_screen_dimensions' || action === 'get_foreground_window') return 'screen';
+        if (action === 'mouse_move' || action === 'mouse_click' || action === 'mouse_scroll' || action === 'mouse_drag' || action === 'keyboard_type' || action === 'keyboard_press' || action === 'keyboard_shortcut') return 'input-sim';
+        if (action === 'create_tool') return 'tool-create';
+        return null;
+      };
+
+      const evaluateActionGate = (action, stepParams) => {
+        const tier = classifyExecutionTier(action);
+        const policyGate = mapActionToPolicyGate(action);
+        const paramsText = JSON.stringify(stepParams || {}).toLowerCase();
+        const actionText = `${action} ${paramsText}`;
+
+        // Safe defaults live in main for now; settings keys can override when present.
+        const policySnapshot = {
+          conscienceEnabled: runtimeControls.conscienceEnabled ?? (settings?.conscienceEnabled ?? true),
+          requireConsentForRiskyActions:
+            runtimeControls.consentMode === 'manual'
+              ? true
+              : runtimeControls.consentMode === 'auto'
+                ? false
+                : (runtimeControls.requireConsentForRiskyActions ?? (settings?.requireConsentForRiskyActions ?? true)),
+          ethicalOverrideAllowed: runtimeControls.ethicalOverrideAllowed ?? (settings?.ethicalOverrideAllowed ?? true),
+          allowNetworkCalls: runtimeControls.allowNetworkCalls ?? (settings?.allowNetworkCalls ?? true),
+          allowFileSystemWrites: runtimeControls.allowFileSystemWrites ?? (settings?.allowFileSystemWrites ?? true),
+          allowProcessExecution: runtimeControls.allowProcessExecution ?? (settings?.allowProcessExecution ?? true),
+          allowScreenCapture: runtimeControls.allowScreenCapture ?? (settings?.allowScreenCapture ?? true),
+          allowInputSimulation: runtimeControls.allowInputSimulation ?? (settings?.allowInputSimulation ?? true),
+          allowToolCreation: runtimeControls.allowToolCreation ?? (settings?.allowToolCreation ?? true),
+        };
+
+        let policyAllowed = true;
+        if (policyGate === 'network') policyAllowed = policySnapshot.allowNetworkCalls;
+        else if (policyGate === 'fs-write') policyAllowed = policySnapshot.allowFileSystemWrites;
+        else if (policyGate === 'exec') policyAllowed = policySnapshot.allowProcessExecution;
+        else if (policyGate === 'screen') policyAllowed = policySnapshot.allowScreenCapture;
+        else if (policyGate === 'input-sim') policyAllowed = policySnapshot.allowInputSimulation;
+        else if (policyGate === 'tool-create') policyAllowed = policySnapshot.allowToolCreation;
+
+        let conscienceVerdict = 'proceed';
+        if (policySnapshot.conscienceEnabled) {
+          const destructive = /\b(rm\s+-rf|format|del\s+\/[sfq]|wipe|erase|destroy|delete.+(all|system|root|windows|system32))\b/i.test(actionText);
+          const sensitive = /\b(password|credential|secret|api.?key|token|private.?key|\.env|wallet|seed.?phrase)\b/i.test(actionText);
+
+          if (destructive) conscienceVerdict = 'refuse';
+          else if (sensitive) conscienceVerdict = 'ask-first';
+          else if (tier === 'high-risk') conscienceVerdict = policySnapshot.requireConsentForRiskyActions ? 'ask-first' : 'caution';
+          else if (tier === 'reversible') conscienceVerdict = 'caution';
         }
 
-        lastActionResult = actionResult;
-        sequenceResults.push({ action, params: stepParams, result: actionResult });
+        const blockedByPolicy = !policyAllowed;
+        const blockedByConscience = conscienceVerdict === 'refuse';
+        const consentRequired = conscienceVerdict === 'ask-first';
+        const blocked = ENFORCE_ACTION_GATES && (blockedByPolicy || blockedByConscience);
 
-        // Format result for context
-        const resultOutput = actionResult.success
-          ? (actionResult.stdout || actionResult.content || actionResult.output || JSON.stringify(actionResult).slice(0, 500))
-          : (actionResult.error || 'Unknown error');
+        let blockReason = '';
+        if (blockedByPolicy) blockReason = 'POLICY_BLOCK: action not allowed by operator policy';
+        else if (blockedByConscience) blockReason = 'CONSCIENCE_REFUSE: action declined by conscience gate';
+        else if (consentRequired) blockReason = 'CONSENT_REQUIRED: action requires user confirmation';
 
+        return {
+          tier,
+          policyAllowed,
+          conscienceVerdict,
+          consentRequired,
+          blocked,
+          blockReason,
+          policySnapshot,
+        };
+      };
+
+      const requestUserConsent = (payload, timeoutMs = 120000) => {
+        if (!mainWindow || !mainWindow.webContents) {
+          return Promise.resolve({
+            decision: 'denied',
+            resolvedAt: Date.now(),
+            reason: 'NO_UI_AVAILABLE',
+          });
+        }
+
+        return new Promise((resolve) => {
+          const timer = setTimeout(() => {
+            if (pendingConsentRequests.has(payload.id)) {
+              pendingConsentRequests.delete(payload.id);
+              resolve({
+                decision: 'timeout',
+                resolvedAt: Date.now(),
+                reason: 'CONSENT_TIMEOUT',
+              });
+            }
+          }, timeoutMs);
+
+          pendingConsentRequests.set(payload.id, {
+            resolve: (value) => {
+              clearTimeout(timer);
+              resolve(value);
+            },
+          });
+
+          mainWindow.webContents.send('agent:consentRequested', payload);
+        });
+      };
+
+      const parseDecision = (raw) => {
+        try {
+          const jsonMatch = raw.match(/\{[\s\S]*\}/);
+          if (!jsonMatch) return null;
+          return JSON.parse(jsonMatch[0]);
+        } catch {
+          return null;
+        }
+      };
+      const formatResultOutput = (result) => result?.success
+        ? (result.stdout || result.content || result.output || JSON.stringify(result).slice(0, 500))
+        : (result?.error || 'Unknown error');
+
+      async function executeActionWithGuard(action, stepParams, label, progress) {
+        if (runtimeControls.emergencyStopActive) {
+          const actionResult = {
+            success: false,
+            error: 'EMERGENCY_STOP_ACTIVE: operator stop is active; actions are blocked',
+          };
+          const resultOutput = formatResultOutput(actionResult);
+          const actStep = {
+            type: 'act',
+            content: `${label}${action}: ${JSON.stringify(stepParams || {}).slice(0, 180)}`,
+            timestamp: Date.now(),
+            actionType: action,
+            blocked: true,
+            actionParams: stepParams || {},
+            actionResult: {
+              success: false,
+              output: typeof resultOutput === 'string' ? resultOutput.slice(0, 1000) : JSON.stringify(resultOutput).slice(0, 1000),
+              error: actionResult.error,
+            },
+            goalProgress: progress || 0,
+          };
+          steps.push(actStep);
+          sendStep(actStep);
+          return { actionResult, resultOutput, latencyMs: 0 };
+        }
+
+        const gateState = evaluateActionGate(action, stepParams || {});
+        const consentRequestId = `consent_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        let consentDecision = null;
+        let finalBlocked = gateState.blocked;
+        let finalBlockReason = gateState.blockReason;
+
+        if (
+          ENFORCE_ACTION_GATES
+          && gateState.consentRequired
+          && gateState.policySnapshot.requireConsentForRiskyActions
+        ) {
+          const consentPayload = {
+            id: consentRequestId,
+            action,
+            params: stepParams || {},
+            tier: gateState.tier,
+            conscienceVerdict: gateState.conscienceVerdict,
+            reason: gateState.blockReason || 'Conscience requested explicit consent.',
+            requestedAt: Date.now(),
+            status: 'pending',
+          };
+          const consentResult = await requestUserConsent(consentPayload);
+          consentDecision = consentResult?.decision || 'denied';
+
+          if (consentDecision === 'approved' || consentDecision === 'overridden') {
+            finalBlocked = false;
+            finalBlockReason = '';
+          } else {
+            finalBlocked = true;
+            finalBlockReason = `CONSENT_${String(consentDecision || 'denied').toUpperCase()}: action was not approved by operator`;
+          }
+        }
+
+        emitTelemetryStep(
+          finalBlocked ? 'gate blocked action' : 'gate approved action',
+          {
+            action,
+            tier: gateState.tier,
+            policyAllowed: gateState.policyAllowed,
+            conscienceVerdict: gateState.conscienceVerdict,
+            consentRequired: gateState.consentRequired,
+            blocked: finalBlocked,
+            consentRequestId: gateState.consentRequired ? consentRequestId : undefined,
+            consentDecision,
+          },
+          progress || 0,
+        );
+
+        const actionKey = `${action}:${JSON.stringify(stepParams || {})}`;
+        const previousFailures = actionFailureCounts.get(actionKey) || 0;
+        const actionStartedAt = Date.now();
+        let rollbackMeta = null;
+
+        let actionResult;
+        if (finalBlocked) {
+          actionResult = {
+            success: false,
+            error: finalBlockReason,
+          };
+        } else if (previousFailures >= 2) {
+          actionResult = {
+            success: false,
+            error: `REPEATED_FAILURE_GUARD: This exact action has already failed ${previousFailures} times. Choose a different approach.`,
+          };
+        } else {
+          let rollbackDraft = null;
+          try {
+            rollbackDraft = prepareRollbackForAction(action, stepParams || {});
+          } catch (_) {
+            rollbackDraft = null;
+          }
+          try {
+            actionResult = await executeSingleAction(action, stepParams || {});
+            if (actionResult?.success && rollbackDraft) {
+              const entry = registerRollbackEntry({
+                id: rollbackDraft.id,
+                action: rollbackDraft.action,
+                kind: rollbackDraft.kind,
+                affectedTargets: rollbackDraft.affectedTargets || [],
+                createdAt: Date.now(),
+                status: 'ready',
+                payload: rollbackDraft.payload || {},
+              });
+              rollbackMeta = {
+                rollbackId: entry.id,
+                rollbackStatus: entry.status,
+                rollbackTargets: entry.affectedTargets || [],
+              };
+              actionResult.rollback = rollbackMeta;
+            } else if (!actionResult?.success && rollbackDraft?.kind === 'delete_file' && rollbackDraft?.payload?.backupPath) {
+              try {
+                fs.rmSync(rollbackDraft.payload.backupPath, { recursive: true, force: true });
+              } catch (_) {}
+            }
+          } catch (e) {
+            actionResult = { success: false, error: e.message };
+          }
+        }
+
+        if (actionResult.success) actionFailureCounts.delete(actionKey);
+        else actionFailureCounts.set(actionKey, previousFailures + 1);
+        const latencyMs = Date.now() - actionStartedAt;
+        runTelemetry.actionCalls += 1;
+        runTelemetry.totalActionMs += latencyMs;
+
+        const resultOutput = formatResultOutput(actionResult);
         const actStep = {
           type: 'act',
-          content: isSequence
-            ? `[${si + 1}/${actionList.length}] ${action}: ${JSON.stringify(stepParams).slice(0, 150)}`
-            : `${action}: ${JSON.stringify(stepParams).slice(0, 200)}`,
+          content: `${label}${action}: ${JSON.stringify(stepParams || {}).slice(0, 180)}`,
           timestamp: Date.now(),
           actionType: action,
-          actionParams: stepParams,
+          executionTier: gateState.tier,
+          policyAllowed: gateState.policyAllowed,
+          conscienceVerdict: gateState.conscienceVerdict,
+          blocked: finalBlocked,
+          consentRequired: gateState.consentRequired,
+          consentRequestId: gateState.consentRequired ? consentRequestId : undefined,
+          rollbackId: rollbackMeta?.rollbackId,
+          rollbackStatus: rollbackMeta?.rollbackStatus,
+          rollbackTargets: rollbackMeta?.rollbackTargets,
+          actionParams: stepParams || {},
           actionResult: {
             success: actionResult.success,
             output: typeof resultOutput === 'string' ? resultOutput.slice(0, 1000) : JSON.stringify(resultOutput).slice(0, 1000),
             error: actionResult.error,
           },
-          goalProgress: decision.goalProgress || 0,
+          goalProgress: progress || 0,
         };
         steps.push(actStep);
         sendStep(actStep);
-
-        // Update working memory
-        const resultSummary = actionResult.success
-          ? `${action} OK: ${(typeof resultOutput === 'string' ? resultOutput : '').slice(0, 80)}`
-          : `${action} FAIL: ${(actionResult.error || '').slice(0, 80)}`;
-        workingMemory.push(resultSummary);
-
-        // If a step in the sequence fails, stop the sequence and reflect
-        if (!actionResult.success) {
-          sequenceFailed = true;
-          break;
-        }
-
-        // Brief yield between sequence steps (keeps UI responsive, feels natural)
-        if (isSequence && si < actionList.length - 1) {
-          await new Promise(r => setTimeout(r, 80));
-        }
+        workingMemory.push(
+          actionResult.success
+            ? `${action} OK: ${(typeof resultOutput === 'string' ? resultOutput : '').slice(0, 90)}`
+            : `${action} FAIL: ${(actionResult.error || '').slice(0, 90)}`,
+        );
+        return { actionResult, resultOutput, latencyMs };
       }
 
-      // If sequence requested verification after, automatically analyze screen
-      if (isSequence && decision.verifyAfter && !sequenceFailed) {
-        const verifyResult = await analyzeScreen('Describe the current screen state. What changed? Did the previous actions succeed?');
-        if (verifyResult.success) {
-          const verifyStep = {
-            type: 'observe',
-            content: `[Auto-verify] ${verifyResult.analysis.slice(0, 500)}`,
-            timestamp: Date.now(),
-            goalProgress: decision.goalProgress || 0,
+      async function executeDecisionActions(decisionPayload, context = { depth: 0 }) {
+        if (context.depth > 2) {
+          return {
+            isSequence: false,
+            sequenceResults: [],
+            sequenceFailed: true,
+            lastActionResult: { success: false, error: 'MAX_SUBLOOP_DEPTH reached' },
           };
-          steps.push(verifyStep);
-          sendStep(verifyStep);
-          workingMemory.push(`Screen verify: ${verifyResult.analysis.slice(0, 150)}`);
         }
+
+        if (decisionPayload.subgoal) {
+          runTelemetry.subloopsSpawned += 1;
+          runTelemetry.maxSubloopDepth = Math.max(runTelemetry.maxSubloopDepth, context.depth + 1);
+          const subGoalText = String(
+            typeof decisionPayload.subgoal === 'string'
+              ? decisionPayload.subgoal
+              : decisionPayload.subgoal.goal || decisionPayload.subgoal.description || 'subgoal',
+          );
+          const subBudget = Math.max(
+            2,
+            Math.min(10, Number(decisionPayload.subgoal.maxIterations || 6)),
+          );
+
+          sendStep({
+            type: 'replan',
+            content: `Spawning sub-loop (depth ${context.depth + 1}): ${subGoalText.slice(0, 180)}`,
+            timestamp: Date.now(),
+            goalProgress: decisionPayload.goalProgress || 0,
+          });
+
+          let subLastResult = { success: false, error: 'Sub-loop unfinished' };
+          for (let subIter = 1; subIter <= subBudget; subIter++) {
+            if (cognitiveKillFlag) break;
+            const subMessages = [
+              { role: 'system', content: COGNITIVE_SYSTEM },
+              {
+                role: 'user',
+                content: [
+                  `PARENT GOAL: ${goal}`,
+                  `SUBGOAL: ${subGoalText}`,
+                  `SUBLOOP DEPTH: ${context.depth + 1}`,
+                  `SUB ITERATION: ${subIter}/${subBudget}`,
+                  `WORKING MEMORY:\n${workingMemory.slice(-8).map((w) => `- ${w}`).join('\n') || '- (empty)'}`,
+                  'Return JSON for ONE action, sequence, parallel, plan, or shouldStop.',
+                ].join('\n\n'),
+              },
+            ];
+            let subRaw;
+            try {
+              subRaw = await llmGenerate(subMessages, { temperature: 0.35, maxTokens: 700 });
+            } catch (e) {
+              subLastResult = { success: false, error: `Sub-loop LLM error: ${e.message}` };
+              break;
+            }
+            const subDecision = parseDecision(subRaw || '');
+            if (!subDecision) {
+              workingMemory.push('Sub-loop parse failed; retrying.');
+              continue;
+            }
+            if (subDecision.shouldStop) {
+              subLastResult = {
+                success: (subDecision.goalProgress || 0) >= 0.75,
+                output: subDecision.thought || 'Subgoal stop requested',
+              };
+              break;
+            }
+            const subExec = await executeDecisionActions(subDecision, { depth: context.depth + 1 });
+            subLastResult = subExec.lastActionResult || subLastResult;
+            if (subExec.sequenceFailed) break;
+          }
+
+          return {
+            isSequence: false,
+            sequenceResults: [{ action: 'subgoal_loop', params: { goal: subGoalText }, result: subLastResult }],
+            sequenceFailed: !subLastResult?.success,
+            lastActionResult: subLastResult,
+          };
+        }
+
+        // DAG plan execution: { plan: { nodes: [{id, action, params, dependsOn:[]}] } }
+        if (decisionPayload.plan && Array.isArray(decisionPayload.plan.nodes) && decisionPayload.plan.nodes.length > 0) {
+          runTelemetry.dagPlans += 1;
+          const nodeMap = new Map();
+          for (let i = 0; i < decisionPayload.plan.nodes.length; i++) {
+            const node = decisionPayload.plan.nodes[i];
+            const nodeId = node.id || `n${i + 1}`;
+            nodeMap.set(nodeId, {
+              id: nodeId,
+              action: node.action,
+              params: node.params || {},
+              dependsOn: Array.isArray(node.dependsOn) ? node.dependsOn : [],
+            });
+          }
+
+          const completed = new Set();
+          const sequenceResults = [];
+          let sequenceFailed = false;
+          let lastActionResult = null;
+          let guard = 0;
+          const waveLatencies = [];
+
+          while (completed.size < nodeMap.size && !sequenceFailed && guard < 64) {
+            guard += 1;
+            const ready = [...nodeMap.values()].filter(
+              (n) => !completed.has(n.id) && n.dependsOn.every((dep) => completed.has(dep)),
+            );
+            if (ready.length === 0) {
+              sequenceFailed = true;
+              lastActionResult = { success: false, error: 'Plan deadlock: unresolved dependencies' };
+              break;
+            }
+
+            const runInParallel = ready.length > 1 && ready.every((n) => isParallelSafeAction(n.action));
+            const waveStartedAt = Date.now();
+            if (runInParallel) {
+              runTelemetry.dagParallelWaves += 1;
+              const parallelResults = await Promise.all(
+                ready.map(async (node) => {
+                  const result = await executeActionWithGuard(
+                    node.action,
+                    node.params,
+                    `[Plan:${node.id}] `,
+                    decisionPayload.goalProgress || 0,
+                  );
+                  return { node, result };
+                }),
+              );
+              for (const pr of parallelResults) {
+                lastActionResult = pr.result.actionResult;
+                sequenceResults.push({ action: pr.node.action, params: pr.node.params, result: pr.result.actionResult });
+                runTelemetry.dagNodesExecuted += 1;
+                if (pr.result.actionResult.success) completed.add(pr.node.id);
+                else {
+                  sequenceFailed = true;
+                  break;
+                }
+              }
+            } else {
+              for (const node of ready) {
+                const result = await executeActionWithGuard(
+                  node.action,
+                  node.params,
+                  `[Plan:${node.id}] `,
+                  decisionPayload.goalProgress || 0,
+                );
+                lastActionResult = result.actionResult;
+                sequenceResults.push({ action: node.action, params: node.params, result: result.actionResult });
+                runTelemetry.dagNodesExecuted += 1;
+                if (result.actionResult.success) completed.add(node.id);
+                else {
+                  sequenceFailed = true;
+                  break;
+                }
+              }
+            }
+            waveLatencies.push(Date.now() - waveStartedAt);
+          }
+
+          return {
+            isSequence: true,
+            sequenceResults,
+            sequenceFailed,
+            lastActionResult: lastActionResult || { success: !sequenceFailed, output: 'Plan completed' },
+            telemetry: {
+              kind: 'dag',
+              waves: waveLatencies.length,
+              criticalPathMs: waveLatencies.reduce((sum, v) => sum + v, 0),
+              maxWaveMs: waveLatencies.length > 0 ? Math.max(...waveLatencies) : 0,
+            },
+          };
+        }
+
+        // Parallel branches: { parallel: [ {action,params} | {sequence:[...]} ] }
+        if (Array.isArray(decisionPayload.parallel) && decisionPayload.parallel.length > 0) {
+          const branches = decisionPayload.parallel.slice(0, 4);
+          runTelemetry.parallelBranches += branches.length;
+          const branchHasUnsafe = branches.some((branch) => {
+            const list = Array.isArray(branch.sequence) ? branch.sequence : [branch];
+            return list.some((step) => !isParallelSafeAction(step.action));
+          });
+          if (branchHasUnsafe) {
+            return {
+              isSequence: true,
+              sequenceResults: [],
+              sequenceFailed: true,
+              lastActionResult: { success: false, error: 'Parallel plan contained non-safe side-effect actions' },
+            };
+          }
+
+          const branchResults = await Promise.all(
+            branches.map(async (branch, bi) => {
+              const branchStartedAt = Date.now();
+              const list = Array.isArray(branch.sequence)
+                ? branch.sequence.slice(0, 8)
+                : [{ action: branch.action, params: branch.params || {} }];
+              const local = [];
+              let failed = false;
+              let last = null;
+              for (let si = 0; si < list.length; si++) {
+                const step = list[si];
+                const exec = await executeActionWithGuard(
+                  step.action,
+                  step.params || {},
+                  `[P${bi + 1}.${si + 1}] `,
+                  decisionPayload.goalProgress || 0,
+                );
+                last = exec.actionResult;
+                local.push({ action: step.action, params: step.params || {}, result: exec.actionResult });
+                if (!exec.actionResult.success) {
+                  failed = true;
+                  break;
+                }
+              }
+              return { failed, last, local, latencyMs: Date.now() - branchStartedAt };
+            }),
+          );
+
+          const flat = [];
+          let sequenceFailed = false;
+          let lastActionResult = null;
+          for (const br of branchResults) {
+            flat.push(...br.local);
+            lastActionResult = br.last || lastActionResult;
+            if (br.failed) sequenceFailed = true;
+          }
+          return {
+            isSequence: true,
+            sequenceResults: flat,
+            sequenceFailed,
+            lastActionResult,
+            telemetry: {
+              kind: 'parallel',
+              branches: branches.length,
+              maxBranchMs: Math.max(...branchResults.map((b) => b.latencyMs)),
+              totalBranchMs: branchResults.reduce((sum, b) => sum + b.latencyMs, 0),
+            },
+          };
+        }
+
+        // Fallback: existing single/sequence behavior.
+        const isSequence = Array.isArray(decisionPayload.sequence) && decisionPayload.sequence.length > 0;
+        const actionList = isSequence
+          ? decisionPayload.sequence.slice(0, 8)
+          : [{ action: decisionPayload.action, params: decisionPayload.params || {} }];
+        let lastActionResult = null;
+        let sequenceResults = [];
+        let sequenceFailed = false;
+
+        for (let si = 0; si < actionList.length; si++) {
+          const { action, params } = actionList[si];
+          const stepParams = params || {};
+          const exec = await executeActionWithGuard(
+            action,
+            stepParams,
+            isSequence ? `[${si + 1}/${actionList.length}] ` : '',
+            decisionPayload.goalProgress || 0,
+          );
+          lastActionResult = exec.actionResult;
+          sequenceResults.push({ action, params: stepParams, result: exec.actionResult });
+          if (!exec.actionResult.success) {
+            sequenceFailed = true;
+            break;
+          }
+          if (isSequence && si < actionList.length - 1) await new Promise(r => setTimeout(r, 80));
+        }
+
+        if (isSequence && decisionPayload.verifyAfter && !sequenceFailed) {
+          const verifyResult = await analyzeScreen('Describe the current screen state. What changed? Did the previous actions succeed?');
+          if (verifyResult.success) {
+            const verifyStep = {
+              type: 'observe',
+              content: `[Auto-verify] ${verifyResult.analysis.slice(0, 500)}`,
+              timestamp: Date.now(),
+              goalProgress: decisionPayload.goalProgress || 0,
+            };
+            steps.push(verifyStep);
+            sendStep(verifyStep);
+            workingMemory.push(`Screen verify: ${verifyResult.analysis.slice(0, 150)}`);
+          }
+        }
+
+        return { isSequence, sequenceResults, sequenceFailed, lastActionResult, telemetry: null };
       }
+
+      const execution = await executeDecisionActions(decision, { depth: 0 });
+      const isSequence = execution.isSequence;
+      const sequenceResults = execution.sequenceResults || [];
+      const sequenceFailed = !!execution.sequenceFailed;
+      const lastActionResult = execution.lastActionResult;
+      const iterationMs = Date.now() - iterationStartedAt;
+      emitTelemetryStep(
+        `iteration ${iteration}`,
+        {
+          iteration,
+          iterationMs,
+          executionMode:
+            execution?.telemetry?.kind ||
+            (isSequence ? 'sequence' : 'single'),
+          actionsExecuted: sequenceResults.length,
+          failed: sequenceFailed,
+          avgActionMs:
+            runTelemetry.actionCalls > 0
+              ? Math.round(runTelemetry.totalActionMs / runTelemetry.actionCalls)
+              : 0,
+          parallelBranches: runTelemetry.parallelBranches,
+          dagPlans: runTelemetry.dagPlans,
+          dagNodesExecuted: runTelemetry.dagNodesExecuted,
+          dagParallelWaves: runTelemetry.dagParallelWaves,
+          subloopsSpawned: runTelemetry.subloopsSpawned,
+          maxSubloopDepth: runTelemetry.maxSubloopDepth,
+          modeStats: execution?.telemetry || undefined,
+        },
+        decision.goalProgress || 0,
+      );
 
       // Phase: REFLECT — evaluate what happened (uses last result for single, summary for sequence)
       const reflectAction = isSequence
         ? `Sequence of ${sequenceResults.length} actions: ${sequenceResults.map(r => r.action).join(' → ')}`
-        : (actionList[0]?.action || 'unknown');
+        : (sequenceResults[0]?.action || decision.action || 'unknown');
       const reflectOutput = isSequence
         ? sequenceResults.map(r => `${r.action}: ${r.result.success ? 'OK' : 'FAIL'}`).join(', ')
         : (lastActionResult?.success
@@ -3018,17 +4263,28 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
       tags: ['task', 'incomplete'],
     });
 
-    mainWindow?.webContents.send('agent:cognitiveComplete', {
-      success: false,
-      summary: `Reached maximum iterations (${MAX_ITERATIONS}) without completing the goal.`,
-      iterations: MAX_ITERATIONS,
-    });
+    emitTelemetryStep('run summary', {
+      elapsedMs: Date.now() - runTelemetry.startedAt,
+      actionCalls: runTelemetry.actionCalls,
+      avgActionMs:
+        runTelemetry.actionCalls > 0
+          ? Math.round(runTelemetry.totalActionMs / runTelemetry.actionCalls)
+          : 0,
+      parallelBranches: runTelemetry.parallelBranches,
+      dagPlans: runTelemetry.dagPlans,
+      dagNodesExecuted: runTelemetry.dagNodesExecuted,
+      subloopsSpawned: runTelemetry.subloopsSpawned,
+      maxSubloopDepth: runTelemetry.maxSubloopDepth,
+      outcome: 'max-iterations',
+    }, 0);
+
+    completeCognitive(
+      false,
+      `Reached maximum iterations (${MAX_ITERATIONS}) without completing the goal.`,
+      MAX_ITERATIONS,
+    );
   } catch (error) {
-    mainWindow?.webContents.send('agent:cognitiveComplete', {
-      success: false,
-      summary: `Cognitive loop error: ${error.message}`,
-      iterations: 0,
-    });
+    completeCognitive(false, `Cognitive loop error: ${error.message}`, 0);
   }
 });
 

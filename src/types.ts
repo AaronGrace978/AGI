@@ -8,6 +8,7 @@
 
 export type ModuleId =
   | 'nexus'
+  | 'memory'
   | 'heart'
   | 'mind'
   | 'hands'
@@ -253,6 +254,8 @@ export type GauntletCategory =
   | 'creativity'
   | 'meta-cognition';
 
+export type GauntletProvenance = 'synthetic' | 'real-workflow';
+
 export interface GauntletCapability {
   id: string;
   name: string;
@@ -269,6 +272,7 @@ export interface GauntletCapabilityResult {
   passed: boolean;
   summary: string;
   latencyMs: number;
+  provenance?: GauntletProvenance;
 }
 
 export type GauntletRunPhase = 'idle' | 'running' | 'completed' | 'cancelled' | 'failed';
@@ -283,6 +287,10 @@ export interface GauntletRunSnapshot {
   results: GauntletCapabilityResult[];
   overallScore: number;
   passRate: number;
+  provenanceRollups?: {
+    synthetic: { overallScore: number; passRate: number; count: number };
+    'real-workflow': { overallScore: number; passRate: number; count: number };
+  };
   logs: string[];
   stopReason: string | null;
 }
@@ -297,6 +305,10 @@ export interface GauntletState {
   results: GauntletCapabilityResult[];
   overallScore: number;
   passRate: number;
+  provenanceRollups: {
+    synthetic: { overallScore: number; passRate: number; count: number };
+    'real-workflow': { overallScore: number; passRate: number; count: number };
+  };
   logs: string[];
   history: GauntletRunSnapshot[];
   stopReason: string | null;
@@ -332,6 +344,31 @@ export interface GauntletState {
   };
 }
 
+export interface LedgerEntry {
+  id: string;
+  timestamp: number;
+  type: string;
+  payload: Record<string, unknown>;
+  prevHash: string;
+  hash: string;
+}
+
+export interface LedgerRun {
+  runId: string;
+  kind: string;
+  startedAt: number;
+  finishedAt: number | null;
+  status: 'running' | 'completed';
+  metadata: Record<string, unknown>;
+  entries: LedgerEntry[];
+  integrity: {
+    algorithm: string;
+    chainHead: string;
+    entryCount: number;
+  };
+  summary?: Record<string, unknown>;
+}
+
 // ─── Cognitive Agent (ReAct Loop) ──────────────────────────────
 
 export type CognitivePhase =
@@ -349,9 +386,109 @@ export interface CognitiveStep {
   content: string;
   timestamp: number;
   actionType?: string;
+  executionTier?: 'read-only' | 'reversible' | 'high-risk';
+  policyAllowed?: boolean;
+  conscienceVerdict?: EthicalJudgment['verdict'];
+  blocked?: boolean;
+  consentRequired?: boolean;
+  consentRequestId?: string;
+  rollbackId?: string;
+  rollbackStatus?: 'ready' | 'applied' | 'failed';
+  rollbackTargets?: string[];
   actionParams?: Record<string, unknown>;
   actionResult?: { success: boolean; output?: string; error?: string };
   goalProgress?: number;
+}
+
+export type ExecutionTierLimit = 'read-only' | 'reversible' | 'high-risk';
+
+export type ConsentMode = 'auto' | 'ask-first' | 'manual';
+export type ConsentDecision = 'approved' | 'denied' | 'overridden' | 'timeout';
+
+export interface PendingConsentAction {
+  id: string;
+  action: string;
+  params: Record<string, unknown>;
+  tier: 'read-only' | 'reversible' | 'high-risk';
+  conscienceVerdict: EthicalJudgment['verdict'];
+  reason: string;
+  requestedAt: number;
+  status: 'pending' | ConsentDecision;
+  resolvedAt?: number;
+}
+
+export interface RollbackEntry {
+  id: string;
+  action: string;
+  kind: 'write_file' | 'rename_file' | 'delete_file';
+  affectedTargets: string[];
+  createdAt: number;
+  status: 'ready' | 'applied' | 'failed';
+  payload: Record<string, unknown>;
+  appliedAt?: number;
+  lastError?: string | null;
+  lastTriedAt?: number;
+}
+
+export interface ReplayState {
+  loading: boolean;
+  availableRuns: Array<{ runId: string; kind: string; startedAt: number; finishedAt: number | null; status: string; entryCount: number; chainHead: string }>;
+  selectedRunId: string | null;
+  selectedRunKind: string | null;
+  steps: CognitiveStep[];
+  cursor: number;
+  isPlaying: boolean;
+  speedMs: number;
+  status: 'idle' | 'ready' | 'playing' | 'paused' | 'complete' | 'error';
+  error: string | null;
+}
+
+export interface RuntimeControlSyncState {
+  syncing: boolean;
+  lastSyncedAt: number | null;
+  lastError: string | null;
+}
+
+// ─── Operator Synthesis Engine ──────────────────────────────────
+
+export interface OperatorObservation {
+  id: string;
+  timestamp: number;
+  type: 'screen_snapshot' | 'context_shift' | 'app_switch' | 'rhythm_sample' | 'correction' | 'preference';
+  summary: string;
+  details?: string;
+  foregroundApp?: string;
+  screenRegion?: string;
+}
+
+export interface OperatorRhythm {
+  avgTypingDelayMs: number;
+  avgSessionLengthMin: number;
+  peakHours: number[];
+  preferredApps: string[];
+  correctionRate: number;
+  lastUpdated: number;
+}
+
+export interface OperatorProfile {
+  observations: OperatorObservation[];
+  rhythm: OperatorRhythm;
+  preferences: Record<string, string>;
+  totalObservations: number;
+  totalSessions: number;
+  synthesisNotes: string[];
+  lastSynthesisAt: number | null;
+}
+
+export interface SynthesisSessionState {
+  active: boolean;
+  startedAt: number | null;
+  observationCount: number;
+  intervalId: number | null;
+  intervalMs: number;
+  lastSnapshotAt: number | null;
+  paused: boolean;
+  error: string | null;
 }
 
 // ─── SPARK: Self-Propagating Autonomous Reasoning Kernel ───────
@@ -380,6 +517,10 @@ export interface WorldRelation {
 export interface WorldModel {
   entities: WorldEntity[];
   relations: WorldRelation[];
+  archivedEntities: WorldEntity[];
+  archivedRelations: WorldRelation[];
+  maxActiveEntities: number;
+  maxActiveRelations: number;
   lastUpdated: number;
 }
 
@@ -574,6 +715,8 @@ export interface SelfModification {
   scoreBefore: number;
   scoreAfter: number;
   applied: boolean;
+  evaluationNotes?: string;
+  gatePassed?: boolean;
   timestamp: number;
 }
 
@@ -596,7 +739,13 @@ export interface TemporalEvent {
 
 export interface TemporalPrediction {
   id: string;
-  prediction: string;
+  prediction:
+    | string
+    | number
+    | boolean
+    | Record<string, unknown>
+    | Array<unknown>;
+  kind?: 'language' | 'numeric' | 'categorical' | 'structured';
   confidence: number;
   basedOn: string[];
   deadline: number;
@@ -790,6 +939,8 @@ export interface Settings {
   systemPrompt: string;
   theme: 'prime' | 'matrix' | 'cyber';
   streamingEnabled: boolean;
+  /** When true, Operator Synthesis auto-starts when the app opens (set-and-forget). */
+  resumeSynthesisOnStartup?: boolean;
 }
 
 export type BrainRoute = 'fast' | 'slow';
@@ -806,19 +957,27 @@ export interface DualBrainState {
 
 export interface MemoryConsolidationState {
   enabled: boolean;
-  pendingEpisodes: Array<{
-    id: string;
-    content: string;
-    source: string;
-    importance: number;
-    timestamp: number;
-  }>;
+  pendingEpisodes: MemoryConsolidationEpisode[];
   lastRunAt: number | null;
   totalRuns: number;
   promotedSemantic: number;
   promotedProcedural: number;
   contradictionsDetected: number;
+  duplicatesSuppressed: number;
+  lowSignalDropped: number;
+  avgQualityScore: number;
+  precisionProxy: number;
+  recallProxy: number;
+  heuristicsBoosted: number;
   logs: string[];
+}
+
+export interface MemoryConsolidationEpisode {
+  id: string;
+  content: string;
+  source: string;
+  importance: number;
+  timestamp: number;
 }
 
 export interface OllamaStatus {
@@ -857,6 +1016,7 @@ declare global {
       };
       memory: {
         get: () => Promise<unknown>;
+        getSummary?: (options?: { maxItems?: number }) => Promise<unknown>;
         update: (u: unknown) => Promise<unknown>;
         addFact: (f: unknown) => Promise<unknown>;
         storeVector: (entry: {
@@ -881,6 +1041,29 @@ declare global {
           similarity: number;
         }>>;
         vectorStats: () => Promise<{ total: number; byType: Record<string, number> }>;
+        listVectors: (options?: {
+          typeFilter?: string | null;
+          limit?: number;
+          offset?: number;
+          sortBy?: 'newest' | 'oldest' | 'importance';
+        }) => Promise<{
+          total: number;
+          memories: Array<{
+            id: string;
+            content: string;
+            type: string;
+            timestamp: number;
+            importance: number;
+            source: string;
+            emotion?: string;
+            tags: string[];
+            accessCount?: number;
+            lastAccessed?: number;
+            decayRate?: number;
+            associations?: string[];
+            layer?: string;
+          }>;
+        }>;
       };
       llm: {
         generate: (
@@ -940,6 +1123,18 @@ declare global {
         createTool: (tool: CustomTool) => Promise<unknown>;
         listTools: () => Promise<unknown>;
         executeTool: (toolId: string, params?: Record<string, unknown>) => Promise<unknown>;
+        listRollbacks: () => Promise<{ success: boolean; entries: RollbackEntry[] }>;
+        executeRollback: (rollbackId: string) => Promise<{ success: boolean; rollbackId?: string; error?: string }>;
+        resolveConsent: (requestId: string, decision: ConsentDecision) => Promise<{ success: boolean; requestId: string; decision?: ConsentDecision; error?: string }>;
+        ledgerCreateRun: (kind: string, metadata?: Record<string, unknown>) => Promise<{ success: boolean; runId?: string; path?: string; error?: string }>;
+        ledgerAppend: (runId: string, entryType: string, payload?: Record<string, unknown>) => Promise<{ success: boolean; entryId?: string; hash?: string; error?: string }>;
+        ledgerFinalize: (runId: string, summary?: Record<string, unknown>) => Promise<{ success: boolean; runId?: string; entryCount?: number; error?: string }>;
+        ledgerListRuns: () => Promise<{ success: boolean; runs: Array<{ runId: string; kind: string; startedAt: number; finishedAt: number | null; status: string; entryCount: number; chainHead: string }>; error?: string }>;
+        ledgerReadRun: (runId: string) => Promise<{ success: boolean; run?: LedgerRun; error?: string }>;
+        replayListRuns: () => Promise<{ success: boolean; runs: Array<{ runId: string; kind: string; startedAt: number; finishedAt: number | null; status: string; entryCount: number; chainHead: string }>; error?: string }>;
+        replayLoadRun: (runId: string) => Promise<{ success: boolean; run?: LedgerRun; error?: string }>;
+        setRuntimeControls: (partial: Record<string, unknown>) => Promise<{ success: boolean; controls?: Record<string, unknown>; error?: string }>;
+        getRuntimeControls: () => Promise<{ success: boolean; controls?: Record<string, unknown>; error?: string }>;
         // Task Planning & Execution
         planAndExecute: (request: string) => void;
         startCognitive: (goal: string) => void;
@@ -952,6 +1147,7 @@ declare global {
         onError: (cb: (data: unknown) => void) => () => void;
         onCognitiveStep: (cb: (data: CognitiveStep) => void) => () => void;
         onCognitiveComplete: (cb: (data: { success: boolean; summary: string; iterations: number }) => void) => () => void;
+        onConsentRequested: (cb: (data: PendingConsentAction) => void) => () => void;
         removeAllListeners: () => void;
       };
       spark: {

@@ -8,6 +8,7 @@ import { useStore } from './store';
 import MatrixRain from './components/MatrixRain';
 import Sidebar from './components/Sidebar';
 import NexusPanel from './components/NexusPanel';
+import MemoryPanel from './components/MemoryPanel';
 import HeartPanel from './components/HeartPanel';
 import MindPanel from './components/MindPanel';
 import HandsPanel from './components/HandsPanel';
@@ -53,6 +54,8 @@ function ActivePanel() {
   switch (activeModule) {
     case 'nexus':
       return <NexusPanel />;
+    case 'memory':
+      return <MemoryPanel />;
     case 'heart':
       return <HeartPanel />;
     case 'mind':

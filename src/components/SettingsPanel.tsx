@@ -43,8 +43,9 @@ const OLLAMA_CLOUD_MODELS = [
 
 // ─── Anthropic model list ───────────────────────────────────────
 const ANTHROPIC_MODELS = [
+  'claude-opus-4-20250514',
   'claude-sonnet-4-20250514',
-  'claude-3-5-sonnet-20241022',
+  'claude-haiku-4-20250514',
   'claude-3-opus-20240229',
   'claude-3-haiku-20240307',
   'claude-3-5-haiku-20241022',
@@ -52,6 +53,16 @@ const ANTHROPIC_MODELS = [
 
 // ─── OpenAI model list ─────────────────────────────────────────
 const OPENAI_MODELS = [
+  'gpt-5.3',
+  'gpt-5.3-mini',
+  'gpt-5.3-nano',
+  'gpt-5',
+  'o3',
+  'o3-mini',
+  'o4-mini',
+  'gpt-4.1',
+  'gpt-4.1-mini',
+  'gpt-4.1-nano',
   'gpt-4o',
   'gpt-4o-mini',
   'gpt-4-turbo',
@@ -134,53 +145,83 @@ function ModelDropdown({
 
   if (provider === 'anthropic') {
     return (
-      <div className="settings-row">
-        <div className="settings-label">
-          Model
-          <small>Anthropic Claude models</small>
+      <>
+        <div className="settings-row">
+          <div className="settings-label">
+            Model
+            <small>Anthropic Claude models</small>
+          </div>
+          <select
+            className="settings-select"
+            value={localModel}
+            onChange={(e) => {
+              setLocalModel(e.target.value);
+              save({ model: e.target.value });
+            }}
+          >
+            {ANTHROPIC_MODELS.map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+            {localModel && !ANTHROPIC_MODELS.includes(localModel) && (
+              <option value={localModel}>{localModel} (current)</option>
+            )}
+          </select>
         </div>
-        <select
-          className="settings-select"
-          value={localModel}
-          onChange={(e) => {
-            setLocalModel(e.target.value);
-            save({ model: e.target.value });
-          }}
-        >
-          {ANTHROPIC_MODELS.map((m) => (
-            <option key={m} value={m}>{m}</option>
-          ))}
-          {localModel && !ANTHROPIC_MODELS.includes(localModel) && (
-            <option value={localModel}>{localModel} (current)</option>
-          )}
-        </select>
-      </div>
+        <div className="settings-row">
+          <div className="settings-label">
+            Custom Model Name
+            <small>Use this for newly released Claude models not in the list</small>
+          </div>
+          <input
+            className="settings-input"
+            value={localModel}
+            onChange={(e) => setLocalModel(e.target.value)}
+            onBlur={() => save()}
+            placeholder="e.g. claude-sonnet-4-20250514"
+          />
+        </div>
+      </>
     );
   }
 
   if (provider === 'openai') {
     return (
-      <div className="settings-row">
-        <div className="settings-label">
-          Model
-          <small>OpenAI GPT models</small>
+      <>
+        <div className="settings-row">
+          <div className="settings-label">
+            Model
+            <small>OpenAI GPT/o-series models</small>
+          </div>
+          <select
+            className="settings-select"
+            value={localModel}
+            onChange={(e) => {
+              setLocalModel(e.target.value);
+              save({ model: e.target.value });
+            }}
+          >
+            {OPENAI_MODELS.map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+            {localModel && !OPENAI_MODELS.includes(localModel) && (
+              <option value={localModel}>{localModel} (current)</option>
+            )}
+          </select>
         </div>
-        <select
-          className="settings-select"
-          value={localModel}
-          onChange={(e) => {
-            setLocalModel(e.target.value);
-            save({ model: e.target.value });
-          }}
-        >
-          {OPENAI_MODELS.map((m) => (
-            <option key={m} value={m}>{m}</option>
-          ))}
-          {localModel && !OPENAI_MODELS.includes(localModel) && (
-            <option value={localModel}>{localModel} (current)</option>
-          )}
-        </select>
-      </div>
+        <div className="settings-row">
+          <div className="settings-label">
+            Custom Model Name
+            <small>Use this for new OpenAI models as they roll out</small>
+          </div>
+          <input
+            className="settings-input"
+            value={localModel}
+            onChange={(e) => setLocalModel(e.target.value)}
+            onBlur={() => save()}
+            placeholder="e.g. gpt-5.3"
+          />
+        </div>
+      </>
     );
   }
 
@@ -222,6 +263,7 @@ export default function SettingsPanel() {
   const [localTemp, setLocalTemp] = useState(settings.temperature);
   const [localMaxTokens, setLocalMaxTokens] = useState(settings.maxTokens);
   const [localSystemPrompt, setLocalSystemPrompt] = useState(settings.systemPrompt);
+  const maxTokensCap = settings.provider === 'anthropic' ? 32000 : 200000;
 
   // Sync when settings load
   useEffect(() => {
@@ -384,11 +426,21 @@ export default function SettingsPanel() {
             className="settings-input"
             type="number"
             value={localMaxTokens}
-            onChange={(e) => setLocalMaxTokens(parseInt(e.target.value) || 4096)}
+            min={1}
+            max={maxTokensCap}
+            onChange={(e) => {
+              const parsed = parseInt(e.target.value, 10) || 4096;
+              setLocalMaxTokens(Math.min(maxTokensCap, Math.max(1, parsed)));
+            }}
             onBlur={() => save()}
             style={{ width: 120, minWidth: 'auto' }}
           />
         </div>
+        {settings.provider === 'anthropic' && (
+          <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: -6 }}>
+            Anthropic output token limit is clamped to 32,000 to avoid request errors.
+          </div>
+        )}
       </div>
 
       {/* System Prompt */}

@@ -10,6 +10,20 @@
 import type { GenerateFn } from './runtime';
 import type { SparkState } from '../types';
 
+function formatPrediction(
+  prediction: string | number | boolean | Record<string, unknown> | Array<unknown>,
+): string {
+  if (typeof prediction === 'string') return prediction;
+  if (typeof prediction === 'number' || typeof prediction === 'boolean') {
+    return String(prediction);
+  }
+  try {
+    return JSON.stringify(prediction);
+  } catch {
+    return '[unserializable prediction]';
+  }
+}
+
 // Web Speech API type declarations for Electron/browser environments
 declare global {
   interface SpeechRecognition extends EventTarget {
@@ -207,7 +221,7 @@ export async function generateSpontaneousThought(
   // Recent predictions
   const preds = state.temporal.activePredictions.filter((p) => !p.resolved);
   if (preds.length > 0) {
-    contextParts.push(`I predicted: ${preds[0].prediction}`);
+    contextParts.push(`I predicted: ${formatPrediction(preds[0].prediction)}`);
   }
 
   // Calibration

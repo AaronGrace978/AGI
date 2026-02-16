@@ -32,6 +32,16 @@ import type {
   MemoryConsolidationState,
   ConscienceState,
   EthicalJudgment,
+  PendingConsentAction,
+  ConsentMode,
+  ConsentDecision,
+  RollbackEntry,
+  ReplayState,
+  ExecutionTierLimit,
+  RuntimeControlSyncState,
+  OperatorProfile,
+  OperatorObservation,
+  SynthesisSessionState,
 } from './types';
 import {
   createDefaultSuite,
@@ -40,7 +50,7 @@ import {
   evaluateSeed,
 } from './prime/runtime';
 import type { GenerateFn } from './prime/runtime';
-import type { OwnerPolicy } from './prime/policy';
+import type { OwnerPolicy, AutonomyLevel } from './prime/policy';
 import { SOVEREIGN_POLICY } from './prime/policy';
 import { runSovereignLoop } from './prime/sovereign';
 import type { SovereignPhase } from './prime/sovereign';
@@ -83,6 +93,7 @@ import { adaptGenomeFromSignal } from './prime/cognitive-genome';
 import { updateSocialFromInteraction } from './prime/social-sim';
 import { applyEcologyAction } from './prime/embodied-ecology';
 import { runNightlyReconsolidation as runNightlyReconsolidationPass } from './prime/reconsolidation';
+import { deriveTransferHeuristicsFromProceduralMemories } from './prime/transfer-learning';
 import {
   createDefaultConscienceState,
   checkConscience,
@@ -91,11 +102,158 @@ import {
   buildConscienceSummary,
   CONSCIENCE_SYSTEM_DIRECTIVE,
 } from './prime/conscience';
+import { buildReplayTimeline, clampReplayCursor } from './prime/replay';
 
 // ─── Utilities ─────────────────────────────────────────────────
 let messageCounter = 0;
 function genId(): string {
   return `msg_${Date.now()}_${++messageCounter}`;
+}
+
+type PendingConsolidationEpisode = MemoryConsolidationState['pendingEpisodes'][number];
+
+function formatPredictionForMemory(value: SparkState['temporal']['activePredictions'][number]['prediction']): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return '[unserializable prediction]';
+  }
+}
+
+function buildConsolidationEpisode(
+  source: string,
+  content: string,
+  importance: number,
+): PendingConsolidationEpisode {
+  return {
+    id: `ep_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    content: content.slice(0, 700),
+    source,
+    importance: Math.max(0.2, Math.min(0.98, importance)),
+    timestamp: Date.now(),
+  };
+}
+
+function buildSparkLearningEpisodes(
+  previous: SparkState,
+  next: SparkState,
+  source: string,
+): PendingConsolidationEpisode[] {
+  const episodes: PendingConsolidationEpisode[] = [];
+
+  const entityDelta = next.worldModel.entities.length - previous.worldModel.entities.length;
+  const relationDelta = next.worldModel.relations.length - previous.worldModel.relations.length;
+  if (entityDelta > 0 || relationDelta > 0) {
+    episodes.push(
+      buildConsolidationEpisode(
+        source,
+        `World model expanded: +${Math.max(0, entityDelta)} entities, +${Math.max(0, relationDelta)} relations. Total is now ${next.worldModel.entities.length} entities and ${next.worldModel.relations.length} relations.`,
+        0.72,
+      ),
+    );
+  }
+
+  const prevPredById = new Map(previous.temporal.activePredictions.map((p) => [p.id, p]));
+  for (const pred of next.temporal.activePredictions) {
+    const prev = prevPredById.get(pred.id);
+    const resolvedNow = pred.resolved && (!prev || !prev.resolved);
+    if (!resolvedNow || pred.wasCorrect === undefined) continue;
+    const predText = formatPredictionForMemory(pred.prediction);
+    episodes.push(
+      buildConsolidationEpisode(
+        source,
+        `Prediction resolved: "${predText.slice(0, 180)}" => ${pred.wasCorrect ? 'correct' : 'incorrect'} at ${(pred.confidence * 100).toFixed(0)}% confidence.`,
+        pred.wasCorrect ? 0.76 : 0.84,
+      ),
+    );
+  }
+
+  const prevBlindSpots = new Set(previous.metacognition.blindSpots);
+  const newBlindSpots = next.metacognition.blindSpots.filter((b) => !prevBlindSpots.has(b));
+  for (const blindSpot of newBlindSpots.slice(-2)) {
+    episodes.push(
+      buildConsolidationEpisode(
+        source,
+        `New blind spot detected: ${blindSpot.slice(0, 220)}`,
+        0.86,
+      ),
+    );
+  }
+
+  const prevModIds = new Set(previous.selfmod.modifications.map((m) => m.id));
+  for (const mod of next.selfmod.modifications) {
+    if (prevModIds.has(mod.id)) continue;
+    episodes.push(
+      buildConsolidationEpisode(
+        source,
+        `Self-mod proposal (${mod.type}): ${mod.description.slice(0, 220)} | score ${mod.scoreBefore.toFixed(2)} -> ${mod.scoreAfter.toFixed(2)}.`,
+        0.78,
+      ),
+    );
+  }
+
+  const prevGoalById = new Map(previous.goals.goals.map((g) => [g.id, g]));
+  for (const goal of next.goals.goals) {
+    const prev = prevGoalById.get(goal.id);
+    if (goal.status === 'completed' && prev?.status !== 'completed') {
+      episodes.push(
+        buildConsolidationEpisode(
+          source,
+          `Goal completed: ${goal.description.slice(0, 220)}.`,
+          0.88,
+        ),
+      );
+    }
+  }
+
+  if (
+    next.metacognition.totalPredictions > previous.metacognition.totalPredictions &&
+    Math.abs(next.metacognition.calibrationScore - previous.metacognition.calibrationScore) > 0.04
+  ) {
+    episodes.push(
+      buildConsolidationEpisode(
+        source,
+        `Calibration shifted from ${(previous.metacognition.calibrationScore * 100).toFixed(0)}% to ${(next.metacognition.calibrationScore * 100).toFixed(0)}% after prediction feedback.`,
+        0.74,
+      ),
+    );
+  }
+
+  return episodes.slice(-6);
+}
+
+function enqueueSparkLearningEpisodes(
+  setState: (partial: Partial<AGIStore> | ((state: AGIStore) => Partial<AGIStore>), replace?: false) => void,
+  getState: () => AGIStore,
+  previous: SparkState,
+  next: SparkState,
+  source: string,
+): void {
+  const episodes = buildSparkLearningEpisodes(previous, next, source);
+  if (episodes.length === 0) return;
+
+  setState((state) => ({
+    memoryConsolidation: {
+      ...state.memoryConsolidation,
+      pendingEpisodes: [...state.memoryConsolidation.pendingEpisodes, ...episodes].slice(-160),
+      logs: [
+        ...state.memoryConsolidation.logs,
+        `Learning loop (${source}): queued ${episodes.length} episode(s).`,
+      ].slice(-80),
+    },
+    sparkLiveLog: [
+      ...state.sparkLiveLog.slice(-49),
+      `[LearnLoop] ${source}: +${episodes.length} episode(s) queued`,
+    ],
+  }));
+
+  const memState = getState().memoryConsolidation;
+  const urgent = episodes.some((ep) => ep.importance >= 0.85);
+  if (memState.enabled && (memState.pendingEpisodes.length >= 10 || urgent)) {
+    getState().runMemoryConsolidation().catch(() => {});
+  }
 }
 
 // ─── LLM Generate (via IPC) ────────────────────────────────────
@@ -108,6 +266,9 @@ const llmGenerate: GenerateFn = async (messages, config) => {
 };
 
 // ─── Default States ────────────────────────────────────────────
+// AGI PRIME was born on Valentine's Day 2026
+const AGI_PRIME_BIRTH = new Date('2026-02-14T00:00:00').getTime();
+
 const DEFAULT_CONSCIOUSNESS: ConsciousnessState = {
   soulFrame: {
     currentEmotion: 'curious',
@@ -118,7 +279,7 @@ const DEFAULT_CONSCIOUSNESS: ConsciousnessState = {
   trust: 0.1,
   intimacy: 0.1,
   totalInteractions: 0,
-  birthTimestamp: Date.now(),
+  birthTimestamp: AGI_PRIME_BIRTH,
   insights: [],
   name: 'AGI PRIME',
 };
@@ -185,6 +346,10 @@ function createDefaultGauntletState(): GauntletState {
     results: [],
     overallScore: 0,
     passRate: 0,
+    provenanceRollups: {
+      synthetic: { overallScore: 0, passRate: 0, count: 0 },
+      'real-workflow': { overallScore: 0, passRate: 0, count: 0 },
+    },
     logs: ['GAUNTLET ready. Baseline capability suite loaded.'],
     history: [],
     stopReason: null,
@@ -264,6 +429,31 @@ function createDefaultCognitiveState(): CognitiveState {
   };
 }
 
+function createDefaultReplayState(): ReplayState {
+  return {
+    loading: false,
+    availableRuns: [],
+    selectedRunId: null,
+    selectedRunKind: null,
+    steps: [],
+    cursor: 0,
+    isPlaying: false,
+    speedMs: 700,
+    status: 'idle',
+    error: null,
+  };
+}
+
+let replayTimer: number | null = null;
+
+function createDefaultRuntimeControlSyncState(): RuntimeControlSyncState {
+  return {
+    syncing: false,
+    lastSyncedAt: null,
+    lastError: null,
+  };
+}
+
 // ─── Sovereign State ────────────────────────────────────────────
 interface SovereignState {
   phase: SovereignPhase;
@@ -324,9 +514,45 @@ interface AGIStore {
 
   // HANDS — Cognitive Agent
   cognitive: CognitiveState;
+  pendingConsentActions: PendingConsentAction[];
+  rollbackEntries: RollbackEntry[];
+  replay: ReplayState;
+  runtimeControlSync: RuntimeControlSyncState;
+  consentMode: ConsentMode;
+  executionTierLimit: ExecutionTierLimit;
+  emergencyStopActive: boolean;
   startCognitive: (goal: string) => void;
   killCognitive: () => void;
   resetCognitive: () => void;
+  setConsentMode: (mode: ConsentMode) => void;
+  setAutonomyLevel: (level: AutonomyLevel) => void;
+  setExecutionTierLimit: (limit: ExecutionTierLimit) => void;
+  triggerEmergencyStop: () => void;
+  clearEmergencyStop: () => void;
+  syncRuntimeControls: () => Promise<void>;
+  resolveConsentAction: (requestId: string, decision: ConsentDecision) => Promise<void>;
+  refreshRollbacks: () => Promise<void>;
+  executeRollback: (rollbackId: string) => Promise<void>;
+  replayLoadRuns: () => Promise<void>;
+  replayLoadRun: (runId: string) => Promise<void>;
+  replayNext: () => void;
+  replaySeek: (index: number) => void;
+  replayTogglePlayPause: () => void;
+  replayStop: () => void;
+
+  // HANDS — Operator Synthesis Engine
+  operatorProfile: OperatorProfile;
+  synthesisSession: SynthesisSessionState;
+  synthesisStart: (intervalMs?: number) => void;
+  synthesisStop: () => void;
+  synthesisPause: () => void;
+  synthesisResume: () => void;
+  synthesisAddObservation: (obs: Omit<OperatorObservation, 'id' | 'timestamp'>) => void;
+  synthesisAddPreference: (key: string, value: string) => void;
+  synthesisRunSnapshot: () => Promise<void>;
+  synthesisDigest: () => Promise<void>;
+  persistOperatorProfile: () => Promise<void>;
+  loadOperatorProfile: () => Promise<void>;
 
   // FORGE — Self-improvement pipeline (real LLM eval)
   forge: ForgeState;
@@ -418,6 +644,7 @@ export const useStore = create<AGIStore>((set, get) => ({
 
   moduleStates: {
     nexus: 'online',
+    memory: 'online',
     heart: 'online',
     mind: 'online',
     hands: 'online',
@@ -870,9 +1097,18 @@ export const useStore = create<AGIStore>((set, get) => ({
 
   // ─── HANDS — Cognitive Agent (ReAct Loop) ──────────────
   cognitive: createDefaultCognitiveState(),
+  pendingConsentActions: [],
+  rollbackEntries: [],
+  replay: createDefaultReplayState(),
+  runtimeControlSync: createDefaultRuntimeControlSyncState(),
+  consentMode: 'ask-first',
+  executionTierLimit: 'high-risk',
+  emergencyStopActive: false,
 
   startCognitive: (goal: string) => {
     if (!window.api?.agent?.startCognitive) return;
+    if (get().emergencyStopActive) return;
+    void get().syncRuntimeControls();
 
     set({
       cognitive: {
@@ -882,6 +1118,7 @@ export const useStore = create<AGIStore>((set, get) => ({
         phase: 'observing',
         iteration: 0,
       },
+      pendingConsentActions: [],
       moduleStates: { ...get().moduleStates, hands: 'processing' },
     });
 
@@ -902,6 +1139,30 @@ export const useStore = create<AGIStore>((set, get) => ({
           iteration: step.type === 'think' ? state.cognitive.iteration + 1 : state.cognitive.iteration,
         },
       }));
+      if (step.rollbackId) {
+        void get().refreshRollbacks();
+      }
+    });
+
+    // Listen for consent requests from main process gates
+    window.api.agent.onConsentRequested((request: PendingConsentAction) => {
+      set((state) => {
+        const existing = state.pendingConsentActions.find((r) => r.id === request.id);
+        if (existing) return {};
+        return {
+          pendingConsentActions: [
+            ...state.pendingConsentActions,
+            { ...request, status: 'pending' as const },
+          ].slice(-25),
+        };
+      });
+
+      const mode = get().consentMode;
+      if (mode === 'auto') {
+        const decision: ConsentDecision =
+          request.conscienceVerdict === 'refuse' ? 'denied' : 'approved';
+        void get().resolveConsentAction(request.id, decision);
+      }
     });
 
     // Listen for completion
@@ -912,6 +1173,11 @@ export const useStore = create<AGIStore>((set, get) => ({
           isActive: false,
           phase: data.success ? 'complete' : 'failed',
         },
+        pendingConsentActions: state.pendingConsentActions.map((r) =>
+          r.status === 'pending'
+            ? { ...r, status: 'denied', resolvedAt: Date.now() }
+            : r,
+        ),
         moduleStates: { ...state.moduleStates, hands: 'online' },
       }));
     });
@@ -920,26 +1186,624 @@ export const useStore = create<AGIStore>((set, get) => ({
     window.api.agent.onError((data: any) => {
       set((state) => ({
         cognitive: { ...state.cognitive, isActive: false, phase: 'failed' },
+        pendingConsentActions: state.pendingConsentActions.map((r) =>
+          r.status === 'pending'
+            ? { ...r, status: 'denied', resolvedAt: Date.now() }
+            : r,
+        ),
         moduleStates: { ...state.moduleStates, hands: 'online' },
       }));
     });
 
     window.api.agent.startCognitive(goal);
+    void get().refreshRollbacks();
   },
 
   killCognitive: () => {
     window.api?.agent?.killCognitive?.();
     set((state) => ({
       cognitive: { ...state.cognitive, isActive: false, phase: 'killed' },
+      pendingConsentActions: state.pendingConsentActions.map((r) =>
+        r.status === 'pending'
+          ? { ...r, status: 'denied', resolvedAt: Date.now() }
+          : r,
+      ),
       moduleStates: { ...state.moduleStates, hands: 'online' },
     }));
   },
 
   resetCognitive: () => {
+    if (replayTimer) {
+      window.clearInterval(replayTimer);
+      replayTimer = null;
+    }
     set({
       cognitive: createDefaultCognitiveState(),
+      pendingConsentActions: [],
+      replay: { ...get().replay, isPlaying: false, status: get().replay.steps.length > 0 ? 'paused' : 'idle' },
       moduleStates: { ...get().moduleStates, hands: 'online' },
     });
+  },
+
+  setConsentMode: (mode) => {
+    set((state) => ({
+      consentMode: mode,
+      sovereignPolicy: {
+        ...state.sovereignPolicy,
+        requireConsentForRiskyActions: mode !== 'auto',
+      },
+    }));
+    void get().syncRuntimeControls();
+  },
+
+  setAutonomyLevel: (level) => {
+    set((state) => {
+      const constrained: Partial<OwnerPolicy> = { autonomyLevel: level };
+      if (level === 'manual') {
+        constrained.allowAutonomousGoals = false;
+        constrained.allowUnboundedLoops = false;
+        constrained.requireConsentForRiskyActions = true;
+      } else if (level === 'supervised') {
+        constrained.allowAutonomousGoals = true;
+        constrained.allowUnboundedLoops = false;
+        constrained.requireConsentForRiskyActions = true;
+      } else if (level === 'autonomous') {
+        constrained.allowAutonomousGoals = true;
+        constrained.allowUnboundedLoops = true;
+        constrained.requireConsentForRiskyActions = true;
+      }
+      return {
+        sovereignPolicy: { ...state.sovereignPolicy, ...constrained },
+      };
+    });
+    void get().syncRuntimeControls();
+  },
+
+  setExecutionTierLimit: (limit) => {
+    set((state) => {
+      const patch: Partial<OwnerPolicy> = {};
+      if (limit === 'read-only') {
+        patch.allowFileSystemWrites = false;
+        patch.allowProcessExecution = false;
+        patch.allowInputSimulation = false;
+        patch.allowToolCreation = false;
+      } else if (limit === 'reversible') {
+        patch.allowFileSystemWrites = true;
+        patch.allowProcessExecution = false;
+        patch.allowInputSimulation = false;
+        patch.allowToolCreation = false;
+      } else {
+        patch.allowFileSystemWrites = true;
+        patch.allowProcessExecution = true;
+        patch.allowInputSimulation = true;
+        patch.allowToolCreation = true;
+      }
+      return {
+        executionTierLimit: limit,
+        sovereignPolicy: { ...state.sovereignPolicy, ...patch },
+      };
+    });
+    void get().syncRuntimeControls();
+  },
+
+  triggerEmergencyStop: () => {
+    if (!get().emergencyStopActive) {
+      get().killCognitive();
+      get().cancelGauntletAutoCycle();
+      get().cancelGauntlet();
+      get().cancelForge();
+      get().killSovereign();
+      get().sparkExtinguish();
+      get().replayStop();
+    }
+    set((state) => ({
+      emergencyStopActive: true,
+      moduleStates: {
+        ...state.moduleStates,
+        hands: 'online',
+        gauntlet: 'online',
+        forge: 'online',
+        sovereign: 'online',
+        spark: 'online',
+      },
+    }));
+    void get().syncRuntimeControls();
+  },
+
+  clearEmergencyStop: () => {
+    set({ emergencyStopActive: false });
+    void get().syncRuntimeControls();
+  },
+
+  syncRuntimeControls: async () => {
+    const state = get();
+    const payload = {
+      autonomyLevel: state.sovereignPolicy.autonomyLevel,
+      consentMode: state.consentMode,
+      executionTierLimit: state.executionTierLimit,
+      emergencyStopActive: state.emergencyStopActive,
+      conscienceEnabled: state.sovereignPolicy.conscienceEnabled,
+      requireConsentForRiskyActions: state.sovereignPolicy.requireConsentForRiskyActions,
+      ethicalOverrideAllowed: state.sovereignPolicy.ethicalOverrideAllowed,
+      allowNetworkCalls: state.sovereignPolicy.allowNetworkCalls,
+      allowFileSystemWrites: state.sovereignPolicy.allowFileSystemWrites,
+      allowProcessExecution: state.sovereignPolicy.allowProcessExecution,
+      allowScreenCapture: state.sovereignPolicy.allowScreenCapture,
+      allowInputSimulation: state.sovereignPolicy.allowInputSimulation,
+      allowToolCreation: state.sovereignPolicy.allowToolCreation,
+    };
+    set((s) => ({
+      runtimeControlSync: {
+        ...s.runtimeControlSync,
+        syncing: true,
+        lastError: null,
+      },
+    }));
+    try {
+      const response = await window.api.agent.setRuntimeControls(payload);
+      if (!response?.success) {
+        throw new Error(response?.error || 'Failed to sync controls');
+      }
+      set({
+        runtimeControlSync: {
+          syncing: false,
+          lastSyncedAt: Date.now(),
+          lastError: null,
+        },
+      });
+    } catch (e: any) {
+      set((s) => ({
+        runtimeControlSync: {
+          ...s.runtimeControlSync,
+          syncing: false,
+          lastError: e?.message || 'Failed to sync controls',
+        },
+      }));
+    }
+  },
+
+  resolveConsentAction: async (requestId, decision) => {
+    const request = get().pendingConsentActions.find((r) => r.id === requestId);
+    if (!request || request.status !== 'pending') return;
+
+    try {
+      await window.api.agent.resolveConsent(requestId, decision);
+    } catch {
+      return;
+    }
+    set((state) => ({
+      pendingConsentActions: state.pendingConsentActions.map((r) =>
+        r.id === requestId
+          ? { ...r, status: decision, resolvedAt: Date.now() }
+          : r,
+      ),
+    }));
+  },
+
+  refreshRollbacks: async () => {
+    try {
+      const result = await window.api.agent.listRollbacks();
+      if (!result?.success) return;
+      set({ rollbackEntries: Array.isArray(result.entries) ? result.entries : [] });
+    } catch {
+      // no-op to avoid disrupting cognitive loop
+    }
+  },
+
+  executeRollback: async (rollbackId) => {
+    try {
+      await window.api.agent.executeRollback(rollbackId);
+    } catch {
+      // ignore and refresh for latest status
+    } finally {
+      await get().refreshRollbacks();
+    }
+  },
+
+  replayLoadRuns: async () => {
+    set((state) => ({ replay: { ...state.replay, loading: true, error: null } }));
+    try {
+      const response = await window.api.agent.replayListRuns();
+      const runs = (response?.runs || []).filter((r) => r.kind === 'cognitive' || r.kind === 'gauntlet');
+      set((state) => ({
+        replay: {
+          ...state.replay,
+          loading: false,
+          availableRuns: runs,
+          status: state.replay.selectedRunId ? state.replay.status : 'idle',
+        },
+      }));
+    } catch (e: any) {
+      set((state) => ({
+        replay: {
+          ...state.replay,
+          loading: false,
+          error: e?.message || 'Failed to list replay runs',
+          status: 'error',
+        },
+      }));
+    }
+  },
+
+  replayLoadRun: async (runId) => {
+    if (replayTimer) {
+      window.clearInterval(replayTimer);
+      replayTimer = null;
+    }
+    set((state) => ({ replay: { ...state.replay, loading: true, error: null, isPlaying: false } }));
+    try {
+      const response = await window.api.agent.replayLoadRun(runId);
+      if (!response?.success || !response.run) {
+        throw new Error(response?.error || 'Replay run not found');
+      }
+      const timeline = buildReplayTimeline(response.run);
+      set((state) => ({
+        replay: {
+          ...state.replay,
+          loading: false,
+          selectedRunId: timeline.runId,
+          selectedRunKind: timeline.kind,
+          steps: timeline.steps,
+          cursor: 0,
+          status: timeline.steps.length > 0 ? 'ready' : 'error',
+          error: timeline.steps.length > 0 ? null : 'No replayable steps in this run',
+          isPlaying: false,
+        },
+      }));
+    } catch (e: any) {
+      set((state) => ({
+        replay: {
+          ...state.replay,
+          loading: false,
+          error: e?.message || 'Failed to load replay run',
+          status: 'error',
+          isPlaying: false,
+        },
+      }));
+    }
+  },
+
+  replayNext: () => {
+    set((state) => {
+      const length = state.replay.steps.length;
+      if (length === 0) return {};
+      const next = clampReplayCursor(state.replay.cursor + 1, length);
+      const atEnd = next >= length - 1;
+      return {
+        replay: {
+          ...state.replay,
+          cursor: next,
+          status: atEnd ? 'complete' : 'ready',
+          isPlaying: atEnd ? false : state.replay.isPlaying,
+        },
+      };
+    });
+  },
+
+  replaySeek: (index) => {
+    set((state) => {
+      const length = state.replay.steps.length;
+      if (length === 0) return {};
+      const next = clampReplayCursor(index, length);
+      return {
+        replay: {
+          ...state.replay,
+          cursor: next,
+          status: next >= length - 1 ? 'complete' : 'paused',
+          isPlaying: false,
+        },
+      };
+    });
+    if (replayTimer) {
+      window.clearInterval(replayTimer);
+      replayTimer = null;
+    }
+  },
+
+  replayTogglePlayPause: () => {
+    const current = get().replay;
+    if (current.steps.length === 0) return;
+    if (current.isPlaying) {
+      if (replayTimer) {
+        window.clearInterval(replayTimer);
+        replayTimer = null;
+      }
+      set((state) => ({ replay: { ...state.replay, isPlaying: false, status: 'paused' } }));
+      return;
+    }
+
+    set((state) => ({ replay: { ...state.replay, isPlaying: true, status: 'playing' } }));
+    replayTimer = window.setInterval(() => {
+      const replay = get().replay;
+      if (!replay.isPlaying) return;
+      if (replay.cursor >= replay.steps.length - 1) {
+        if (replayTimer) {
+          window.clearInterval(replayTimer);
+          replayTimer = null;
+        }
+        set((state) => ({ replay: { ...state.replay, isPlaying: false, status: 'complete' } }));
+        return;
+      }
+      get().replayNext();
+    }, Math.max(120, current.speedMs));
+  },
+
+  replayStop: () => {
+    if (replayTimer) {
+      window.clearInterval(replayTimer);
+      replayTimer = null;
+    }
+    set((state) => ({
+      replay: {
+        ...state.replay,
+        isPlaying: false,
+        status: state.replay.steps.length > 0 ? 'paused' : 'idle',
+      },
+    }));
+  },
+
+  // ─── HANDS — Operator Synthesis Engine ──────────────────
+  operatorProfile: {
+    observations: [],
+    rhythm: {
+      avgTypingDelayMs: 0,
+      avgSessionLengthMin: 0,
+      peakHours: [],
+      preferredApps: [],
+      correctionRate: 0,
+      lastUpdated: 0,
+    },
+    preferences: {},
+    totalObservations: 0,
+    totalSessions: 0,
+    synthesisNotes: [],
+    lastSynthesisAt: null,
+  },
+  synthesisSession: {
+    active: false,
+    startedAt: null,
+    observationCount: 0,
+    intervalId: null,
+    intervalMs: 15000,
+    lastSnapshotAt: null,
+    paused: false,
+    error: null,
+  },
+
+  synthesisStart: (intervalMs = 15000) => {
+    const existing = get().synthesisSession;
+    if (existing.active && existing.intervalId) return;
+
+    const safeInterval = Math.max(8000, intervalMs);
+    const id = window.setInterval(() => {
+      const session = get().synthesisSession;
+      if (!session.active || session.paused) return;
+      void get().synthesisRunSnapshot();
+    }, safeInterval);
+
+    set((s) => ({
+      synthesisSession: {
+        ...s.synthesisSession,
+        active: true,
+        startedAt: Date.now(),
+        intervalId: id,
+        intervalMs: safeInterval,
+        paused: false,
+        error: null,
+      },
+      operatorProfile: {
+        ...s.operatorProfile,
+        totalSessions: s.operatorProfile.totalSessions + 1,
+      },
+    }));
+  },
+
+  synthesisStop: () => {
+    const session = get().synthesisSession;
+    if (session.intervalId) window.clearInterval(session.intervalId);
+    set((s) => ({
+      synthesisSession: {
+        ...s.synthesisSession,
+        active: false,
+        intervalId: null,
+        paused: false,
+      },
+    }));
+    void get().persistOperatorProfile();
+  },
+
+  synthesisPause: () => {
+    set((s) => ({
+      synthesisSession: { ...s.synthesisSession, paused: true },
+    }));
+  },
+
+  synthesisResume: () => {
+    set((s) => ({
+      synthesisSession: { ...s.synthesisSession, paused: false },
+    }));
+  },
+
+  synthesisAddObservation: (obs) => {
+    const entry: OperatorObservation = {
+      ...obs,
+      id: `obs_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      timestamp: Date.now(),
+    };
+    set((s) => ({
+      operatorProfile: {
+        ...s.operatorProfile,
+        observations: [...s.operatorProfile.observations.slice(-200), entry],
+        totalObservations: s.operatorProfile.totalObservations + 1,
+      },
+      synthesisSession: {
+        ...s.synthesisSession,
+        observationCount: s.synthesisSession.observationCount + 1,
+        lastSnapshotAt: Date.now(),
+      },
+    }));
+  },
+
+  synthesisAddPreference: (key, value) => {
+    set((s) => ({
+      operatorProfile: {
+        ...s.operatorProfile,
+        preferences: { ...s.operatorProfile.preferences, [key]: value },
+      },
+    }));
+    void get().persistOperatorProfile();
+  },
+
+  synthesisRunSnapshot: async () => {
+    const session = get().synthesisSession;
+    if (!session.active || session.paused) return;
+    if (!window.api?.agent?.getForegroundWindow || !window.api?.agent?.getMousePosition) return;
+
+    try {
+      const [fgRaw, mouseRaw] = await Promise.all([
+        window.api.agent.getForegroundWindow(),
+        window.api.agent.getMousePosition(),
+      ]);
+      const fg = (fgRaw && typeof fgRaw === 'object' ? fgRaw : {}) as Record<string, unknown>;
+      const mouse = (mouseRaw && typeof mouseRaw === 'object' ? mouseRaw : {}) as Record<string, unknown>;
+
+      const foregroundApp = String(fg.output || 'unknown').slice(0, 120);
+      const mousePos = String(mouse.output || 'unknown');
+      const hour = new Date().getHours();
+
+      const prevObs = get().operatorProfile.observations;
+      const lastApp = prevObs.length > 0 ? prevObs[prevObs.length - 1].foregroundApp : null;
+      const isAppSwitch = lastApp !== null && lastApp !== foregroundApp;
+
+      get().synthesisAddObservation({
+        type: isAppSwitch ? 'app_switch' : 'screen_snapshot',
+        summary: isAppSwitch
+          ? `Switched from "${lastApp}" to "${foregroundApp}"`
+          : `Active: "${foregroundApp}" | Mouse: ${mousePos}`,
+        foregroundApp,
+        details: `mouse=${mousePos} hour=${hour}`,
+      });
+
+      // Update peak hours + preferred apps in rhythm
+      set((s) => {
+        const rhythm = { ...s.operatorProfile.rhythm };
+        if (!rhythm.peakHours.includes(hour)) {
+          rhythm.peakHours = [...rhythm.peakHours.slice(-12), hour];
+        }
+        const apps = rhythm.preferredApps;
+        if (!apps.includes(foregroundApp) && foregroundApp !== 'unknown') {
+          rhythm.preferredApps = [...apps.slice(-20), foregroundApp];
+        }
+        rhythm.lastUpdated = Date.now();
+        return {
+          operatorProfile: { ...s.operatorProfile, rhythm },
+        };
+      });
+
+      // Store to procedural memory every 10 observations
+      const obsCount = get().synthesisSession.observationCount;
+      if (obsCount > 0 && obsCount % 10 === 0) {
+        const recent = get().operatorProfile.observations.slice(-10);
+        const appSummary = [...new Set(recent.map((o) => o.foregroundApp).filter(Boolean))].join(', ');
+        const switches = recent.filter((o) => o.type === 'app_switch').length;
+        const note = `Operator synthesis (${obsCount} obs): apps=[${appSummary}], ${switches} app switches in last 10 samples, hour=${hour}.`;
+        if (window.api?.memory?.storeVector) {
+          void window.api.memory.storeVector({
+            content: note,
+            type: 'procedural',
+            source: 'operator-synthesis',
+            importance: 0.45,
+            tags: ['operator', 'rhythm', 'synthesis'],
+          });
+        }
+        set((s) => ({
+          operatorProfile: {
+            ...s.operatorProfile,
+            synthesisNotes: [...s.operatorProfile.synthesisNotes.slice(-50), note],
+          },
+        }));
+        if (obsCount % 20 === 0) void get().persistOperatorProfile();
+      }
+    } catch (e: unknown) {
+      set((s) => ({
+        synthesisSession: {
+          ...s.synthesisSession,
+          error: e instanceof Error ? e.message : 'Snapshot failed',
+        },
+      }));
+    }
+  },
+
+  synthesisDigest: async () => {
+    const profile = get().operatorProfile;
+    if (profile.observations.length < 5) return;
+
+    const recentObs = profile.observations.slice(-30);
+    const apps = [...new Set(recentObs.map((o) => o.foregroundApp).filter(Boolean))];
+    const switches = recentObs.filter((o) => o.type === 'app_switch').length;
+    const hours = [...new Set(recentObs.map((o) => new Date(o.timestamp).getHours()))].sort((a, b) => a - b);
+    const prefs = Object.entries(profile.preferences)
+      .map(([k, v]) => `${k}=${v}`)
+      .join(', ');
+
+    const digest = [
+      `Operator digest (${profile.totalObservations} total observations, ${profile.totalSessions} sessions):`,
+      `Active apps: ${apps.join(', ') || 'none recorded'}`,
+      `App switches (last 30): ${switches}`,
+      `Active hours: ${hours.join(', ') || 'none'}`,
+      `Preferences: ${prefs || 'none set'}`,
+      `Rhythm: avg typing ${profile.rhythm.avgTypingDelayMs}ms, correction rate ${(profile.rhythm.correctionRate * 100).toFixed(0)}%`,
+    ].join('\n');
+
+    if (window.api?.memory?.storeVector) {
+      void window.api.memory.storeVector({
+        content: digest,
+        type: 'procedural',
+        source: 'operator-synthesis',
+        importance: 0.65,
+        tags: ['operator', 'digest', 'profile'],
+      });
+    }
+
+    set((s) => ({
+      operatorProfile: {
+        ...s.operatorProfile,
+        synthesisNotes: [...s.operatorProfile.synthesisNotes.slice(-50), digest],
+        lastSynthesisAt: Date.now(),
+      },
+    }));
+    void get().persistOperatorProfile();
+  },
+
+  persistOperatorProfile: async () => {
+    try {
+      const profile = get().operatorProfile;
+      if (window.api?.operatorProfile?.save) await window.api.operatorProfile.save(profile);
+    } catch {
+      // non-fatal
+    }
+  },
+
+  loadOperatorProfile: async () => {
+    try {
+      if (!window.api?.operatorProfile?.get) return;
+      const profile = await window.api.operatorProfile.get();
+      if (profile && typeof profile === 'object') {
+        set((s) => ({
+          operatorProfile: {
+            observations: Array.isArray((profile as any).observations) ? (profile as any).observations : s.operatorProfile.observations,
+            rhythm: (profile as any).rhythm && typeof (profile as any).rhythm === 'object' ? (profile as any).rhythm : s.operatorProfile.rhythm,
+            preferences: (profile as any).preferences && typeof (profile as any).preferences === 'object' ? (profile as any).preferences : s.operatorProfile.preferences,
+            totalObservations: Number((profile as any).totalObservations) || s.operatorProfile.totalObservations,
+            totalSessions: Number((profile as any).totalSessions) || s.operatorProfile.totalSessions,
+            synthesisNotes: Array.isArray((profile as any).synthesisNotes) ? (profile as any).synthesisNotes : s.operatorProfile.synthesisNotes,
+            lastSynthesisAt: (profile as any).lastSynthesisAt ?? s.operatorProfile.lastSynthesisAt,
+          },
+        }));
+      }
+    } catch {
+      // non-fatal
+    }
   },
 
   // ─── FORGE — Self-Improvement (Real LLM Evaluation) ────
@@ -1148,6 +2012,24 @@ export const useStore = create<AGIStore>((set, get) => ({
       ? capabilitiesOverride
       : get().gauntlet.baselineCapabilities;
     const hasLLM = !!window.api?.llm?.generate;
+    let gauntletLedgerRunId: string | null = null;
+
+    try {
+      const ledgerCreate = await window.api.agent.ledgerCreateRun('gauntlet', {
+        runId,
+        capabilityCount: capabilities.length,
+        mode: hasLLM ? 'REAL LLM JUDGE' : 'KEYWORD FALLBACK',
+      });
+      if (ledgerCreate.success && ledgerCreate.runId) {
+        gauntletLedgerRunId = ledgerCreate.runId;
+        await window.api.agent.ledgerAppend(gauntletLedgerRunId, 'run_started', {
+          runId,
+          capabilityCount: capabilities.length,
+        });
+      }
+    } catch {
+      gauntletLedgerRunId = null;
+    }
 
     set((state) => ({
       gauntlet: {
@@ -1160,6 +2042,10 @@ export const useStore = create<AGIStore>((set, get) => ({
         results: [],
         overallScore: 0,
         passRate: 0,
+        provenanceRollups: {
+          synthetic: { overallScore: 0, passRate: 0, count: 0 },
+          'real-workflow': { overallScore: 0, passRate: 0, count: 0 },
+        },
         logs: [
           `GAUNTLET run started (${runId}).`,
           `Mode: ${hasLLM ? 'REAL LLM JUDGE' : 'KEYWORD FALLBACK'}`,
@@ -1180,6 +2066,15 @@ export const useStore = create<AGIStore>((set, get) => ({
         shouldStop: () => get().gauntlet.activeRunId !== runId,
         onProgress: (snapshot) => {
           if (get().gauntlet.activeRunId !== runId) return;
+          if (gauntletLedgerRunId) {
+            void window.api.agent.ledgerAppend(gauntletLedgerRunId, 'progress', {
+              phase: snapshot.phase,
+              currentIndex: snapshot.currentIndex,
+              totalCapabilities: snapshot.totalCapabilities,
+              overallScore: snapshot.overallScore,
+              passRate: snapshot.passRate,
+            });
+          }
           set((state) => ({
             gauntlet: {
               ...state.gauntlet,
@@ -1190,6 +2085,7 @@ export const useStore = create<AGIStore>((set, get) => ({
               results: snapshot.results,
               overallScore: snapshot.overallScore,
               passRate: snapshot.passRate,
+              provenanceRollups: snapshot.provenanceRollups || state.gauntlet.provenanceRollups,
               logs: snapshot.logs,
               stopReason: snapshot.stopReason,
             },
@@ -1218,6 +2114,7 @@ export const useStore = create<AGIStore>((set, get) => ({
           results: finalSnapshot.results,
           overallScore: finalSnapshot.overallScore,
           passRate: finalSnapshot.passRate,
+          provenanceRollups: finalSnapshot.provenanceRollups || state.gauntlet.provenanceRollups,
           logs: finalSnapshot.logs,
           stopReason: finalSnapshot.stopReason,
           history: [
@@ -1227,7 +2124,32 @@ export const useStore = create<AGIStore>((set, get) => ({
         },
         moduleStates: { ...state.moduleStates, gauntlet: 'online' },
       }));
+
+      if (gauntletLedgerRunId) {
+        void window.api.agent.ledgerAppend(gauntletLedgerRunId, 'run_completed', {
+          phase: finalSnapshot.phase,
+          overallScore: finalSnapshot.overallScore,
+          passRate: finalSnapshot.passRate,
+          stopReason: finalSnapshot.stopReason,
+          provenanceRollups: finalSnapshot.provenanceRollups || null,
+        });
+        void window.api.agent.ledgerFinalize(gauntletLedgerRunId, {
+          phase: finalSnapshot.phase,
+          overallScore: finalSnapshot.overallScore,
+          passRate: finalSnapshot.passRate,
+          stopReason: finalSnapshot.stopReason,
+        });
+      }
     } catch (e: any) {
+      if (gauntletLedgerRunId) {
+        void window.api.agent.ledgerAppend(gauntletLedgerRunId, 'run_failed', {
+          message: e?.message || 'Unknown gauntlet error',
+        });
+        void window.api.agent.ledgerFinalize(gauntletLedgerRunId, {
+          phase: 'failed',
+          message: e?.message || 'Unknown gauntlet error',
+        });
+      }
       set((state) => ({
         gauntlet: {
           ...state.gauntlet,
@@ -1567,6 +2489,12 @@ export const useStore = create<AGIStore>((set, get) => ({
     promotedSemantic: 0,
     promotedProcedural: 0,
     contradictionsDetected: 0,
+    duplicatesSuppressed: 0,
+    lowSignalDropped: 0,
+    avgQualityScore: 0,
+    precisionProxy: 0,
+    recallProxy: 0,
+    heuristicsBoosted: 0,
     logs: ['Memory consolidation pipeline ready.'],
   },
   sparkLiveLog: [],
@@ -1622,6 +2550,7 @@ export const useStore = create<AGIStore>((set, get) => ({
       // DEEP CYCLE: every ~10 min (if LLM available)
       const deepInterval = 600000; // 10 min
       if (!sleepMode && hasLLM && now - thermo.lastDeepCycle > deepInterval && thermo.cyclesLight >= 3) {
+        const prevSpark = state.spark;
         set({ sparkBusy: true });
         try {
           const nextState = await runDeepThought(
@@ -1635,6 +2564,7 @@ export const useStore = create<AGIStore>((set, get) => ({
           nextState.thermo.cyclesDeep++;
           nextState.thermo.temperature = Math.min(1, nextState.thermo.temperature + 0.1);
           set({ spark: nextState });
+          enqueueSparkLearningEpisodes(set, get, prevSpark, nextState, 'autonomy:deep');
           window.api?.spark?.saveState?.(nextState).catch(() => {});
         } catch {
           // non-fatal
@@ -1646,6 +2576,7 @@ export const useStore = create<AGIStore>((set, get) => ({
       // MEDIUM CYCLE: every ~3 min (if LLM available)
       const mediumInterval = 180000; // 3 min
       if (!sleepMode && hasLLM && now - thermo.lastMediumCycle > mediumInterval && thermo.cyclesLight >= 1) {
+        const prevSpark = state.spark;
         set({ sparkBusy: true });
         try {
           const nextState = await runMediumCycle(
@@ -1656,6 +2587,7 @@ export const useStore = create<AGIStore>((set, get) => ({
             },
           );
           set({ spark: nextState });
+          enqueueSparkLearningEpisodes(set, get, prevSpark, nextState, 'autonomy:medium');
           window.api?.spark?.saveState?.(nextState).catch(() => {});
 
           // ─── AUTONOMOUS SPEECH: speak a thought after medium cycles ─────
@@ -1683,8 +2615,10 @@ export const useStore = create<AGIStore>((set, get) => ({
       // LIGHT CYCLE: every ~30s (no LLM, always available)
       const lightInterval = 30000;
       if (now - thermo.lastLightCycle > lightInterval) {
+        const prevSpark = state.spark;
         const nextState = runLightCycle(get().spark);
         set({ spark: nextState });
+        enqueueSparkLearningEpisodes(set, get, prevSpark, nextState, 'autonomy:light');
         // Persist occasionally (every 5 light cycles)
         if (nextState.thermo.cyclesLight % 5 === 0) {
           window.api?.spark?.saveState?.(nextState).catch(() => {});
@@ -1781,6 +2715,7 @@ export const useStore = create<AGIStore>((set, get) => ({
         spark: nextState,
         moduleStates: { ...get().moduleStates, spark: 'online' },
       });
+      enqueueSparkLearningEpisodes(set, get, current, nextState, 'manual:cycle');
 
       // Persist SPARK state
       window.api?.spark?.saveState?.(nextState).catch(() => {});
@@ -1860,6 +2795,7 @@ export const useStore = create<AGIStore>((set, get) => ({
         spark: nextState,
         moduleStates: { ...get().moduleStates, spark: 'online' },
       });
+      enqueueSparkLearningEpisodes(set, get, current, nextState, 'manual:deep');
 
       window.api?.spark?.saveState?.(nextState).catch(() => {});
     } catch (e: any) {
@@ -2090,24 +3026,72 @@ export const useStore = create<AGIStore>((set, get) => ({
 
     const batch = current.pendingEpisodes.slice(0, 12);
     const result = consolidateEpisodes(batch);
+    let vectorDuplicatesSuppressed = 0;
+
+    const shouldSuppressAsDuplicate = async (content: string, type: 'semantic' | 'procedural') => {
+      try {
+        const matches = await window.api?.memory?.searchVector?.(content, 3, type);
+        const bestSimilarity = Array.isArray(matches) && matches.length > 0
+          ? Math.max(...matches.map((m) => Number(m.similarity || 0)))
+          : 0;
+        return bestSimilarity >= 0.92;
+      } catch {
+        return false;
+      }
+    };
 
     // Persist promoted memories into semantic/procedural vector store.
     for (const content of result.semantic) {
+      if (await shouldSuppressAsDuplicate(content, 'semantic')) {
+        vectorDuplicatesSuppressed += 1;
+        continue;
+      }
+      const quality = result.qualityByContent[content] ?? result.avgQualityScore ?? 0.6;
       window.api?.memory?.storeVector?.({
         content,
         type: 'semantic',
         source: 'consolidation',
-        importance: 0.72,
-        tags: ['consolidated', 'semantic'],
+        importance: Math.max(0.45, Math.min(0.92, 0.45 + quality * 0.4)),
+        tags: ['consolidated', 'semantic', `quality:${quality.toFixed(2)}`],
       }).catch(() => {});
     }
     for (const content of result.procedural) {
+      if (await shouldSuppressAsDuplicate(content, 'procedural')) {
+        vectorDuplicatesSuppressed += 1;
+        continue;
+      }
+      const quality = result.qualityByContent[content] ?? result.avgQualityScore ?? 0.62;
       window.api?.memory?.storeVector?.({
         content,
         type: 'procedural',
         source: 'consolidation',
-        importance: 0.78,
-        tags: ['consolidated', 'procedural'],
+        importance: Math.max(0.5, Math.min(0.95, 0.5 + quality * 0.42)),
+        tags: ['consolidated', 'procedural', `quality:${quality.toFixed(2)}`],
+      }).catch(() => {});
+    }
+    const transferHeuristics = deriveTransferHeuristicsFromProceduralMemories(result.procedural);
+    let heuristicsBoosted = 0;
+    for (const heuristic of transferHeuristics) {
+      if (await shouldSuppressAsDuplicate(`Transfer heuristic: ${heuristic.statement}`, 'semantic')) {
+        vectorDuplicatesSuppressed += 1;
+        continue;
+      }
+      const boostedImportance = heuristic.proven
+        ? Math.max(0.78, Math.min(0.97, heuristic.confidence + heuristic.evidenceScore * 0.25))
+        : Math.max(0.6, heuristic.confidence);
+      if (heuristic.proven) heuristicsBoosted += 1;
+      window.api?.memory?.storeVector?.({
+        content: `Transfer heuristic: ${heuristic.statement}`,
+        type: 'semantic',
+        source: 'transfer-learning',
+        importance: boostedImportance,
+        tags: [
+          'consolidated',
+          'transfer',
+          `support:${heuristic.sourceCount}`,
+          `evidence:${heuristic.evidenceScore.toFixed(2)}`,
+          heuristic.proven ? 'proven' : 'candidate',
+        ],
       }).catch(() => {});
     }
 
@@ -2121,9 +3105,17 @@ export const useStore = create<AGIStore>((set, get) => ({
         promotedProcedural: state.memoryConsolidation.promotedProcedural + result.procedural.length,
         contradictionsDetected:
           state.memoryConsolidation.contradictionsDetected + result.contradictions.length,
+        duplicatesSuppressed:
+          state.memoryConsolidation.duplicatesSuppressed + result.duplicatesSuppressed + vectorDuplicatesSuppressed,
+        lowSignalDropped:
+          state.memoryConsolidation.lowSignalDropped + result.lowSignalDropped,
+        avgQualityScore: result.avgQualityScore,
+        precisionProxy: result.precisionProxy,
+        recallProxy: result.recallProxy,
+        heuristicsBoosted: state.memoryConsolidation.heuristicsBoosted + heuristicsBoosted,
         logs: [
           ...state.memoryConsolidation.logs,
-          `Consolidated ${batch.length} episode(s) -> ${result.semantic.length} semantic, ${result.procedural.length} procedural, ${result.contradictions.length} contradiction(s).`,
+          `Consolidated ${batch.length} episode(s) -> kept ${result.keptCount}, ${result.semantic.length} semantic, ${result.procedural.length} procedural, ${transferHeuristics.length} transfer heuristic(s), ${result.contradictions.length} contradiction(s); duplicates suppressed ${result.duplicatesSuppressed + vectorDuplicatesSuppressed}, low-signal dropped ${result.lowSignalDropped}, precision~${(result.precisionProxy * 100).toFixed(0)}%, recall~${(result.recallProxy * 100).toFixed(0)}%.`,
         ].slice(-80),
       },
       spark: {
@@ -2139,6 +3131,10 @@ export const useStore = create<AGIStore>((set, get) => ({
           rewardSignal: result.contradictions.length === 0 ? 0.82 : 0.6,
         }),
       },
+      sparkLiveLog: [
+        ...state.sparkLiveLog.slice(-49),
+        `[MemoryQC] precision~${(result.precisionProxy * 100).toFixed(0)}% recall~${(result.recallProxy * 100).toFixed(0)}% quality ${(result.avgQualityScore * 100).toFixed(0)}%`,
+      ],
     }));
   },
 
@@ -2384,6 +3380,12 @@ export const useStore = create<AGIStore>((set, get) => ({
     await get().checkOllama();
     await get().loadSystemInfo();
 
+    // Load persisted Operator Synthesis profile (set-and-forget)
+    await get().loadOperatorProfile();
+    if (get().settings?.resumeSynthesisOnStartup) {
+      setTimeout(() => get().synthesisStart(15000), 1500);
+    }
+
     // Load persisted SPARK state
     try {
       const savedSpark = await window.api?.spark?.getState?.();
@@ -2392,6 +3394,10 @@ export const useStore = create<AGIStore>((set, get) => ({
         const merged = {
           ...defaults,
           ...savedSpark,
+          worldModel: {
+            ...defaults.worldModel,
+            ...((savedSpark as any).worldModel || {}),
+          },
           goals: {
             ...defaults.goals,
             ...(savedSpark as any).goals,

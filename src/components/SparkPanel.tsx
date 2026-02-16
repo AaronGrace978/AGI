@@ -9,6 +9,20 @@
 import { useState, useRef, useEffect } from 'react';
 import { useStore } from '../store';
 
+function formatPrediction(
+  prediction: string | number | boolean | Record<string, unknown> | Array<unknown>,
+): string {
+  if (typeof prediction === 'string') return prediction;
+  if (typeof prediction === 'number' || typeof prediction === 'boolean') {
+    return String(prediction);
+  }
+  try {
+    return JSON.stringify(prediction);
+  } catch {
+    return '[unserializable prediction]';
+  }
+}
+
 // ─── Sub-components ────────────────────────────────────────────
 
 function WorldModelSection() {
@@ -357,7 +371,7 @@ function TemporalSection() {
             {activePredictions.slice(-4).map((p) => (
               <div key={p.id} className="spark-prediction">
                 <span className="spark-prediction-arrow">→</span>
-                <span className="spark-prediction-text">{p.prediction}</span>
+                <span className="spark-prediction-text">{formatPrediction(p.prediction)}</span>
                 <span className="spark-prediction-conf">
                   {(p.confidence * 100).toFixed(0)}%
                 </span>
@@ -480,7 +494,7 @@ function GenomeSection() {
                 | 'disorganized',
             )
           }
-          style={{ fontSize: 10, background: 'var(--bg-panel)', color: 'var(--text-primary)' }}
+          style={{ fontSize: 13, background: 'var(--bg-panel)', color: 'var(--text-primary)' }}
         >
           <option value="secure">secure</option>
           <option value="anxious">anxious</option>

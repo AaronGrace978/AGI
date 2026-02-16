@@ -15,6 +15,7 @@ interface SidebarItem {
 
 const MODULES: SidebarItem[] = [
   { id: 'nexus', icon: '⬡', label: 'NEXUS — Chat' },
+  { id: 'memory', icon: '◍', label: 'MEMORY — Chronicle', className: 'memory-btn' },
   { id: 'heart', icon: '♥', label: 'HEART — Soul', className: 'heart-btn' },
   { id: 'mind', icon: '◈', label: 'MIND — Arena', className: 'mind-btn' },
   { id: 'hands', icon: '✧', label: 'HANDS — Agent', className: 'hands-btn' },
