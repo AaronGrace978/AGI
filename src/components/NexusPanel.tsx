@@ -6,6 +6,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useStore } from '../store';
+import { usePinnedAutoScroll } from '../hooks/usePinnedAutoScroll';
 
 function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -67,13 +68,15 @@ export default function NexusPanel() {
   const setDualBrainEnabled = useStore((s) => s.setDualBrainEnabled);
 
   const [input, setInput] = useState('');
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesAreaRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Auto-scroll
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, streamingContent]);
+  // Auto-scroll only while "pinned" to the bottom (prevents fighting manual scroll).
+  usePinnedAutoScroll(
+    messagesAreaRef,
+    [messages.length, streamingContent],
+    { behavior: 'auto', bottomThresholdPx: 64 },
+  );
 
   // Auto-resize textarea
   useEffect(() => {
@@ -151,7 +154,7 @@ export default function NexusPanel() {
       {!hasMessages ? (
         <WelcomeScreen />
       ) : (
-        <div className="messages-area">
+        <div className="messages-area" ref={messagesAreaRef}>
           {messages.map((msg) => (
             <div key={msg.id} className={`message ${msg.role}`}>
               <div className="message-avatar">
@@ -183,8 +186,6 @@ export default function NexusPanel() {
               AGI PRIME is thinking...
             </div>
           )}
-
-          <div ref={messagesEndRef} />
         </div>
       )}
 

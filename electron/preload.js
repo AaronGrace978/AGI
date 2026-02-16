@@ -173,6 +173,7 @@ contextBridge.exposeInMainWorld('api', {
     planAndExecute: (request) => ipcRenderer.send('agent:planAndExecute', request),
 
     // Cognitive loop (ReAct)
+    // goal can be a string or an object: { goal, contextAddendum?, origin? }
     startCognitive: (goal) => ipcRenderer.send('agent:startCognitive', goal),
     killCognitive: () => ipcRenderer.send('agent:killCognitive'),
     onCognitiveStep: (cb) => {

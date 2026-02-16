@@ -179,6 +179,25 @@ export interface AgentCapability {
   available: boolean;
 }
 
+// ─── HANDS Cognitive Start Payload ──────────────────────────────
+
+export type CognitiveStartRequest =
+  | string
+  | {
+    goal: string;
+    contextAddendum?: string; // optional extra context injected by Executive/Champion
+    origin?: string; // e.g. 'nexus', 'spark', 'operator'
+    goalId?: string; // optional SparkGoal id (for autonomous goal execution)
+  };
+
+export type ArenaStartRequest =
+  | string
+  | {
+    prompt: string;
+    contextAddendum?: string;
+    origin?: string;
+  };
+
 // ─── FORGE: Self-Improvement Pipeline ──────────────────────────
 
 export type ForgeEvalType = 'llm-judge' | 'keyword' | 'exact';
@@ -998,7 +1017,7 @@ declare global {
         removeAllListeners: () => void;
       };
       arena: {
-        start: (prompt: string, config?: Record<string, unknown>) => void;
+        start: (prompt: ArenaStartRequest, config?: Record<string, unknown>) => void;
         onAgentStart: (cb: (data: { agentId: string; name: string }) => void) => () => void;
         onAgentChunk: (cb: (data: { agentId: string; content: string; fullText: string }) => void) => () => void;
         onAgentDone: (cb: (data: { agentId: string; response: string }) => void) => () => void;
@@ -1137,7 +1156,7 @@ declare global {
         getRuntimeControls: () => Promise<{ success: boolean; controls?: Record<string, unknown>; error?: string }>;
         // Task Planning & Execution
         planAndExecute: (request: string) => void;
-        startCognitive: (goal: string) => void;
+        startCognitive: (goal: CognitiveStartRequest) => void;
         killCognitive: () => void;
         onStatus: (cb: (data: unknown) => void) => () => void;
         onPlan: (cb: (data: unknown) => void) => () => void;

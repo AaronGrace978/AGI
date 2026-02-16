@@ -5,10 +5,9 @@
 //  Mounted inside the SOVEREIGN panel.
 // ═══════════════════════════════════════════════════════════════
 
-import { useState, useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { useStore } from '../store';
-import { runHardeningCheck, type HardeningReport, type CheckStatus, type HealthCheckItem } from '../prime/hardening';
-import { estimateDataFootprint } from '../prime/retention';
+import type { CheckStatus, HealthCheckItem } from '../prime/hardening';
 
 const STATUS_ICONS: Record<CheckStatus, string> = {
   pass: '●',
@@ -25,67 +24,15 @@ const STATUS_COLORS: Record<CheckStatus, string> = {
 };
 
 export default function HardeningPanel() {
-  const [report, setReport] = useState<HardeningReport | null>(null);
-  const [lastTestResult, setLastTestResult] = useState<{ ran: boolean; pass: boolean; count: number }>({
-    ran: false, pass: false, count: 0,
-  });
-
-  const emergencyStopActive = useStore((s) => s.emergencyStopActive);
-  const sovereignPolicy = useStore((s) => s.sovereignPolicy);
-  const cognitive = useStore((s) => s.cognitive);
-  const runtimeControlSync = useStore((s) => s.runtimeControlSync);
-  const rollbackEntries = useStore((s) => s.rollbackEntries);
-  const conscience = useStore((s) => s.conscience);
-  const gauntlet = useStore((s) => s.gauntlet);
-  const forge = useStore((s) => s.forge);
-  const replay = useStore((s) => s.replay);
+  const report = useStore((s) => s.hardening.report);
+  const tests = useStore((s) => s.hardening.tests);
+  const hardeningRunCheck = useStore((s) => s.hardeningRunCheck);
+  const markTestsPassed = useStore((s) => s.hardeningMarkTestsPassed);
+  const markTestsFailed = useStore((s) => s.hardeningMarkTestsFailed);
 
   const runCheck = useCallback(() => {
-    const dataFootprint = estimateDataFootprint({
-      ledgerRuns: replay.availableRuns.length,
-      rollbackEntries: rollbackEntries.length,
-      auditEntries: conscience.judgments.length,
-      ethicalMemory: conscience.ethicalMemory.length,
-      vectorMemories: 0, // We don't have renderer-side vector count
-      judgments: conscience.judgments.length,
-    });
-
-    const result = runHardeningCheck({
-      testsRan: lastTestResult.ran,
-      testsPass: lastTestResult.pass,
-      testCount: lastTestResult.count,
-      runtimeSyncHealthy: !runtimeControlSync.lastError,
-      runtimeSyncLastAt: runtimeControlSync.lastSyncedAt,
-      runtimeSyncError: runtimeControlSync.lastError,
-      emergencyStopActive,
-      conscienceEnabled: sovereignPolicy.conscienceEnabled,
-      killSwitchEnabled: sovereignPolicy.killSwitchEnabled,
-      requireConsentForRiskyActions: sovereignPolicy.requireConsentForRiskyActions,
-      ledgerRunCount: replay.availableRuns.length,
-      rollbackEntryCount: rollbackEntries.length,
-      auditEntryCount: conscience.judgments.length,
-      dataWarningLevel: dataFootprint.warningLevel,
-      cognitiveActive: cognitive.isActive,
-      cognitivePhase: cognitive.phase,
-      forgePhase: forge.phase,
-      gauntletPhase: gauntlet.phase,
-      gauntletPassRate: gauntlet.passRate,
-    });
-
-    setReport(result);
-  }, [
-    lastTestResult, runtimeControlSync, emergencyStopActive,
-    sovereignPolicy, cognitive, rollbackEntries, conscience,
-    gauntlet, forge, replay,
-  ]);
-
-  const markTestsPassed = useCallback(() => {
-    setLastTestResult({ ran: true, pass: true, count: 105 });
-  }, []);
-
-  const markTestsFailed = useCallback(() => {
-    setLastTestResult({ ran: true, pass: false, count: 105 });
-  }, []);
+    hardeningRunCheck();
+  }, [hardeningRunCheck]);
 
   return (
     <div className="hardening-panel">
@@ -98,10 +45,18 @@ export default function HardeningPanel() {
         <button className="hardening-btn primary" onClick={runCheck}>
           RUN HEALTH CHECK
         </button>
-        <button className="hardening-btn" onClick={markTestsPassed} title="Mark tests as passed (after running npm test externally)">
+        <button
+          className="hardening-btn"
+          onClick={() => markTestsPassed(tests.count || 105)}
+          title="Mark tests as passed (after running npm test externally)"
+        >
           TESTS PASSED
         </button>
-        <button className="hardening-btn danger" onClick={markTestsFailed} title="Mark tests as failed">
+        <button
+          className="hardening-btn danger"
+          onClick={() => markTestsFailed(tests.count || 105)}
+          title="Mark tests as failed"
+        >
           TESTS FAILED
         </button>
       </div>

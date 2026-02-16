@@ -7,6 +7,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useStore } from '../store';
+import { usePinnedAutoScroll } from '../hooks/usePinnedAutoScroll';
 import {
   getAvailableVoices,
   selectVoice,
@@ -223,12 +224,12 @@ export default function VoiceBox() {
     };
   }, [selectedVoiceName]);
 
-  // Auto-scroll transcript
-  useEffect(() => {
-    if (transcriptRef.current) {
-      transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
-    }
-  }, [voiceState.transcript]);
+  // Auto-scroll transcript only while pinned to bottom.
+  usePinnedAutoScroll(
+    transcriptRef,
+    [voiceState.transcript.length],
+    { behavior: 'auto', bottomThresholdPx: 64 },
+  );
 
   const handleVoiceChange = useCallback((name: string) => {
     setSelectedVoiceName(name);

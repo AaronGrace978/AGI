@@ -26,6 +26,77 @@ const crypto = require('crypto');
 
 const isDev = !app.isPackaged;
 
+// ─── Stable userData (prevents "memory reset" between dev/prod) ──
+// Electron's default userData path depends on the app name (and can differ between
+// `electron .` dev runs and packaged builds). That makes persisted memory/settings
+// look "wiped" even though they're just in a different folder.
+//
+// We pin userData to a stable directory under appData, unless explicitly disabled.
+const defaultUserDataPath = (() => {
+  try { return app.getPath('userData'); } catch { return ''; }
+})();
+try {
+  const stableRoot =
+    process.env.AGI_PRIME_USER_DATA_DIR
+    || path.join(app.getPath('appData'), 'AGI PRIME');
+  const disableStable = process.env.AGI_PRIME_STABLE_USERDATA === '0';
+  if (!disableStable) {
+    app.setPath('userData', stableRoot);
+  }
+} catch (e) {
+  console.warn('[Config] Failed to set stable userData:', e?.message || e);
+}
+
+// ─── Cache Path Hardening (Windows) ─────────────────────────────
+// Some Windows setups (Controlled Folder Access, AV, stale permissions, multi-instance)
+// can cause Chromium's disk/GPU cache creation to fail with "Access is denied".
+// For stability, force the cache directory into our app's userData (writable) area.
+try {
+  const forcedCacheDir = path.join(app.getPath('userData'), 'chromium-cache');
+  if (!fs.existsSync(forcedCacheDir)) fs.mkdirSync(forcedCacheDir, { recursive: true });
+  app.setPath('cache', forcedCacheDir);
+  // Also hint Chromium directly (must be set before ready).
+  app.commandLine.appendSwitch('disk-cache-dir', forcedCacheDir);
+} catch (e) {
+  console.warn('[Cache] Failed to set cache dir:', e?.message || e);
+}
+
+// ─── Safe Mode (GPU/Compositor fallback) ─────────────────────────
+// If the renderer goes black (often a GPU/driver/compositor issue),
+// launching with safe mode can recover UI rendering.
+//
+// Usage:
+// - Env var: AGI_PRIME_DISABLE_GPU=1
+// - CLI flag: --safe-mode
+const SAFE_MODE = process.argv.includes('--safe-mode') || process.env.AGI_PRIME_DISABLE_GPU === '1';
+if (SAFE_MODE) {
+  try {
+    console.warn('[SafeMode] Disabling hardware acceleration');
+    app.disableHardwareAcceleration();
+    app.commandLine.appendSwitch('disable-gpu');
+    app.commandLine.appendSwitch('disable-gpu-compositing');
+    app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
+  } catch (e) {
+    console.warn('[SafeMode] Failed to apply GPU disables:', e?.message || e);
+  }
+}
+
+// ─── Crash/Exception Diagnostics ─────────────────────────────────
+// "Keeps crashing" is usually a renderer crash or an unhandled promise.
+// These hooks make the cause visible in the terminal logs.
+process.on('uncaughtException', (err) => {
+  console.error('[Main] uncaughtException:', err?.stack || err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[Main] unhandledRejection:', reason);
+});
+app.on('child-process-gone', (_event, details) => {
+  console.error('[Electron] child-process-gone:', details);
+});
+app.on('render-process-gone', (_event, _webContents, details) => {
+  console.error('[Electron] render-process-gone:', details);
+});
+
 let mainWindow = null;
 const pendingConsentRequests = new Map();
 let rollbackRegistry = null;
@@ -53,6 +124,63 @@ if (!fs.existsSync(rollbackBackupDir)) {
 if (!fs.existsSync(ledgerDir)) {
   fs.mkdirSync(ledgerDir, { recursive: true });
 }
+
+function safeCopyIfMissing(fromPath, toPath) {
+  try {
+    if (!fs.existsSync(fromPath)) return false;
+    if (fs.existsSync(toPath)) return false;
+    fs.copyFileSync(fromPath, toPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function migrateLegacyDataIfNeeded() {
+  try {
+    // Only attempt migration when the new install has no memory yet.
+    const targetHasAny =
+      fs.existsSync(memoryFile)
+      || fs.existsSync(vectorFile)
+      || fs.existsSync(settingsFile)
+      || fs.existsSync(sparkFile);
+    if (targetHasAny) return;
+
+    const appData = app.getPath('appData');
+    const candidates = [
+      defaultUserDataPath,
+      path.join(appData, 'Electron'),      // common for `electron .` dev runs
+      path.join(appData, 'agi-prime'),     // sometimes matches package "name"
+      path.join(appData, 'AGI PRIME'),     // sometimes matches productName
+    ]
+      .filter(Boolean)
+      .map((p) => path.join(p, 'agi-prime-data'));
+
+    const unique = Array.from(new Set(candidates));
+    for (const legacyDir of unique) {
+      if (!legacyDir || legacyDir === dataDir) continue;
+      if (!fs.existsSync(legacyDir)) continue;
+
+      const copied = [];
+      if (safeCopyIfMissing(path.join(legacyDir, 'memory.json'), memoryFile)) copied.push('memory.json');
+      if (safeCopyIfMissing(path.join(legacyDir, 'vectors.json'), vectorFile)) copied.push('vectors.json');
+      if (safeCopyIfMissing(path.join(legacyDir, 'settings.json'), settingsFile)) copied.push('settings.json');
+      if (safeCopyIfMissing(path.join(legacyDir, 'spark.json'), sparkFile)) copied.push('spark.json');
+      if (safeCopyIfMissing(path.join(legacyDir, 'tool-registry.json'), toolRegistryFile)) copied.push('tool-registry.json');
+      if (safeCopyIfMissing(path.join(legacyDir, 'goals.json'), goalsFile)) copied.push('goals.json');
+
+      if (copied.length > 0) {
+        console.log(`[Data] Migrated from "${legacyDir}" -> "${dataDir}" (${copied.join(', ')})`);
+        break;
+      }
+    }
+  } catch (e) {
+    console.warn('[Data] Migration failed:', e?.message || e);
+  }
+}
+
+// Run migration before loading persisted state.
+migrateLegacyDataIfNeeded();
 
 function loadJSON(filePath, defaults) {
   try {
@@ -324,6 +452,17 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: false,
     },
+  });
+
+  // Renderer crash visibility (common when a React component throws).
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    console.error('[Window] render-process-gone:', details);
+  });
+  mainWindow.webContents.on('unresponsive', () => {
+    console.warn('[Window] renderer unresponsive');
+  });
+  mainWindow.webContents.on('did-fail-load', (_event, code, desc, url) => {
+    console.error('[Window] did-fail-load:', { code, desc, url });
   });
 
   mainWindow.once('ready-to-show', () => {
@@ -1258,6 +1397,10 @@ function extractArenaBlueprint(text) {
 
 ipcMain.on('arena:start', async (event, prompt, config) => {
   try {
+    const promptText = typeof prompt === 'string'
+      ? String(prompt || '')
+      : (prompt && typeof prompt === 'object' ? String(prompt.prompt || '') : '');
+    const contextAddendum = prompt && typeof prompt === 'object' ? String(prompt.contextAddendum || '') : '';
     const model = config?.model || settings.model;
     const provider = config?.provider || settings.provider;
     const agentResponses = [];
@@ -1267,8 +1410,8 @@ ipcMain.on('arena:start', async (event, prompt, config) => {
       mainWindow?.webContents.send('arena:agentStart', { agentId: agent.id, name: agent.name });
 
       const messages = [
-        { role: 'system', content: agent.role },
-        { role: 'user', content: buildArenaAgentTask(prompt, agent.id) },
+        { role: 'system', content: contextAddendum ? `${agent.role}\n\n${contextAddendum}` : agent.role },
+        { role: 'user', content: buildArenaAgentTask(promptText, agent.id) },
       ];
 
       let fullText = '';
@@ -1330,7 +1473,7 @@ ipcMain.on('arena:start', async (event, prompt, config) => {
     const synthAgent = ARENA_AGENTS[3];
     mainWindow?.webContents.send('arena:agentStart', { agentId: synthAgent.id, name: synthAgent.name });
 
-    const synthPrompt = `Original question: ${prompt}
+    const synthPrompt = `Original question: ${promptText}
 
 ${agentResponses.map((a) => `### ${a.name}:\n${a.response}`).join('\n\n')}
 
@@ -1362,7 +1505,7 @@ Rules:
 - Keep total response under 900 words.`;
 
     const synthMessages = [
-      { role: 'system', content: synthAgent.role },
+      { role: 'system', content: contextAddendum ? `${synthAgent.role}\n\n${contextAddendum}` : synthAgent.role },
       { role: 'user', content: synthPrompt },
     ];
 
@@ -1748,6 +1891,15 @@ ipcMain.handle('system:info', () => {
     nodeVersion: process.version,
     electronVersion: process.versions.electron,
     memory: process.memoryUsage(),
+    paths: {
+      userData: app.getPath('userData'),
+      dataDir,
+      memoryFile,
+      vectorFile,
+      settingsFile,
+      sparkFile,
+      legacyUserData: defaultUserDataPath || null,
+    },
     soul: memory.soul,
     consciousness: memory.consciousness,
   };
@@ -3280,31 +3432,77 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
   cognitiveKillFlag = false;
   const MAX_ITERATIONS = 25;
   let cognitiveLedgerRunId = null;
+  const goalText = typeof goal === 'string'
+    ? String(goal || '')
+    : (goal && typeof goal === 'object' ? String(goal.goal || '') : '');
+  const contextAddendum = goal && typeof goal === 'object' ? String(goal.contextAddendum || '') : '';
+  const origin = goal && typeof goal === 'object' ? String(goal.origin || '') : '';
   try {
     const created = createLedgerRun('cognitive', {
-      goal: String(goal || '').slice(0, 1000),
+      goal: goalText.slice(0, 1000),
+      origin: origin || 'unknown',
+      hasContextAddendum: !!contextAddendum,
       maxIterations: MAX_ITERATIONS,
       startedFrom: 'agent:startCognitive',
     });
     cognitiveLedgerRunId = created.runId;
     appendLedgerEntry(cognitiveLedgerRunId, 'run_started', {
-      goal: String(goal || '').slice(0, 400),
+      goal: goalText.slice(0, 400),
+      origin: origin || 'unknown',
     });
   } catch (_) {
     cognitiveLedgerRunId = null;
   }
 
+  const truncateStr = (value, max) => {
+    const s = typeof value === 'string' ? value : (value === null || value === undefined ? '' : String(value));
+    return s.length > max ? s.slice(0, max) + '…' : s;
+  };
+
+  const compactActionParams = (params) => {
+    if (!params || typeof params !== 'object') return params;
+    const p = { ...params };
+    // Commonly huge fields (file contents, long prompts, etc.)
+    if (typeof p.content === 'string') p.content = truncateStr(p.content, 1200);
+    if (typeof p.text === 'string') p.text = truncateStr(p.text, 1200);
+    if (typeof p.command === 'string') p.command = truncateStr(p.command, 800);
+    return p;
+  };
+
+  const compactActionResult = (result) => {
+    if (!result || typeof result !== 'object') return result;
+    const r = { ...result };
+    if (typeof r.output === 'string') r.output = truncateStr(r.output, 4000);
+    if (typeof r.error === 'string') r.error = truncateStr(r.error, 4000);
+    if (typeof r.stdout === 'string') r.stdout = truncateStr(r.stdout, 4000);
+    if (typeof r.stderr === 'string') r.stderr = truncateStr(r.stderr, 2000);
+    return r;
+  };
+
+  const compactStepForIPC = (step) => {
+    if (!step || typeof step !== 'object') return step;
+    const s = { ...step };
+    s.content = truncateStr(s.content, 2400);
+    if (s.actionParams) s.actionParams = compactActionParams(s.actionParams);
+    if (s.actionResult) s.actionResult = compactActionResult(s.actionResult);
+    return s;
+  };
+
   const sendStep = (step) => {
-    mainWindow?.webContents.send('agent:cognitiveStep', step);
+    const safeStep = compactStepForIPC(step);
+    mainWindow?.webContents.send('agent:cognitiveStep', safeStep);
     try {
       if (!cognitiveLedgerRunId) return;
+      // "Transient" steps are UI heartbeats (e.g. "still working...") and should not
+      // pollute the deterministic ledger/replay history.
+      if (safeStep && safeStep.transient) return;
       appendLedgerEntry(cognitiveLedgerRunId, 'cognitive_step', {
-        type: step.type,
-        timestamp: step.timestamp,
-        content: String(step.content || '').slice(0, 1200),
-        actionType: step.actionType || null,
-        goalProgress: step.goalProgress ?? null,
-        actionResult: step.actionResult || null,
+        type: safeStep.type,
+        timestamp: safeStep.timestamp,
+        content: String(safeStep.content || '').slice(0, 1200),
+        actionType: safeStep.actionType || null,
+        goalProgress: safeStep.goalProgress ?? null,
+        actionResult: safeStep.actionResult || null,
       });
     } catch (_) {}
   };
@@ -3364,7 +3562,7 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
 
   try {
     // Retrieve relevant procedural memories for strategy
-    const relevantMemories = await searchVectorMemories(goal, 5, 'procedural');
+    const relevantMemories = await searchVectorMemories(goalText, 5, 'procedural');
     const memoryContext = relevantMemories.length > 0
       ? '\n\nRELEVANT PAST EXPERIENCE:\n' + relevantMemories.map(m => `- ${m.memory.content}`).join('\n')
       : '';
@@ -3372,7 +3570,7 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
     // Phase: OBSERVE initial state
     sendStep({
       type: 'observe',
-      content: `Goal received: "${goal}". Gathering initial state...${memoryContext ? '\n' + memoryContext : ''}`,
+      content: `Goal received: "${goalText}". Gathering initial state...${memoryContext ? '\n' + memoryContext : ''}`,
       timestamp: Date.now(),
       goalProgress: 0,
     });
@@ -3387,9 +3585,12 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
 
       // Build context from working memory and recent steps
       const contextParts = [
-        `GOAL: ${goal}`,
+        `GOAL: ${goalText}`,
         `ITERATION: ${iteration}/${MAX_ITERATIONS}`,
       ];
+      if (contextAddendum) {
+        contextParts.push('', 'EXECUTIVE CONTEXT:', contextAddendum.slice(0, 2000));
+      }
       if (workingMemory.length > 0) {
         contextParts.push('', 'WORKING MEMORY:');
         for (const wm of workingMemory.slice(-8)) contextParts.push(`  - ${wm}`);
@@ -3457,7 +3658,7 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
 
         // Store experience
         await storeVectorMemory({
-          content: `Task "${goal.slice(0, 100)}" — ${success ? 'SUCCESS' : 'STOPPED'}. ${summary.slice(0, 200)}`,
+          content: `Task "${goalText.slice(0, 100)}" — ${success ? 'SUCCESS' : 'STOPPED'}. ${summary.slice(0, 200)}`,
           type: 'procedural',
           source: 'cognitive-loop',
           importance: success ? 0.6 : 0.8,
@@ -3827,6 +4028,60 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
             error: `REPEATED_FAILURE_GUARD: This exact action has already failed ${previousFailures} times. Choose a different approach.`,
           };
         } else {
+          // Emit a "started" step immediately so the UI shows activity even if the
+          // underlying action takes a while (network/screen/input-sim can be slow).
+          // IMPORTANT: don't push this into the `steps` array (used for LLM context),
+          // because it has no result yet and would look like a failure in summaries.
+          const startedStep = {
+            type: 'act',
+            content: `${label}${action}: ${JSON.stringify(stepParams || {}).slice(0, 180)} (running...)`,
+            timestamp: Date.now(),
+            actionType: action,
+            executionTier: gateState.tier,
+            policyAllowed: gateState.policyAllowed,
+            conscienceVerdict: gateState.conscienceVerdict,
+            blocked: false,
+            consentRequired: gateState.consentRequired,
+            consentRequestId: gateState.consentRequired ? consentRequestId : undefined,
+            actionParams: stepParams || {},
+            goalProgress: progress || 0,
+            pending: true,
+          };
+          sendStep(startedStep);
+
+          // Heartbeat while action is running (UI-only).
+          const policyGate = mapActionToPolicyGate(action);
+          const heartbeatEnabled =
+            policyGate === 'network'
+            || policyGate === 'screen'
+            || policyGate === 'input-sim'
+            || policyGate === 'exec'
+            || policyGate === 'tool-create';
+          let heartbeatInterval = null;
+          let heartbeatFirstBeat = null;
+          let heartbeatCount = 0;
+          const heartbeat = () => {
+            heartbeatCount += 1;
+            const elapsedSec = (Date.now() - actionStartedAt) / 1000;
+            sendStep({
+              type: 'observe',
+              content: `[Working] ${label}${action} running (${elapsedSec.toFixed(1)}s)`,
+              timestamp: Date.now(),
+              goalProgress: progress || 0,
+              transient: true,
+            });
+          };
+          if (heartbeatEnabled) {
+            // Delay initial heartbeat to avoid spam for fast actions.
+            heartbeatFirstBeat = setTimeout(() => {
+              if (heartbeatInterval !== null) heartbeat();
+            }, 1200);
+            heartbeatInterval = setInterval(() => {
+              if (heartbeatCount >= 12) return; // cap to ~24s
+              heartbeat();
+            }, 2000);
+          }
+
           let rollbackDraft = null;
           try {
             rollbackDraft = prepareRollbackForAction(action, stepParams || {});
@@ -3858,6 +4113,15 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
             }
           } catch (e) {
             actionResult = { success: false, error: e.message };
+          }
+          // Clear heartbeat timers if any.
+          if (heartbeatInterval !== null) {
+            try { clearInterval(heartbeatInterval); } catch (_) {}
+            heartbeatInterval = null;
+          }
+          if (heartbeatFirstBeat !== null) {
+            try { clearTimeout(heartbeatFirstBeat); } catch (_) {}
+            heartbeatFirstBeat = null;
           }
         }
 
@@ -3938,7 +4202,7 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
               {
                 role: 'user',
                 content: [
-                  `PARENT GOAL: ${goal}`,
+                  `PARENT GOAL: ${goalText}`,
                   `SUBGOAL: ${subGoalText}`,
                   `SUBLOOP DEPTH: ${context.depth + 1}`,
                   `SUB ITERATION: ${subIter}/${subBudget}`,
@@ -4230,7 +4494,7 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
         { role: 'system', content: 'You are reflecting on an action you just took. Be brief and analytical.' },
         {
           role: 'user',
-          content: `Goal: ${goal}\nAction: ${reflectAction}\nResult: ${reflectSuccess ? 'SUCCESS' : 'FAILURE'}\nOutput: ${(typeof reflectOutput === 'string' ? reflectOutput : JSON.stringify(reflectOutput)).slice(0, 400)}\n\nIn 1-2 sentences: What did you learn? Are you closer to the goal? What should you do next?`,
+          content: `Goal: ${goalText}\nAction: ${reflectAction}\nResult: ${reflectSuccess ? 'SUCCESS' : 'FAILURE'}\nOutput: ${(typeof reflectOutput === 'string' ? reflectOutput : JSON.stringify(reflectOutput)).slice(0, 400)}\n\nIn 1-2 sentences: What did you learn? Are you closer to the goal? What should you do next?`,
         },
       ];
 
@@ -4256,7 +4520,7 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
 
     // Max iterations reached
     await storeVectorMemory({
-      content: `Task "${goal.slice(0, 100)}" — INCOMPLETE after ${MAX_ITERATIONS} iterations.`,
+      content: `Task "${goalText.slice(0, 100)}" — INCOMPLETE after ${MAX_ITERATIONS} iterations.`,
       type: 'procedural',
       source: 'cognitive-loop',
       importance: 0.7,

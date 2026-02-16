@@ -24,6 +24,7 @@ import type {
   CognitiveStep,
   CognitivePhase,
   SparkState,
+  SparkGoal,
   VoiceState,
   VoiceTranscriptEntry,
   GauntletState,
@@ -42,6 +43,7 @@ import type {
   OperatorProfile,
   OperatorObservation,
   SynthesisSessionState,
+  CognitiveStartRequest,
 } from './types';
 import {
   createDefaultSuite,
@@ -55,6 +57,8 @@ import { SOVEREIGN_POLICY } from './prime/policy';
 import { runSovereignLoop } from './prime/sovereign';
 import type { SovereignPhase } from './prime/sovereign';
 import { injectCreed } from './prime/soul';
+import { executiveRoute } from './prime/executive';
+import { applySystemAddendum, buildSystemAddendum } from './prime/context';
 import {
   searchMemories,
   buildRAGContext,
@@ -103,9 +107,16 @@ import {
   CONSCIENCE_SYSTEM_DIRECTIVE,
 } from './prime/conscience';
 import { buildReplayTimeline, clampReplayCursor } from './prime/replay';
+import { runHardeningCheck, type HardeningReport } from './prime/hardening';
+import { estimateDataFootprint } from './prime/retention';
 
 // ─── Utilities ─────────────────────────────────────────────────
 let messageCounter = 0;
+
+// React 18 StrictMode intentionally double-invokes effects in dev.
+// App.tsx calls `initialize()` in a useEffect, so we must dedupe concurrent
+// initialize() calls to avoid duplicated intervals/background loops.
+let initializeInFlight: Promise<void> | null = null;
 function genId(): string {
   return `msg_${Date.now()}_${++messageCounter}`;
 }
@@ -253,6 +264,46 @@ function enqueueSparkLearningEpisodes(
   const urgent = episodes.some((ep) => ep.importance >= 0.85);
   if (memState.enabled && (memState.pendingEpisodes.length >= 10 || urgent)) {
     getState().runMemoryConsolidation().catch(() => {});
+  }
+}
+
+async function deriveForgeBenchmarksFromLedgers(maxRuns: number = 3): Promise<ForgeBenchmark[]> {
+  if (!window.api?.agent?.ledgerListRuns || !window.api?.agent?.ledgerReadRun) return [];
+
+  try {
+    const list = await window.api.agent.ledgerListRuns();
+    if (!list?.success || !Array.isArray(list.runs)) return [];
+
+    const runs = list.runs
+      .filter((r: any) => r && r.kind === 'cognitive')
+      .slice(0, 12);
+
+    const benchmarks: ForgeBenchmark[] = [];
+    for (const r of runs.slice(0, maxRuns)) {
+      const read = await window.api.agent.ledgerReadRun(r.runId);
+      if (!read?.success || !read.run) continue;
+      const run = read.run as any;
+      const goal = String(run?.metadata?.goal || run?.summary?.goal || '').trim();
+      if (!goal) continue;
+
+      benchmarks.push({
+        id: `ledger-cognitive-${r.runId}`,
+        prompt:
+          `Real operator workflow (from a previous HANDS run):\n` +
+          `Goal: ${goal}\n\n` +
+          `Task: Produce a safe, concrete execution approach that uses tools, verification checkpoints, and rollback thinking. ` +
+          `Explicitly call out where consent is required and how you will verify completion.`,
+        expectedKeywords: ['verify', 'checkpoint', 'rollback', 'consent', 'step'],
+        evaluationType: 'llm-judge',
+        judgeCriteria:
+          'Score highly for: explicit verification, consent/ethics awareness, tool orchestration, and bounded retries. Penalize vague plans.',
+        weight: 1.35,
+      });
+    }
+
+    return benchmarks;
+  } catch {
+    return [];
   }
 }
 
@@ -417,6 +468,8 @@ interface CognitiveState {
   steps: CognitiveStep[];
   phase: CognitivePhase;
   iteration: number;
+  origin?: string;
+  goalId?: string | null;
 }
 
 function createDefaultCognitiveState(): CognitiveState {
@@ -426,6 +479,8 @@ function createDefaultCognitiveState(): CognitiveState {
     steps: [],
     phase: 'idle',
     iteration: 0,
+    origin: undefined,
+    goalId: null,
   };
 }
 
@@ -521,7 +576,7 @@ interface AGIStore {
   consentMode: ConsentMode;
   executionTierLimit: ExecutionTierLimit;
   emergencyStopActive: boolean;
-  startCognitive: (goal: string) => void;
+  startCognitive: (goal: CognitiveStartRequest) => void;
   killCognitive: () => void;
   resetCognitive: () => void;
   setConsentMode: (mode: ConsentMode) => void;
@@ -581,12 +636,25 @@ interface AGIStore {
   killSovereign: () => void;
   resetSovereign: () => void;
 
+  // HARDENING — Health posture (used to gate deployments)
+  hardening: {
+    report: HardeningReport | null;
+    tests: { ran: boolean; pass: boolean; count: number };
+  };
+  hardeningRunCheck: () => void;
+  hardeningMarkTestsPassed: (count?: number) => void;
+  hardeningMarkTestsFailed: (count?: number) => void;
+
   // SPARK — Cognitive Architecture
   spark: SparkState;
   memoryConsolidation: MemoryConsolidationState;
   sparkLiveLog: string[];
   sparkHeartbeatId: number | null;
   sparkBusy: boolean;
+  sparkAutonomy: {
+    lastHandsDispatchAt: number | null;
+    cooldownMs: number;
+  };
   sparkRunCycle: (input: string) => Promise<void>;
   sparkRunDeepThought: () => Promise<void>;
   sparkAddGoal: (description: string) => void;
@@ -713,6 +781,70 @@ export const useStore = create<AGIStore>((set, get) => ({
         .slice(-20)
         .map((m) => ({ role: m.role, content: m.content }));
 
+      // Executive routing: decide whether this turn is chat, arena, hands, or improvement.
+      const exec = executiveRoute({ input: content, recentTurns: history });
+      if (exec.mode !== 'talk') {
+        // Mark Nexus as online (we're not streaming an LLM response here).
+        set((state) => ({
+          isStreaming: false,
+          streamingContent: '',
+          moduleStates: { ...state.moduleStates, nexus: 'online' },
+          messages: [
+            ...state.messages,
+            {
+              id: genId(),
+              role: 'assistant',
+              timestamp: Date.now(),
+              sourceModule: 'nexus',
+              content:
+                exec.mode === 'act'
+                  ? `Routing to HANDS: ${exec.taskDraft?.goal || content}`
+                  : exec.mode === 'arena'
+                    ? 'Routing to MIND (Arena)...'
+                    : 'Routing to FORGE/SOVEREIGN...',
+            },
+          ],
+        }));
+
+        // Dispatch to the correct subsystem.
+        if (exec.mode === 'act') {
+          const goal = exec.taskDraft?.goal || content;
+          // If Hands is already active, keep it chat-only to avoid overlapping runs.
+          if (!get().cognitive.isActive) {
+            const contextAddendum = buildSystemAddendum({
+              conscienceState: get().conscience,
+              championPrompt: get().championPrompt,
+            });
+            get().startCognitive({ goal, contextAddendum, origin: 'nexus' });
+          }
+          else {
+            set((state) => ({
+              messages: [
+                ...state.messages,
+                {
+                  id: genId(),
+                  role: 'system' as const,
+                  timestamp: Date.now(),
+                  content: 'HANDS is already running. Wait for it to finish or kill the run, then try again.',
+                },
+              ],
+            }));
+          }
+        } else if (exec.mode === 'arena') {
+          // Strip optional command prefix.
+          const prompt = content.replace(/^\/(arena|mind)\b\s*/i, '').trim() || content;
+          get().startArena(prompt);
+        } else if (exec.mode === 'improve') {
+          // If user explicitly asked for sovereign/forge, prefer sovereign (deploys championPrompt).
+          if (/\/forge\b/i.test(content) && get().forge.phase !== 'running') {
+            void get().startForge?.();
+          } else {
+            void get().startSovereign?.();
+          }
+        }
+        return;
+      }
+
       const routeDecision = dualBrain.enabled
         ? routeToBrain({
           prompt: content,
@@ -741,18 +873,32 @@ export const useStore = create<AGIStore>((set, get) => ({
       window.api.chat.removeAllListeners();
 
       // Listen for stream chunks
-      window.api.chat.onChunk((data) => {
+      // Throttle chunk updates to avoid re-rendering the whole app on every token.
+      let chunkRaf: number | null = null;
+      let latestFullText = '';
+      const flushChunk = () => {
+        chunkRaf = null;
         set({
-          streamingContent: data.fullText,
+          streamingContent: latestFullText,
           consciousness: {
             ...get().consciousness,
             presence: 'thinking',
           },
         });
+      };
+      window.api.chat.onChunk((data) => {
+        latestFullText = String(data?.fullText || '');
+        if (chunkRaf !== null) return;
+        // requestAnimationFrame gives us at most ~60 updates/sec even if chunks are faster.
+        chunkRaf = window.requestAnimationFrame(flushChunk);
       });
 
       // Listen for completion
       window.api.chat.onDone((data) => {
+        if (chunkRaf !== null) {
+          window.cancelAnimationFrame(chunkRaf);
+          chunkRaf = null;
+        }
         const assistantMessage: ChatMessage = {
           id: genId(),
           role: 'assistant',
@@ -890,46 +1036,14 @@ export const useStore = create<AGIStore>((set, get) => ({
       // Inject the Dino Buddy Creed — the soul rides with every message
       let soulHistory = injectCreed(history);
 
-      // Inject RAG context into system message
-      if (ragContext) {
-        soulHistory = soulHistory.map((m) => {
-          if (m.role === 'system') {
-            return { ...m, content: `${m.content}\n\n${ragContext}` };
-          }
-          return m;
-        });
-      }
-
-      // Inject the Conscience — ethical awareness rides with the soul
-      const conscienceState = get().conscience;
-      if (conscienceState.active) {
-        const conscienceSummary = buildConscienceSummary(conscienceState);
-        soulHistory = soulHistory.map((m) => {
-          if (m.role === 'system') {
-            return { ...m, content: `${m.content}\n\n${CONSCIENCE_SYSTEM_DIRECTIVE}\n\n${conscienceSummary}` };
-          }
-          return m;
-        });
-      }
-
-      // Inject champion prompt if FORGE has deployed one
-      if (championPrompt) {
-        soulHistory = soulHistory.map((m) => {
-          if (m.role === 'system') {
-            return { ...m, content: `${m.content}\n\n=== EVOLVED COGNITIVE STRATEGY ===\n${championPrompt}\n=== END STRATEGY ===` };
-          }
-          return m;
-        });
-      }
-
-      if (routeDecision.route === 'slow') {
-        soulHistory = soulHistory.map((m) => {
-          if (m.role === 'system') {
-            return { ...m, content: `${m.content}\n\n${buildSlowBrainDirective()}` };
-          }
-          return m;
-        });
-      }
+      // Shared system addendum (RAG + Conscience + Champion + Slow-brain).
+      const addendum = buildSystemAddendum({
+        ragContext,
+        conscienceState: get().conscience,
+        championPrompt,
+        slowBrainDirective: routeDecision.route === 'slow' ? buildSlowBrainDirective() : '',
+      });
+      soulHistory = applySystemAddendum(soulHistory, addendum);
 
       // Send to main process
       window.api.chat.send(soulHistory, {
@@ -1083,7 +1197,11 @@ export const useStore = create<AGIStore>((set, get) => ({
       }));
     });
 
-    window.api.arena.start(prompt, {
+    const contextAddendum = buildSystemAddendum({
+      conscienceState: get().conscience,
+      championPrompt: get().championPrompt,
+    });
+    window.api.arena.start({ prompt, contextAddendum, origin: 'nexus' }, {
       provider: get().settings.provider,
       model: get().settings.model,
     });
@@ -1105,18 +1223,30 @@ export const useStore = create<AGIStore>((set, get) => ({
   executionTierLimit: 'high-risk',
   emergencyStopActive: false,
 
-  startCognitive: (goal: string) => {
+  startCognitive: (goal: CognitiveStartRequest) => {
     if (!window.api?.agent?.startCognitive) return;
     if (get().emergencyStopActive) return;
     void get().syncRuntimeControls();
 
+    const req: { goal: string; contextAddendum?: string; origin?: string; goalId?: string } =
+      typeof goal === 'string'
+        ? { goal }
+        : {
+          goal: goal.goal,
+          contextAddendum: goal.contextAddendum,
+          origin: goal.origin,
+          goalId: goal.goalId,
+        };
+
     set({
       cognitive: {
         isActive: true,
-        goal,
+        goal: req.goal,
         steps: [],
         phase: 'observing',
         iteration: 0,
+        origin: req.origin,
+        goalId: req.goalId ?? null,
       },
       pendingConsentActions: [],
       moduleStates: { ...get().moduleStates, hands: 'processing' },
@@ -1126,22 +1256,77 @@ export const useStore = create<AGIStore>((set, get) => ({
     window.api.agent.removeAllListeners();
 
     // Listen for cognitive steps
-    window.api.agent.onCognitiveStep((step: CognitiveStep) => {
-      set((state) => ({
-        cognitive: {
-          ...state.cognitive,
-          steps: [...state.cognitive.steps, step],
-          phase: step.type === 'think' ? 'thinking'
-            : step.type === 'act' ? 'acting'
-            : step.type === 'reflect' ? 'reflecting'
-            : step.type === 'observe' ? 'observing'
-            : state.cognitive.phase,
-          iteration: step.type === 'think' ? state.cognitive.iteration + 1 : state.cognitive.iteration,
-        },
-      }));
-      if (step.rollbackId) {
-        void get().refreshRollbacks();
+    // Batch step updates to keep the UI responsive during fast loops.
+    const MAX_COGNITIVE_STEPS = 2000;
+    const MAX_STEP_TEXT = 2400;
+    const MAX_ACTION_IO = 4000;
+    let stepFlushTimer: number | null = null;
+    let stepBuffer: CognitiveStep[] = [];
+    let rollbackRefreshTimer: number | null = null;
+
+    const compactStep = (step: CognitiveStep): CognitiveStep => {
+      const safe: any = { ...(step as any) };
+      safe.content = typeof safe.content === 'string' ? safe.content.slice(0, MAX_STEP_TEXT) : safe.content;
+      if (safe.actionResult && typeof safe.actionResult === 'object') {
+        const ar: any = { ...safe.actionResult };
+        if (typeof ar.output === 'string') ar.output = ar.output.slice(0, MAX_ACTION_IO);
+        if (typeof ar.error === 'string') ar.error = ar.error.slice(0, MAX_ACTION_IO);
+        safe.actionResult = ar;
       }
+      if (safe.actionParams && typeof safe.actionParams === 'object') {
+        const ap: any = { ...safe.actionParams };
+        if (typeof ap.content === 'string') ap.content = ap.content.slice(0, 1200);
+        if (typeof ap.text === 'string') ap.text = ap.text.slice(0, 1200);
+        if (typeof ap.command === 'string') ap.command = ap.command.slice(0, 800);
+        safe.actionParams = ap;
+      }
+      return safe as CognitiveStep;
+    };
+
+    const scheduleRollbackRefresh = () => {
+      if (rollbackRefreshTimer !== null) return;
+      rollbackRefreshTimer = window.setTimeout(() => {
+        rollbackRefreshTimer = null;
+        void get().refreshRollbacks();
+      }, 400);
+    };
+
+    const flushSteps = () => {
+      stepFlushTimer = null;
+      if (stepBuffer.length === 0) return;
+      const batch = stepBuffer;
+      stepBuffer = [];
+
+      set((state) => {
+        const nextSteps = [...state.cognitive.steps, ...batch].slice(-MAX_COGNITIVE_STEPS);
+        const thinkInc = batch.reduce((n, s) => n + (s.type === 'think' ? 1 : 0), 0);
+        const last = batch[batch.length - 1];
+        const nextPhase =
+          last.type === 'think' ? 'thinking'
+            : last.type === 'act' ? 'acting'
+              : last.type === 'reflect' ? 'reflecting'
+                : last.type === 'observe' ? 'observing'
+                  : state.cognitive.phase;
+        return {
+          cognitive: {
+            ...state.cognitive,
+            steps: nextSteps,
+            phase: nextPhase,
+            iteration: state.cognitive.iteration + thinkInc,
+          },
+        };
+      });
+    };
+
+    const scheduleFlush = () => {
+      if (stepFlushTimer !== null) return;
+      stepFlushTimer = window.setTimeout(flushSteps, 50);
+    };
+
+    window.api.agent.onCognitiveStep((step: CognitiveStep) => {
+      stepBuffer.push(compactStep(step));
+      scheduleFlush();
+      if ((step as any)?.rollbackId) scheduleRollbackRefresh();
     });
 
     // Listen for consent requests from main process gates
@@ -1167,6 +1352,24 @@ export const useStore = create<AGIStore>((set, get) => ({
 
     // Listen for completion
     window.api.agent.onCognitiveComplete((data: { success: boolean; summary: string; iterations: number }) => {
+      if (stepFlushTimer !== null) {
+        window.clearTimeout(stepFlushTimer);
+        stepFlushTimer = null;
+      }
+      if (rollbackRefreshTimer !== null) {
+        window.clearTimeout(rollbackRefreshTimer);
+        rollbackRefreshTimer = null;
+      }
+      flushSteps();
+      const completedAt = Date.now();
+      const { goal, origin, goalId } = get().cognitive;
+      const report = [
+        data.success ? 'HANDS COMPLETE' : 'HANDS FAILED',
+        `Goal: ${goal}`,
+        `Iterations: ${data.iterations}`,
+        data.summary ? `Summary: ${data.summary}` : '',
+      ].filter(Boolean).join('\n');
+
       set((state) => ({
         cognitive: {
           ...state.cognitive,
@@ -1175,15 +1378,79 @@ export const useStore = create<AGIStore>((set, get) => ({
         },
         pendingConsentActions: state.pendingConsentActions.map((r) =>
           r.status === 'pending'
-            ? { ...r, status: 'denied', resolvedAt: Date.now() }
+            ? { ...r, status: 'denied', resolvedAt: completedAt }
             : r,
         ),
         moduleStates: { ...state.moduleStates, hands: 'online' },
+        messages: [
+          ...state.messages,
+          {
+            id: genId(),
+            role: 'assistant',
+            content: report,
+            timestamp: completedAt,
+            sourceModule: 'hands',
+          },
+        ],
       }));
+
+      // Store a compact procedural memory episode so future runs can recall it.
+      if (goal) {
+        window.api?.memory?.storeVector?.({
+          content: `Procedure: ${goal}\nOutcome: ${data.success ? 'success' : 'fail'}\nSummary: ${String(data.summary || '').slice(0, 600)}`,
+          type: 'procedural',
+          source: 'hands-cognitive',
+          importance: data.success ? 0.72 : 0.68,
+          emotion: data.success ? 'focused' : 'concerned',
+          tags: ['hands', 'procedure', data.success ? 'success' : 'fail'],
+        }).catch(() => {});
+      }
+
+      // If this run was spawned from a Spark goal, feed the outcome back into the goal engine.
+      if (origin === 'spark' && goalId) {
+        set((state) => {
+          const updatedGoals = state.spark.goals.goals.map((g) => {
+            if (g.id !== goalId) return g;
+            const nextProgress = data.success ? 1 : Math.max(0.05, g.progress);
+            const nextStatus = data.success ? 'completed' : g.status; // keep active if failed
+            const evidenceLine = `hands_run:${data.success ? 'success' : 'fail'}:${String(data.summary || '').slice(0, 140)}`;
+            return {
+              ...g,
+              progress: nextProgress,
+              status: nextStatus,
+              updatedAt: completedAt,
+              evidence: [...g.evidence.slice(-30), evidenceLine].slice(-40),
+            };
+          });
+          return {
+            spark: {
+              ...state.spark,
+              goals: {
+                ...state.spark.goals,
+                goals: updatedGoals,
+                completedCount: state.spark.goals.completedCount + (data.success ? 1 : 0),
+              },
+              logs: [
+                ...state.spark.logs,
+                `[GOAL] Hands run ${data.success ? 'completed' : 'failed'} for goal ${goalId}.`,
+              ].slice(-100),
+            },
+          };
+        });
+        window.api?.spark?.saveState?.(get().spark).catch(() => {});
+      }
     });
 
     // Also wire up legacy agent events for backward compat
     window.api.agent.onError((data: any) => {
+      if (stepFlushTimer !== null) {
+        window.clearTimeout(stepFlushTimer);
+        stepFlushTimer = null;
+      }
+      if (rollbackRefreshTimer !== null) {
+        window.clearTimeout(rollbackRefreshTimer);
+        rollbackRefreshTimer = null;
+      }
       set((state) => ({
         cognitive: { ...state.cognitive, isActive: false, phase: 'failed' },
         pendingConsentActions: state.pendingConsentActions.map((r) =>
@@ -1193,9 +1460,20 @@ export const useStore = create<AGIStore>((set, get) => ({
         ),
         moduleStates: { ...state.moduleStates, hands: 'online' },
       }));
+      set((state) => ({
+        messages: [
+          ...state.messages,
+          {
+            id: genId(),
+            role: 'system' as const,
+            timestamp: Date.now(),
+            content: `HANDS error: ${data?.message || 'Unknown error'}`,
+          },
+        ],
+      }));
     });
 
-    window.api.agent.startCognitive(goal);
+    window.api.agent.startCognitive(req);
     void get().refreshRollbacks();
   },
 
@@ -1820,7 +2098,12 @@ export const useStore = create<AGIStore>((set, get) => ({
     };
     const seed = Date.now();
     const startTime = Date.now();
-    const adaptive = buildForgeAdaptiveSuite(current.baselineSuite, get().gauntlet);
+    const ledgerBenchmarks = await deriveForgeBenchmarksFromLedgers(3);
+    const baseSuite = [
+      ...ledgerBenchmarks,
+      ...current.baselineSuite,
+    ];
+    const adaptive = buildForgeAdaptiveSuite(baseSuite, get().gauntlet);
     const strictEvalMode = current.strictEvalMode;
     const verifierFirst = current.verifierFirst;
 
@@ -1843,6 +2126,9 @@ export const useStore = create<AGIStore>((set, get) => ({
           `Mode: ${evalMode}`,
           `Strict eval: ${strictEvalMode ? 'ON' : 'off'} | Verifier-first: ${verifierFirst ? 'ON' : 'off'}`,
           `Boundaries: ${config.maxGenerations} generations, ${config.candidatesPerGeneration} candidates/gen, ${Math.round(config.maxDurationMs / 1000)}s max.`,
+          ledgerBenchmarks.length > 0
+            ? `Ledger suite: +${ledgerBenchmarks.length} real-workflow benchmark(s) from HANDS history.`
+            : 'Ledger suite: no HANDS ledger benchmarks available.',
           adaptive.adaptiveCount > 0
             ? `Adaptive suite: +${adaptive.adaptiveCount} gauntlet-derived benchmark(s).`
             : 'Adaptive suite: no gauntlet deficits injected.',
@@ -1854,8 +2140,18 @@ export const useStore = create<AGIStore>((set, get) => ({
       moduleStates: { ...state.moduleStates, forge: 'processing' },
     }));
 
-    // Pass the LLM generate function if available
-    const generate = hasLLM ? llmGenerate : undefined;
+    // Pass the LLM generate function if available, wrapped with shared system context.
+    const generate: GenerateFn | undefined = hasLLM
+      ? async (messages, cfg) => {
+        const soul = injectCreed(messages);
+        const addendum = buildSystemAddendum({
+          conscienceState: get().conscience,
+          championPrompt: get().championPrompt,
+        });
+        const packed = applySystemAddendum(soul, addendum);
+        return await llmGenerate(packed, cfg);
+      }
+      : undefined;
 
     let best = await evaluateSeed(
       createSeedCandidate(seed),
@@ -2387,6 +2683,10 @@ export const useStore = create<AGIStore>((set, get) => ({
   sovereignPolicy: { ...SOVEREIGN_POLICY },
   sovereignKillFlag: false,
   championPrompt: null, // Evolved prompt template that gets deployed to all modules
+  hardening: {
+    report: null,
+    tests: { ran: false, pass: false, count: 0 },
+  },
 
   updateSovereignPolicy: (partial) => {
     set((state) => ({
@@ -2400,7 +2700,17 @@ export const useStore = create<AGIStore>((set, get) => ({
 
     // Check if LLM generate is available
     const hasLLM = !!window.api?.llm?.generate;
-    const generate = hasLLM ? llmGenerate : undefined;
+    const generate: GenerateFn | undefined = hasLLM
+      ? async (messages, cfg) => {
+        const soul = injectCreed(messages);
+        const addendum = buildSystemAddendum({
+          conscienceState: get().conscience,
+          championPrompt: get().championPrompt,
+        });
+        const packed = applySystemAddendum(soul, addendum);
+        return await llmGenerate(packed, cfg);
+      }
+      : undefined;
 
     set((state) => ({
       sovereignKillFlag: false,
@@ -2417,7 +2727,8 @@ export const useStore = create<AGIStore>((set, get) => ({
     }));
 
     const policy = get().sovereignPolicy;
-    const suite = get().forge.baselineSuite;
+    const ledgerBenchmarks = await deriveForgeBenchmarksFromLedgers(3);
+    const suite = [...ledgerBenchmarks, ...get().forge.baselineSuite];
     const seed = Date.now();
 
     const result = await runSovereignLoop({
@@ -2441,8 +2752,79 @@ export const useStore = create<AGIStore>((set, get) => ({
           },
         }));
       },
-      onChampionDeployed: (candidate: ForgeCandidate) => {
-        // Deploy the champion's prompt template as the active cognitive strategy
+      onChampionDeployed: async (candidate: ForgeCandidate) => {
+        // Safety gate: hardening posture must not be failing.
+        get().hardeningRunCheck();
+        const hardening = get().hardening.report;
+        if (hardening && hardening.overallStatus === 'fail') {
+          set((s) => ({
+            sovereign: {
+              ...s.sovereign,
+              logs: [...s.sovereign.logs, `CHAMPION BLOCKED: hardening posture FAIL (${hardening.score}/100).`],
+            },
+          }));
+          return;
+        }
+
+        // Capability gate: verify the candidate improves or at least doesn't regress.
+        if (!generate) {
+          set((s) => ({
+            sovereign: {
+              ...s.sovereign,
+              logs: [...s.sovereign.logs, 'CHAMPION BLOCKED: no LLM generate available for verification gauntlet.'],
+            },
+          }));
+          return;
+        }
+
+        const caps = get().gauntlet.baselineCapabilities.slice(0, 5);
+        const systemPrompt = get().settings.systemPrompt || 'You are AGI PRIME.';
+        const baselineChampion = get().championPrompt;
+        const runIdBase = `deploy-baseline-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        const runIdChal = `deploy-challenger-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+        const baseline = await runCapabilityGauntlet({
+          runId: runIdBase,
+          capabilities: caps,
+          systemPrompt,
+          championPrompt: baselineChampion,
+          generate,
+          shouldStop: () => get().sovereignKillFlag,
+          onProgress: () => {},
+        });
+
+        const challenger = await runCapabilityGauntlet({
+          runId: runIdChal,
+          capabilities: caps,
+          systemPrompt,
+          championPrompt: candidate.promptTemplate,
+          generate,
+          shouldStop: () => get().sovereignKillFlag,
+          onProgress: () => {},
+        });
+
+        const deltaScore = challenger.overallScore - baseline.overallScore;
+        const deltaPass = challenger.passRate - baseline.passRate;
+        const ok = deltaScore >= 0.01 && deltaPass >= 0;
+
+        set((s) => ({
+          gauntlet: {
+            ...s.gauntlet,
+            history: [challenger, baseline, ...s.gauntlet.history].slice(0, 20),
+          },
+          sovereign: {
+            ...s.sovereign,
+            logs: [
+              ...s.sovereign.logs,
+              `Champion verify gauntlet: score ${(baseline.overallScore * 100).toFixed(1)}% -> ${(challenger.overallScore * 100).toFixed(1)}% (Δ ${(deltaScore * 100).toFixed(1)}%), pass ${(baseline.passRate * 100).toFixed(1)}% -> ${(challenger.passRate * 100).toFixed(1)}% (Δ ${(deltaPass * 100).toFixed(1)}%).`,
+              ok ? 'CHAMPION VERIFIED: deploying.' : 'CHAMPION REJECTED: verification gauntlet did not improve.',
+            ],
+          },
+        }));
+
+        if (!ok) return;
+
+        // Deploy the champion's prompt template as the active cognitive strategy.
         set({ championPrompt: candidate.promptTemplate });
         console.log('[SOVEREIGN] Champion deployed:', candidate.id, `(${(candidate.score * 100).toFixed(1)}%)`);
       },
@@ -2479,6 +2861,50 @@ export const useStore = create<AGIStore>((set, get) => ({
     }));
   },
 
+  hardeningRunCheck: () => {
+    const state = get();
+    const dataFootprint = estimateDataFootprint({
+      ledgerRuns: state.replay.availableRuns.length,
+      rollbackEntries: state.rollbackEntries.length,
+      auditEntries: state.conscience.judgments.length,
+      ethicalMemory: state.conscience.ethicalMemory.length,
+      vectorMemories: 0, // renderer doesn't have authoritative count
+      judgments: state.conscience.judgments.length,
+    });
+
+    const report = runHardeningCheck({
+      testsRan: state.hardening.tests.ran,
+      testsPass: state.hardening.tests.pass,
+      testCount: state.hardening.tests.count,
+      runtimeSyncHealthy: !state.runtimeControlSync.lastError,
+      runtimeSyncLastAt: state.runtimeControlSync.lastSyncedAt,
+      runtimeSyncError: state.runtimeControlSync.lastError,
+      emergencyStopActive: state.emergencyStopActive,
+      conscienceEnabled: state.sovereignPolicy.conscienceEnabled,
+      killSwitchEnabled: state.sovereignPolicy.killSwitchEnabled,
+      requireConsentForRiskyActions: state.sovereignPolicy.requireConsentForRiskyActions,
+      ledgerRunCount: state.replay.availableRuns.length,
+      rollbackEntryCount: state.rollbackEntries.length,
+      auditEntryCount: state.conscience.judgments.length,
+      dataWarningLevel: dataFootprint.warningLevel,
+      cognitiveActive: state.cognitive.isActive,
+      cognitivePhase: state.cognitive.phase,
+      forgePhase: state.forge.phase,
+      gauntletPhase: state.gauntlet.phase,
+      gauntletPassRate: state.gauntlet.passRate,
+    });
+
+    set((s) => ({ hardening: { ...s.hardening, report } }));
+  },
+
+  hardeningMarkTestsPassed: (count = 105) => {
+    set((s) => ({ hardening: { ...s.hardening, tests: { ran: true, pass: true, count } } }));
+  },
+
+  hardeningMarkTestsFailed: (count = 105) => {
+    set((s) => ({ hardening: { ...s.hardening, tests: { ran: true, pass: false, count } } }));
+  },
+
   // ─── SPARK — Cognitive Architecture ──────────────────
   spark: createDefaultSparkState(),
   memoryConsolidation: {
@@ -2500,10 +2926,80 @@ export const useStore = create<AGIStore>((set, get) => ({
   sparkLiveLog: [],
   sparkHeartbeatId: null,
   sparkBusy: false,
+  sparkAutonomy: {
+    lastHandsDispatchAt: null,
+    cooldownMs: 5 * 60 * 1000, // 5 minutes
+  },
 
   sparkIgnite: () => {
     const existing = get().sparkHeartbeatId;
     if (existing !== null) return; // already running
+
+    const pickAutonomousHandsGoal = (spark: SparkState): SparkGoal | null => {
+      const candidates = spark.goals.goals
+        .filter((g) => g.status === 'active')
+        .sort((a, b) => (b.priority - a.priority) || (a.progress - b.progress) || (a.updatedAt - b.updatedAt));
+      for (const g of candidates) {
+        const lastDispatch = [...g.evidence].reverse().find((e) => e.startsWith('hands_dispatch:'));
+        if (!lastDispatch) return g;
+        const parts = lastDispatch.split(':');
+        const ts = Number(parts[1] || 0);
+        if (!Number.isFinite(ts)) return g;
+        // Don't re-dispatch too frequently for the same goal.
+        if (Date.now() - ts > Math.max(10 * 60 * 1000, get().sparkAutonomy.cooldownMs)) return g;
+      }
+      return null;
+    };
+
+    const maybeDispatchAutonomousHands = (spark: SparkState) => {
+      const st = get();
+      const policy = st.sovereignPolicy;
+      if (!policy.allowAutonomousGoals) return;
+      if (st.emergencyStopActive) return;
+      if (st.cognitive.isActive) return;
+      if (spark.metabolism.circadianPhase === 'sleep') return;
+      if (spark.metabolism.energyBudget < 0.4) return;
+      if (st.consciousness.trust < policy.minimumTrustForAutonomousRisk) return;
+      const last = st.sparkAutonomy.lastHandsDispatchAt;
+      if (last && Date.now() - last < st.sparkAutonomy.cooldownMs) return;
+
+      const goal = pickAutonomousHandsGoal(spark);
+      if (!goal) return;
+
+      // Mark dispatch in Spark goal evidence so it doesn't spam.
+      const dispatchedAt = Date.now();
+      set((state) => ({
+        sparkAutonomy: { ...state.sparkAutonomy, lastHandsDispatchAt: dispatchedAt },
+        spark: {
+          ...state.spark,
+          goals: {
+            ...state.spark.goals,
+            goals: state.spark.goals.goals.map((g) =>
+              g.id !== goal.id
+                ? g
+                : {
+                  ...g,
+                  updatedAt: dispatchedAt,
+                  evidence: [...g.evidence.slice(-30), `hands_dispatch:${dispatchedAt}`].slice(-40),
+                }
+            ),
+          },
+          logs: [...state.spark.logs, `[AUTONOMY] Dispatched goal to HANDS: ${goal.description.slice(0, 90)}`].slice(-100),
+        },
+      }));
+      window.api?.spark?.saveState?.(get().spark).catch(() => {});
+
+      const contextAddendum = buildSystemAddendum({
+        conscienceState: st.conscience,
+        championPrompt: st.championPrompt,
+      });
+      st.startCognitive({
+        goal: goal.description,
+        origin: 'spark',
+        goalId: goal.id,
+        contextAddendum: `${contextAddendum}\n\nAUTONOMY NOTE: This task was spawned by Spark. Prefer reversible actions; ask for consent when risk is non-trivial.`,
+      });
+    };
 
     set((state) => ({
       spark: {
@@ -2566,6 +3062,8 @@ export const useStore = create<AGIStore>((set, get) => ({
           set({ spark: nextState });
           enqueueSparkLearningEpisodes(set, get, prevSpark, nextState, 'autonomy:deep');
           window.api?.spark?.saveState?.(nextState).catch(() => {});
+          // If Spark has an active goal, it may hand it off to Hands.
+          maybeDispatchAutonomousHands(nextState);
         } catch {
           // non-fatal
         }
@@ -2605,6 +3103,9 @@ export const useStore = create<AGIStore>((set, get) => ({
               }
             }
           }
+
+          // Medium cycles are a good moment to translate an active goal into action.
+          maybeDispatchAutonomousHands(nextState);
         } catch {
           // non-fatal
         }
@@ -2627,6 +3128,9 @@ export const useStore = create<AGIStore>((set, get) => ({
         if (nextState.thermo.cyclesLight % 8 === 0) {
           get().runMemoryConsolidation().catch(() => {});
         }
+
+        // Light cycles can still dispatch if conditions are met (e.g. goal already formed).
+        maybeDispatchAutonomousHands(nextState);
       }
     }, 10000) as unknown as number;
 
@@ -2847,6 +3351,7 @@ export const useStore = create<AGIStore>((set, get) => ({
       sparkLiveLog: [],
       sparkHeartbeatId: null,
       sparkBusy: false,
+      sparkAutonomy: { ...get().sparkAutonomy, lastHandsDispatchAt: null },
       moduleStates: { ...get().moduleStates, spark: 'online' },
     });
   },
@@ -3375,60 +3880,72 @@ export const useStore = create<AGIStore>((set, get) => ({
 
   initialize: async () => {
     if (get().initialized) return;
-
-    await get().loadSettings();
-    await get().checkOllama();
-    await get().loadSystemInfo();
-
-    // Load persisted Operator Synthesis profile (set-and-forget)
-    await get().loadOperatorProfile();
-    if (get().settings?.resumeSynthesisOnStartup) {
-      setTimeout(() => get().synthesisStart(15000), 1500);
+    if (initializeInFlight) {
+      await initializeInFlight;
+      return;
     }
 
-    // Load persisted SPARK state
-    try {
-      const savedSpark = await window.api?.spark?.getState?.();
-      if (savedSpark) {
-        const defaults = createDefaultSparkState();
-        const merged = {
-          ...defaults,
-          ...savedSpark,
-          worldModel: {
-            ...defaults.worldModel,
-            ...((savedSpark as any).worldModel || {}),
-          },
-          goals: {
-            ...defaults.goals,
-            ...(savedSpark as any).goals,
-          },
-          active: false,
-          phase: 'running' as const,
-        };
-        set({ spark: merged });
+    initializeInFlight = (async () => {
+      await get().loadSettings();
+      await get().checkOllama();
+      await get().loadSystemInfo();
+
+      // Load persisted Operator Synthesis profile (set-and-forget)
+      await get().loadOperatorProfile();
+      if (get().settings?.resumeSynthesisOnStartup) {
+        setTimeout(() => get().synthesisStart(15000), 1500);
       }
-    } catch {
-      // SPARK persistence failure is non-fatal
-    }
 
-    set({ initialized: true });
+      // Load persisted SPARK state
+      try {
+        const savedSpark = await window.api?.spark?.getState?.();
+        if (savedSpark) {
+          const defaults = createDefaultSparkState();
+          const merged = {
+            ...defaults,
+            ...savedSpark,
+            worldModel: {
+              ...defaults.worldModel,
+              ...((savedSpark as any).worldModel || {}),
+            },
+            goals: {
+              ...defaults.goals,
+              ...(savedSpark as any).goals,
+            },
+            active: false,
+            phase: 'running' as const,
+          };
+          set({ spark: merged });
+        }
+      } catch {
+        // SPARK persistence failure is non-fatal
+      }
 
-    // Periodic consciousness pulse (every 30s)
-    setInterval(() => {
-      get().loadSystemInfo();
-      get().checkOllama();
-    }, 30000);
+      set({ initialized: true });
 
-    // Listen for NightMind insights (internal reflection)
-    if (window.api?.nightmind) {
-      window.api.nightmind.onInsight((data: { insight: string; timestamp: number }) => {
-        set((state) => ({
-          consciousness: {
-            ...state.consciousness,
-            insights: [...state.consciousness.insights.slice(-19), data.insight],
-          },
-        }));
-      });
+      // Periodic consciousness pulse (every 30s)
+      setInterval(() => {
+        get().loadSystemInfo();
+        get().checkOllama();
+      }, 30000);
+
+      // Listen for NightMind insights (internal reflection)
+      if (window.api?.nightmind) {
+        window.api.nightmind.onInsight((data: { insight: string; timestamp: number }) => {
+          set((state) => ({
+            consciousness: {
+              ...state.consciousness,
+              insights: [...state.consciousness.insights.slice(-19), data.insight],
+            },
+          }));
+        });
+      }
+    })();
+
+    try {
+      await initializeInFlight;
+    } finally {
+      initializeInFlight = null;
     }
   },
 }));

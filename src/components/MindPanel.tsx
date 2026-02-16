@@ -60,15 +60,25 @@ export default function MindPanel() {
 
   // Auto-scroll agent cards when streaming
   useEffect(() => {
-    const cards = document.querySelectorAll('.arena-agent-body');
+    const cards = document.querySelectorAll<HTMLElement>('.arena-agent-body');
     cards.forEach((card) => {
-      card.scrollTop = card.scrollHeight;
+      // Only keep auto-scrolling if the user is already near the bottom.
+      const distanceFromBottom = card.scrollHeight - card.scrollTop - card.clientHeight;
+      if (distanceFromBottom <= 48) {
+        card.scrollTop = card.scrollHeight;
+      }
     });
   }, [arena.agents]);
 
   // Auto-scroll synthesis into view when it appears
   useEffect(() => {
     if (arena.synthesis) {
+      const container = agentsContainerRef.current;
+      // Avoid yanking the user around if they're reading earlier content.
+      if (container) {
+        const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+        if (distanceFromBottom > 96) return;
+      }
       synthRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [arena.synthesis]);

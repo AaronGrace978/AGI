@@ -8,6 +8,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useStore } from '../store';
 import type { CognitiveStep } from '../types';
 import type { AutonomyLevel } from '../prime/policy';
+import { usePinnedAutoScroll } from '../hooks/usePinnedAutoScroll';
 
 type ApiResult = Record<string, unknown> & {
   success?: boolean;
@@ -106,7 +107,7 @@ export default function HandsPanel() {
   const [macroDetails, setMacroDetails] = useState('');
   const [prefKey, setPrefKey] = useState('');
   const [prefValue, setPrefValue] = useState('');
-  const logEndRef = useRef<HTMLDivElement>(null);
+  const handsLogRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const operatorProfile = useStore((s) => s.operatorProfile);
@@ -120,10 +121,12 @@ export default function HandsPanel() {
   const synthesisRunSnapshot = useStore((s) => s.synthesisRunSnapshot);
   const synthesisDigest = useStore((s) => s.synthesisDigest);
 
-  // Auto-scroll
-  useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [cognitive.steps]);
+  // Auto-scroll only while pinned to bottom (so you can scroll up mid-run).
+  usePinnedAutoScroll(
+    handsLogRef,
+    [cognitive.steps.length, cognitive.isActive],
+    { behavior: 'auto', bottomThresholdPx: 96 },
+  );
 
   useEffect(() => {
     void refreshRollbacks();
@@ -147,6 +150,9 @@ export default function HandsPanel() {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // While HANDS is actively running, allow free typing (including Enter/newlines)
+    // so the UI doesn't feel "frozen". Submit-on-Enter only when idle.
+    if (cognitive.isActive || emergencyStopActive) return;
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
@@ -1326,7 +1332,7 @@ export default function HandsPanel() {
       </div>
 
       {/* Cognitive Steps */}
-      <div className="hands-log">
+      <div className="hands-log" ref={handsLogRef}>
         {cognitive.steps.length === 0 && !cognitive.isActive ? (
           <div className="hands-empty">
             <div className="hands-empty-icon">✧</div>
@@ -1369,7 +1375,6 @@ export default function HandsPanel() {
                 <span>{cognitive.phase === 'thinking' ? 'Reasoning...' : cognitive.phase === 'acting' ? 'Executing...' : cognitive.phase === 'reflecting' ? 'Reflecting...' : 'Processing...'}</span>
               </div>
             )}
-            <div ref={logEndRef} />
           </div>
         )}
       </div>
@@ -1384,7 +1389,7 @@ export default function HandsPanel() {
             onKeyDown={handleKeyDown}
             placeholder="Set a goal... (e.g. 'Find all Python files and list them', 'Create a project folder structure')"
             rows={1}
-            disabled={cognitive.isActive || emergencyStopActive}
+            disabled={emergencyStopActive}
           />
           <button
             className="send-btn hands-send"

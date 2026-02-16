@@ -74,7 +74,7 @@ export async function runSovereignLoop(params: {
   seed: number;
   generate?: GenerateFn;
   onGeneration: (telemetry: SovereignTelemetry) => void;
-  onChampionDeployed?: (candidate: ForgeCandidate) => void;
+  onChampionDeployed?: (candidate: ForgeCandidate) => void | Promise<void>;
   shouldStop: () => boolean;
 }): Promise<SovereignRunResult> {
   const { policy, suite, seed, generate, onGeneration, onChampionDeployed, shouldStop } = params;
@@ -166,7 +166,7 @@ export async function runSovereignLoop(params: {
       if (best.score > 0.5 && onChampionDeployed) {
         logs.push(`CHAMPION DEPLOYED: ${best.id} (${(best.score * 100).toFixed(1)}%)`);
         championDeployed = true;
-        onChampionDeployed(best);
+        await Promise.resolve(onChampionDeployed(best));
       }
     }
 
@@ -198,7 +198,7 @@ export async function runSovereignLoop(params: {
   if (!championDeployed && best.score > 0.4 && onChampionDeployed) {
     logs.push(`FINAL CHAMPION DEPLOYED: ${best.id}`);
     championDeployed = true;
-    onChampionDeployed(best);
+    await Promise.resolve(onChampionDeployed(best));
   }
 
   const tel = buildTelemetry('converged', startTime, generation, totalCandidates, best, convergence, reports, logs, policy, championDeployed);
@@ -236,6 +236,7 @@ function buildTelemetry(
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
-    window.setTimeout(resolve, ms);
+    // Use global timer so this works in browser + Node (tests).
+    setTimeout(resolve, ms);
   });
 }

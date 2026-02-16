@@ -8,6 +8,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useStore } from '../store';
+import { usePinnedAutoScroll } from '../hooks/usePinnedAutoScroll';
 
 function formatPrediction(
   prediction: string | number | boolean | Record<string, unknown> | Array<unknown>,
@@ -652,11 +653,11 @@ function SparkLog() {
   const sparkLive = useStore((s) => s.sparkLiveLog);
   const logRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (logRef.current) {
-      logRef.current.scrollTop = logRef.current.scrollHeight;
-    }
-  }, [sparkLive, spark.logs]);
+  usePinnedAutoScroll(
+    logRef,
+    [sparkLive.length, spark.logs.length],
+    { behavior: 'auto', bottomThresholdPx: 64 },
+  );
 
   const allLogs = [...spark.logs, ...sparkLive];
 

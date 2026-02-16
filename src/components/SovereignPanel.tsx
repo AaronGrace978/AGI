@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store';
 import type { AutonomyLevel } from '../prime/policy';
 import HardeningPanel from './HardeningPanel';
+import { usePinnedAutoScroll } from '../hooks/usePinnedAutoScroll';
 
 const AUTONOMY_LEVELS: { id: AutonomyLevel; label: string; desc: string }[] = [
   { id: 'manual',      label: 'MANUAL',      desc: 'Every action requires approval' },
@@ -33,15 +34,17 @@ export default function SovereignPanel() {
   const killSovereign = useStore((s) => s.killSovereign);
   const resetSovereign = useStore((s) => s.resetSovereign);
 
-  const logEndRef = useRef<HTMLDivElement>(null);
+  const logScrollRef = useRef<HTMLDivElement>(null);
   const [showPolicy, setShowPolicy] = useState(false);
 
   const isRunning = sovereign.phase === 'evolving' || sovereign.phase === 'initializing';
 
-  // Auto-scroll log
-  useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [sovereign.logs.length]);
+  // Auto-scroll log only while pinned to bottom.
+  usePinnedAutoScroll(
+    logScrollRef,
+    [sovereign.logs.length],
+    { behavior: 'auto', bottomThresholdPx: 64 },
+  );
 
   return (
     <div className="sovereign-panel">
@@ -286,13 +289,12 @@ export default function SovereignPanel() {
         {/* ─── Live Log ───────────────────────────────────── */}
         <div className="sovereign-log">
           <h3>Runtime Log</h3>
-          <div className="sovereign-log-scroll">
+          <div className="sovereign-log-scroll" ref={logScrollRef}>
             {sovereign.logs.map((line, i) => (
               <div key={i} className={`sov-log-line ${line.startsWith('G') ? 'gen' : line.startsWith('══') ? 'header' : line.startsWith('──') ? 'divider' : ''}`}>
                 {line}
               </div>
             ))}
-            <div ref={logEndRef} />
           </div>
         </div>
       </div>
