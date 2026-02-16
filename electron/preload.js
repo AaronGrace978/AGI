@@ -91,6 +91,9 @@ contextBridge.exposeInMainWorld('api', {
     searchVector: (query, topK, typeFilter) => ipcRenderer.invoke('memory:searchVector', query, topK, typeFilter),
     vectorStats: () => ipcRenderer.invoke('memory:vectorStats'),
     listVectors: (options) => ipcRenderer.invoke('memory:listVectors', options),
+    export: () => ipcRenderer.invoke('memory:export'),
+    import: (importPath) => ipcRenderer.invoke('memory:import', importPath),
+    listExports: () => ipcRenderer.invoke('memory:listExports'),
   },
 
   // ─── LLM (Non-Streaming) ─────────────────────────────

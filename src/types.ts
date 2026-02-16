@@ -1083,6 +1083,9 @@ declare global {
             layer?: string;
           }>;
         }>;
+        export: () => Promise<{ success: boolean; path?: string; count?: number; error?: string }>;
+        import: (importPath?: string | null) => Promise<{ success: boolean; added?: number; updated?: number; skipped?: number; total?: number; error?: string }>;
+        listExports: () => Promise<{ success: boolean; exports?: Array<{ filename: string; path: string; size: number; modified: number }>; error?: string }>;
       };
       llm: {
         generate: (

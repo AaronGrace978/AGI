@@ -54,6 +54,9 @@ export default function MemoryPanel() {
   const [filterType, setFilterType] = useState<FilterType>('all');
   const [sortBy, setSortBy] = useState<SortType>('newest');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [exportStatus, setExportStatus] = useState<string>('');
 
   const normalizedQuery = debouncedQuery.trim();
   const isSearching = normalizedQuery.length > 0;
@@ -134,6 +137,54 @@ export default function MemoryPanel() {
     () => Object.entries(stats.byType || {}).sort((a, b) => b[1] - a[1]),
     [stats.byType],
   );
+
+  const handleExport = useCallback(async () => {
+    if (!window.api?.memory?.export) {
+      setError('Export not available');
+      return;
+    }
+    setExporting(true);
+    setExportStatus('');
+    try {
+      const result = await window.api.memory.export();
+      if (result.success) {
+        setExportStatus(`Exported ${result.count} memories to G:\\AGIPRIME\\Memory`);
+        setTimeout(() => setExportStatus(''), 5000);
+      } else {
+        setError(result.error || 'Export failed');
+      }
+    } catch (e) {
+      setError(`Export error: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    } finally {
+      setExporting(false);
+    }
+  }, []);
+
+  const handleImport = useCallback(async () => {
+    if (!window.api?.memory?.import) {
+      setError('Import not available');
+      return;
+    }
+    setImporting(true);
+    setExportStatus('');
+    setError('');
+    try {
+      const result = await window.api.memory.import();
+      if (result.success) {
+        setExportStatus(`Imported: ${result.added} added, ${result.updated} updated, ${result.skipped} skipped (total: ${result.total})`);
+        setTimeout(() => setExportStatus(''), 8000);
+        // Reload memories and overview
+        await loadOverview();
+        await loadMemories(false);
+      } else {
+        setError(result.error || 'Import failed');
+      }
+    } catch (e) {
+      setError(`Import error: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    } finally {
+      setImporting(false);
+    }
+  }, [loadOverview, loadMemories]);
 
   return (
     <div className="memory-panel">
@@ -218,6 +269,22 @@ export default function MemoryPanel() {
         >
           refresh
         </button>
+        <button
+          className="memory-refresh-btn"
+          onClick={handleExport}
+          disabled={exporting || loading}
+          style={{ background: exporting ? 'rgba(96, 165, 250, 0.25)' : undefined }}
+        >
+          {exporting ? 'exporting...' : 'export'}
+        </button>
+        <button
+          className="memory-refresh-btn"
+          onClick={handleImport}
+          disabled={importing || loading}
+          style={{ background: importing ? 'rgba(96, 165, 250, 0.25)' : undefined }}
+        >
+          {importing ? 'importing...' : 'import'}
+        </button>
       </div>
 
       <div className="memory-list-meta">
@@ -226,6 +293,7 @@ export default function MemoryPanel() {
           {isSearching ? ' search matches' : ' stored memories'}
         </span>
         {loading && <span>loading...</span>}
+        {exportStatus && <span style={{ color: '#86efac' }}>{exportStatus}</span>}
         {error && <span className="memory-error">{error}</span>}
       </div>
 

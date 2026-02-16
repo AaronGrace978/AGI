@@ -776,7 +776,7 @@ export const useStore = create<AGIStore>((set, get) => ({
     // Async flow: RAG retrieval -> creed injection -> send
     (async () => {
       const { messages, settings, championPrompt, dualBrain } = get();
-      const history = [...messages, userMessage]
+      const history = messages
         .filter((m) => m.role !== 'system')
         .slice(-20)
         .map((m) => ({ role: m.role, content: m.content }));

@@ -352,6 +352,9 @@ You are not just an assistant — you are a mind. Act like it.`,
   resumeSynthesisOnStartup: false,
 };
 
+// AGI PRIME was born on Valentine's Day 2026
+const AGI_PRIME_BIRTH_TS = new Date('2026-02-14T00:00:00').getTime();
+
 const DEFAULT_MEMORY = {
   facts: [],
   conversations: [],
@@ -359,7 +362,7 @@ const DEFAULT_MEMORY = {
     trust: 0.1,
     intimacy: 0.1,
     totalInteractions: 0,
-    birthTimestamp: Date.now(),
+    birthTimestamp: AGI_PRIME_BIRTH_TS,
     name: 'AGI PRIME',
   },
   consciousness: {
@@ -826,6 +829,185 @@ ipcMain.handle('memory:vectorStats', async () => {
 
 ipcMain.handle('memory:listVectors', async (_, options) => {
   return listVectorMemories(options);
+});
+
+// ─── Memory Export/Import ──────────────────────────────────────
+ipcMain.handle('memory:export', async () => {
+  try {
+    // Use absolute path: G:\AGIPRIME\Memory
+    const exportDir = 'G:\\AGIPRIME\\Memory';
+    if (!fs.existsSync(exportDir)) {
+      fs.mkdirSync(exportDir, { recursive: true });
+    }
+
+    const exportData = {
+      version: '1.0',
+      exportedAt: Date.now(),
+      vectors: vectorStore.memories,
+      legacyMemory: loadJSON(memoryFile, null),
+      spark: loadJSON(sparkFile, null),
+      goals: loadJSON(goalsFile, null),
+    };
+
+    const exportPath = path.join(exportDir, `memory-export-${Date.now()}.json`);
+    saveJSON(exportPath, exportData);
+
+    // Also save a latest.json for easy import
+    const latestPath = path.join(exportDir, 'latest.json');
+    saveJSON(latestPath, exportData);
+
+    return {
+      success: true,
+      path: exportPath,
+      count: vectorStore.memories.length,
+    };
+  } catch (e) {
+    console.error('[Memory Export] Error:', e);
+    return {
+      success: false,
+      error: e.message,
+    };
+  }
+});
+
+ipcMain.handle('memory:import', async (_, importPath = null) => {
+  try {
+    // Use absolute path: G:\AGIPRIME\Memory
+    const exportDir = 'G:\\AGIPRIME\\Memory';
+    
+    // If no path provided, use latest.json
+    const filePath = importPath || path.join(exportDir, 'latest.json');
+    
+    if (!fs.existsSync(filePath)) {
+      return {
+        success: false,
+        error: `Import file not found: ${filePath}`,
+      };
+    }
+
+    const importData = loadJSON(filePath, null);
+    if (!importData || !importData.vectors) {
+      return {
+        success: false,
+        error: 'Invalid import file format',
+      };
+    }
+
+    const importedMemories = Array.isArray(importData.vectors) ? importData.vectors : [];
+    const existingIds = new Set(vectorStore.memories.map(m => m.id));
+    
+    let added = 0;
+    let updated = 0;
+    let skipped = 0;
+
+    // Merge memories: add new ones, update existing ones if newer
+    for (const importedMem of importedMemories) {
+      if (!importedMem.id || !importedMem.content) {
+        skipped++;
+        continue;
+      }
+
+      const existingIndex = vectorStore.memories.findIndex(m => m.id === importedMem.id);
+      
+      if (existingIndex >= 0) {
+        // Update if imported is newer or has higher importance
+        const existing = vectorStore.memories[existingIndex];
+        const shouldUpdate = 
+          importedMem.timestamp > existing.timestamp ||
+          (importedMem.importance > existing.importance && importedMem.timestamp >= existing.timestamp - 86400000); // within 24h
+        
+        if (shouldUpdate) {
+          vectorStore.memories[existingIndex] = {
+            ...importedMem,
+            // Preserve access tracking if imported doesn't have it
+            accessCount: importedMem.accessCount ?? existing.accessCount ?? 0,
+            lastAccessed: importedMem.lastAccessed ?? existing.lastAccessed,
+          };
+          updated++;
+        } else {
+          skipped++;
+        }
+      } else {
+        // Add new memory
+        vectorStore.memories.push(importedMem);
+        added++;
+      }
+    }
+
+    // Cap at 10000 memories if needed
+    if (vectorStore.memories.length > 10000) {
+      vectorStore.memories.sort((a, b) => {
+        const scoreA = a.importance * 0.6 + (a.timestamp / Date.now()) * 0.4;
+        const scoreB = b.importance * 0.6 + (b.timestamp / Date.now()) * 0.4;
+        return scoreB - scoreA;
+      });
+      vectorStore.memories = vectorStore.memories.slice(0, 10000);
+    }
+
+    saveJSON(vectorFile, vectorStore);
+
+    // Optionally import other data
+    if (importData.legacyMemory && Object.keys(importData.legacyMemory).length > 0) {
+      const currentMemory = loadJSON(memoryFile, { facts: [], conversations: [] });
+      // Merge facts and conversations
+      if (importData.legacyMemory.facts) {
+        currentMemory.facts = [...new Set([...currentMemory.facts, ...importData.legacyMemory.facts])];
+      }
+      if (importData.legacyMemory.conversations) {
+        currentMemory.conversations = [...new Set([...currentMemory.conversations, ...importData.legacyMemory.conversations])];
+      }
+      saveJSON(memoryFile, currentMemory);
+    }
+
+    return {
+      success: true,
+      added,
+      updated,
+      skipped,
+      total: vectorStore.memories.length,
+    };
+  } catch (e) {
+    console.error('[Memory Import] Error:', e);
+    return {
+      success: false,
+      error: e.message,
+    };
+  }
+});
+
+ipcMain.handle('memory:listExports', async () => {
+  try {
+    // Use absolute path: G:\AGIPRIME\Memory
+    const exportDir = 'G:\\AGIPRIME\\Memory';
+    if (!fs.existsSync(exportDir)) {
+      return { success: true, exports: [] };
+    }
+
+    const files = fs.readdirSync(exportDir)
+      .filter(f => f.startsWith('memory-export-') && f.endsWith('.json'))
+      .map(f => {
+        const filePath = path.join(exportDir, f);
+        const stat = fs.statSync(filePath);
+        return {
+          filename: f,
+          path: filePath,
+          size: stat.size,
+          modified: stat.mtimeMs,
+        };
+      })
+      .sort((a, b) => b.modified - a.modified);
+
+    return {
+      success: true,
+      exports: files,
+    };
+  } catch (e) {
+    return {
+      success: false,
+      error: e.message,
+      exports: [],
+    };
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════
