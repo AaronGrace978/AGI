@@ -38,10 +38,9 @@ function isLikelyArenaRequest(text: string): boolean {
     /^\/(arena|mind)\b/i.test(text.trim());
 }
 
-function isLikelyImproveRequest(text: string): boolean {
-  const t = text.toLowerCase();
-  return /\b(forge|evolve|evolution|self-improve|improve yourself|optimize yourself|gauntlet|benchmark)\b/i.test(t) ||
-    /^\/(forge|evolve|improve)\b/i.test(text.trim());
+function isLikelyImproveRequest(_text: string): boolean {
+  // Only explicit /forge, /evolve, /improve (handled above) route to FORGE/SOVEREIGN.
+  return false;
 }
 
 export function executiveRoute(params: {

@@ -1011,10 +1011,23 @@ declare global {
     api: {
       chat: {
         send: (messages: Array<{ role: string; content: string }>, config?: Record<string, unknown>) => void;
-        onChunk: (cb: (data: { content: string; fullText: string }) => void) => () => void;
-        onDone: (cb: (data: { content: string; model: string; provider: string }) => void) => () => void;
-        onError: (cb: (data: { message: string }) => void) => () => void;
+        onChunk: (cb: (data: { runId?: string | null; content: string; fullText: string }) => void) => () => void;
+        onDone: (cb: (data: { runId?: string | null; content: string; model: string; provider: string }) => void) => () => void;
+        onError: (cb: (data: { runId?: string | null; message: string }) => void) => () => void;
         removeAllListeners: () => void;
+      };
+      chatHistory?: {
+        export: (messages: ChatMessage[]) => Promise<{ success: boolean; canceled?: boolean; path?: string; count?: number; error?: string }>;
+        import: () => Promise<{ success: boolean; canceled?: boolean; messages?: ChatMessage[]; path?: string; count?: number; error?: string }>;
+        list: () => Promise<{ success: boolean; chats?: Array<{ path: string; filename: string; modified: number; size: number }>; error?: string }>;
+        load: (filePath: string) => Promise<{ success: boolean; messages?: ChatMessage[]; count?: number; error?: string }>;
+      };
+      conversations?: {
+        list: () => Promise<{ success: boolean; conversations?: Array<{ id: string; title: string; createdAt: number; updatedAt: number; messageCount: number; lastMessagePreview?: string }>; activeConversationId?: string | null; error?: string }>;
+        load: (conversationId: string) => Promise<{ success: boolean; conversation?: Conversation; error?: string }>;
+        save: (conversation: Conversation) => Promise<{ success: boolean; meta?: { id: string; title: string; createdAt: number; updatedAt: number; messageCount: number; lastMessagePreview?: string }; error?: string }>;
+        rename: (conversationId: string, title: string) => Promise<{ success: boolean; title?: string; error?: string }>;
+        delete: (conversationId: string) => Promise<{ success: boolean; error?: string }>;
       };
       arena: {
         start: (prompt: ArenaStartRequest, config?: Record<string, unknown>) => void;
