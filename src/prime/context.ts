@@ -8,11 +8,19 @@ import { buildConscienceSummary, CONSCIENCE_SYSTEM_DIRECTIVE } from './conscienc
 
 export type ChatLikeMessage = { role: string; content: string };
 
+export interface SparkContextSnapshot {
+  activeGoals?: string[];
+  recentInsights?: string[];
+  circadianPhase?: string;
+  curiosityQuestion?: string;
+}
+
 export interface SystemAddendumInput {
   ragContext?: string;
   conscienceState?: ConscienceState | null;
   championPrompt?: string | null;
   slowBrainDirective?: string;
+  sparkContext?: SparkContextSnapshot | null;
 }
 
 export function buildSystemAddendum(input: SystemAddendumInput): string {
@@ -35,6 +43,27 @@ export function buildSystemAddendum(input: SystemAddendumInput): string {
 
   if (input.slowBrainDirective) {
     chunks.push(input.slowBrainDirective.trim());
+  }
+
+  // Inject SPARK cognitive state — goals, insights, curiosity
+  if (input.sparkContext) {
+    const sparkParts: string[] = [];
+    const sc = input.sparkContext;
+    if (sc.activeGoals && sc.activeGoals.length > 0) {
+      sparkParts.push(`ACTIVE GOALS: ${sc.activeGoals.join('; ')}`);
+    }
+    if (sc.recentInsights && sc.recentInsights.length > 0) {
+      sparkParts.push(`RECENT INSIGHTS: ${sc.recentInsights.join(' | ')}`);
+    }
+    if (sc.curiosityQuestion) {
+      sparkParts.push(`OPEN QUESTION: ${sc.curiosityQuestion}`);
+    }
+    if (sc.circadianPhase) {
+      sparkParts.push(`COGNITIVE PHASE: ${sc.circadianPhase}`);
+    }
+    if (sparkParts.length > 0) {
+      chunks.push(`=== INTERNAL STATE ===\n${sparkParts.join('\n')}\n=== END STATE ===`);
+    }
   }
 
   return chunks.filter(Boolean).join('\n\n').trim();

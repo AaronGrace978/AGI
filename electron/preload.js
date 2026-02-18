@@ -26,6 +26,23 @@ contextBridge.exposeInMainWorld('api', {
     },
   },
 
+  // ─── Chat History (Export / Import / Past chats) ─────────────
+  chatHistory: {
+    export: (messages) => ipcRenderer.invoke('chatHistory:export', messages),
+    import: () => ipcRenderer.invoke('chatHistory:import'),
+    list: () => ipcRenderer.invoke('chatHistory:list'),
+    load: (filePath) => ipcRenderer.invoke('chatHistory:load', filePath),
+  },
+
+  // ─── Conversations (persisted Nexus sessions) ────────────────
+  conversations: {
+    list: () => ipcRenderer.invoke('conversations:list'),
+    load: (conversationId) => ipcRenderer.invoke('conversations:load', conversationId),
+    save: (conversation) => ipcRenderer.invoke('conversations:save', conversation),
+    rename: (conversationId, title) => ipcRenderer.invoke('conversations:rename', conversationId, title),
+    delete: (conversationId) => ipcRenderer.invoke('conversations:delete', conversationId),
+  },
+
   // ─── Arena ─────────────────────────────────────────────
   arena: {
     start: (prompt, config) => ipcRenderer.send('arena:start', prompt, config),

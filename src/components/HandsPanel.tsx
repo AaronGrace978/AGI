@@ -107,7 +107,7 @@ export default function HandsPanel() {
   const [macroDetails, setMacroDetails] = useState('');
   const [prefKey, setPrefKey] = useState('');
   const [prefValue, setPrefValue] = useState('');
-  const handsLogRef = useRef<HTMLDivElement>(null);
+  const handsPanelRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const operatorProfile = useStore((s) => s.operatorProfile);
@@ -123,7 +123,7 @@ export default function HandsPanel() {
 
   // Auto-scroll only while pinned to bottom (so you can scroll up mid-run).
   usePinnedAutoScroll(
-    handsLogRef,
+    handsPanelRef,
     [cognitive.steps.length, cognitive.isActive],
     { behavior: 'auto', bottomThresholdPx: 96 },
   );
@@ -550,7 +550,7 @@ export default function HandsPanel() {
   };
 
   return (
-    <div className="hands-panel">
+    <div className="hands-panel" ref={handsPanelRef}>
       {/* Header */}
       <div className="hands-header">
         <div className="hands-header-left">
@@ -1332,7 +1332,7 @@ export default function HandsPanel() {
       </div>
 
       {/* Cognitive Steps */}
-      <div className="hands-log" ref={handsLogRef}>
+      <div className="hands-log">
         {cognitive.steps.length === 0 && !cognitive.isActive ? (
           <div className="hands-empty">
             <div className="hands-empty-icon">✧</div>

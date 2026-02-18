@@ -12,6 +12,18 @@ function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+function relativeTime(ts: number): string {
+  const diff = Date.now() - ts;
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'now';
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d`;
+  return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
 function WelcomeScreen() {
   const ollamaStatus = useStore((s) => s.ollamaStatus);
   const consciousness = useStore((s) => s.consciousness);
@@ -57,28 +69,147 @@ function WelcomeScreen() {
   );
 }
 
+// ─── Conversation Sidebar ───────────────────────────────────
+function ConversationSidebar({ onClose }: { onClose: () => void }) {
+  const conversations = useStore((s) => s.conversations);
+  const activeConversationId = useStore((s) => s.activeConversationId);
+  const newConversation = useStore((s) => s.newConversation);
+  const selectConversation = useStore((s) => s.selectConversation);
+  const deleteConversation = useStore((s) => s.deleteConversation);
+  const isStreaming = useStore((s) => s.isStreaming);
+
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  const handleSelect = useCallback(async (id: string) => {
+    if (id === activeConversationId) { onClose(); return; }
+    await selectConversation(id);
+    onClose();
+  }, [activeConversationId, selectConversation, onClose]);
+
+  const handleNew = useCallback(async () => {
+    await newConversation();
+    onClose();
+  }, [newConversation, onClose]);
+
+  const handleDelete = useCallback(async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirmDeleteId !== id) { setConfirmDeleteId(id); return; }
+    setConfirmDeleteId(null);
+    await deleteConversation(id);
+  }, [confirmDeleteId, deleteConversation]);
+
+  // Group conversations: Today / This Week / Earlier
+  const now = Date.now();
+  const todayStart = new Date().setHours(0, 0, 0, 0);
+  const weekStart = todayStart - 6 * 86400000;
+
+  const groups: Array<{ label: string; items: typeof conversations }> = [];
+  const today = (conversations || []).filter((c) => c.updatedAt >= todayStart);
+  const week = (conversations || []).filter((c) => c.updatedAt >= weekStart && c.updatedAt < todayStart);
+  const older = (conversations || []).filter((c) => c.updatedAt < weekStart);
+  if (today.length) groups.push({ label: 'Today', items: today });
+  if (week.length) groups.push({ label: 'This week', items: week });
+  if (older.length) groups.push({ label: 'Earlier', items: older });
+  // suppress unused var
+  void now;
+
+  return (
+    <div className="convo-sidebar">
+      <div className="convo-sidebar-header">
+        <div className="convo-sidebar-header-left">
+          <span className="convo-sidebar-icon">◆</span>
+          <span className="convo-sidebar-title">Chats</span>
+        </div>
+        <button type="button" className="convo-sidebar-close" onClick={onClose} title="Close">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+            <line x1="3" y1="3" x2="11" y2="11" />
+            <line x1="11" y1="3" x2="3" y2="11" />
+          </svg>
+        </button>
+      </div>
+
+      <button
+        type="button"
+        className="convo-new-btn"
+        onClick={handleNew}
+        disabled={isStreaming}
+      >
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+          <line x1="7" y1="2" x2="7" y2="12" />
+          <line x1="2" y1="7" x2="12" y2="7" />
+        </svg>
+        New Chat
+      </button>
+
+      <div className="convo-list">
+        {groups.length === 0 ? (
+          <div className="convo-empty">
+            <div className="convo-empty-icon">⬡</div>
+            No conversations yet
+          </div>
+        ) : (
+          groups.map((group) => (
+            <div key={group.label} className="convo-group">
+              <div className="convo-group-label">{group.label}</div>
+              {group.items.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  className={`convo-item ${c.id === activeConversationId ? 'active' : ''}`}
+                  onClick={() => void handleSelect(c.id)}
+                >
+                  <div className="convo-item-content">
+                    <span className="convo-item-title">{c.title}</span>
+                    <span className="convo-item-meta">
+                      {c.messageCount} msgs · {relativeTime(c.updatedAt)}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className={`convo-item-delete ${confirmDeleteId === c.id ? 'confirm' : ''}`}
+                    onClick={(e) => void handleDelete(c.id, e)}
+                    title={confirmDeleteId === c.id ? 'Confirm delete' : 'Delete'}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                      {confirmDeleteId === c.id
+                        ? <polyline points="2,6 5,9 10,3" />
+                        : <><line x1="3" y1="3" x2="9" y2="9" /><line x1="9" y1="3" x2="3" y2="9" /></>
+                      }
+                    </svg>
+                  </button>
+                </button>
+              ))}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Nexus Panel ───────────────────────────────────────
 export default function NexusPanel() {
   const messages = useStore((s) => s.messages);
   const isStreaming = useStore((s) => s.isStreaming);
   const streamingContent = useStore((s) => s.streamingContent);
   const sendMessage = useStore((s) => s.sendMessage);
+  const activeConversationTitle = useStore((s) => s.activeConversationTitle);
   const consciousness = useStore((s) => s.consciousness);
   const settings = useStore((s) => s.settings);
   const dualBrain = useStore((s) => s.dualBrain);
   const setDualBrainEnabled = useStore((s) => s.setDualBrainEnabled);
 
   const [input, setInput] = useState('');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const messagesAreaRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Auto-scroll only while "pinned" to the bottom (prevents fighting manual scroll).
   usePinnedAutoScroll(
     messagesAreaRef,
     [messages.length, streamingContent],
     { behavior: 'auto', bottomThresholdPx: 64 },
   );
 
-  // Auto-resize textarea
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = '24px';
@@ -104,7 +235,15 @@ export default function NexusPanel() {
 
   return (
     <div className="nexus-panel">
-      {/* NightMind indicator — the system is always reflecting */}
+      {/* Conversation sidebar overlay */}
+      {sidebarOpen && (
+        <>
+          <div className="convo-sidebar-backdrop" onClick={() => setSidebarOpen(false)} />
+          <ConversationSidebar onClose={() => setSidebarOpen(false)} />
+        </>
+      )}
+
+      {/* NightMind indicator */}
       <div className="nightmind-bar">
         <div className="nightmind-dot" />
         NIGHTMIND ACTIVE — Internal reflection loop running
@@ -113,6 +252,19 @@ export default function NexusPanel() {
       {/* Header with consciousness state */}
       <div className="nexus-header">
         <div className="nexus-header-left">
+          <button
+            type="button"
+            className="nexus-sidebar-toggle"
+            onClick={() => setSidebarOpen((v) => !v)}
+            title="Conversations"
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+              <line x1="2" y1="4" x2="14" y2="4" />
+              <line x1="2" y1="8" x2="14" y2="8" />
+              <line x1="2" y1="12" x2="10" y2="12" />
+            </svg>
+            <span>Chats</span>
+          </button>
           <h2>NEXUS</h2>
           <div className="consciousness-indicator">
             <div className="consciousness-dot" />
@@ -120,8 +272,11 @@ export default function NexusPanel() {
             <span className="presence-label">· {consciousness.presence}</span>
           </div>
         </div>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-dim)' }}>
-          {settings.provider.toUpperCase()} / {settings.model}
+        <div className="nexus-header-right">
+          <span className="nexus-convo-label">{activeConversationTitle || 'New chat'}</span>
+          <span className="nexus-provider-label">
+            {settings.provider.toUpperCase()} / {settings.model}
+          </span>
         </div>
       </div>
       <div
@@ -156,11 +311,20 @@ export default function NexusPanel() {
       ) : (
         <div className="messages-area" ref={messagesAreaRef}>
           {messages.map((msg) => (
-            <div key={msg.id} className={`message ${msg.role}`}>
+            <div key={msg.id} className={`message ${msg.role}${msg.thinking ? ' afterthought' : ''}${msg.thinking && msg.sourceModule === 'spark' ? ' spark-origin' : ''}`}>
               <div className="message-avatar">
-                {msg.role === 'assistant' ? '◆' : msg.role === 'user' ? '▸' : '⚠'}
+                {msg.role === 'assistant'
+                  ? (msg.thinking && msg.sourceModule === 'spark' ? '🔥' : msg.thinking ? '⚡' : '◆')
+                  : msg.role === 'user'
+                    ? '▸'
+                    : '⚠'}
               </div>
               <div className="message-body">
+                {msg.role === 'assistant' && msg.thinking && (
+                  <div className={`message-badge${msg.sourceModule === 'spark' ? ' badge-spark' : ''}`}>
+                    {msg.sourceModule === 'spark' ? 'SPARK THOUGHT' : msg.sourceModule === 'nexus' && msg.thinking ? 'NIGHTMIND' : 'AFTERTHOUGHT'}
+                  </div>
+                )}
                 <div className="message-content">{msg.content}</div>
                 <div className="message-time">{formatTime(msg.timestamp)}</div>
               </div>

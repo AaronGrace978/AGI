@@ -63,7 +63,10 @@ import {
   searchMemories,
   buildRAGContext,
   storeConversationMemory,
+  storeInsight,
+  storeMemory,
 } from './prime/memory';
+import type { Conversation } from './types';
 import {
   createDefaultSparkState,
   runSparkCycle,
@@ -119,6 +122,10 @@ let messageCounter = 0;
 let initializeInFlight: Promise<void> | null = null;
 function genId(): string {
   return `msg_${Date.now()}_${++messageCounter}`;
+}
+
+function genConversationId(): string {
+  return `c_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 type PendingConsolidationEpisode = MemoryConsolidationState['pendingEpisodes'][number];
@@ -556,6 +563,25 @@ interface AGIStore {
   setDualBrainEnabled: (enabled: boolean) => void;
   setDualBrainThresholds: (complexity: number, uncertainty: number) => void;
   clearMessages: () => void;
+  loadChatHistory: (messages: ChatMessage[]) => void;
+
+  // NEXUS — Conversations (persisted chat logs + AI titles)
+  conversations: Array<{
+    id: string;
+    title: string;
+    createdAt: number;
+    updatedAt: number;
+    messageCount: number;
+    lastMessagePreview?: string;
+  }>;
+  activeConversationId: string | null;
+  activeConversationTitle: string;
+  activeConversationCreatedAt: number | null;
+  loadConversations: () => Promise<void>;
+  newConversation: () => Promise<void>;
+  selectConversation: (conversationId: string) => Promise<void>;
+  renameConversation: (conversationId: string, title: string) => Promise<void>;
+  deleteConversation: (conversationId: string) => Promise<void>;
 
   // HEART — Consciousness
   consciousness: ConsciousnessState;
@@ -729,6 +755,10 @@ export const useStore = create<AGIStore>((set, get) => ({
   messages: [],
   isStreaming: false,
   streamingContent: '',
+  conversations: [],
+  activeConversationId: null,
+  activeConversationTitle: 'New chat',
+  activeConversationCreatedAt: null,
   dualBrain: {
     enabled: true,
     complexityThreshold: 0.45,
@@ -740,6 +770,11 @@ export const useStore = create<AGIStore>((set, get) => ({
   },
 
   sendMessage: (content: string) => {
+    const isNewConversation = !get().activeConversationId;
+    const conversationId = (get().activeConversationId || genConversationId()) as string;
+    const conversationCreatedAt = get().activeConversationCreatedAt || Date.now();
+    const runId = `chat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
     const userMessage: ChatMessage = {
       id: genId(),
       role: 'user',
@@ -752,6 +787,9 @@ export const useStore = create<AGIStore>((set, get) => ({
       isStreaming: true,
       streamingContent: '',
       moduleStates: { ...state.moduleStates, nexus: 'processing' },
+      ...(isNewConversation
+        ? { activeConversationId: conversationId, activeConversationTitle: 'New chat', activeConversationCreatedAt: conversationCreatedAt }
+        : {}),
       spark: {
         ...state.spark,
         social: updateSocialFromInteraction(state.spark.social, {
@@ -772,6 +810,25 @@ export const useStore = create<AGIStore>((set, get) => ({
         }),
       },
     }));
+
+    // Persist user message to the active conversation (fire-and-forget).
+    (async () => {
+      if (!window.api?.conversations?.save) return;
+      try {
+        const s = get();
+        if (!s.activeConversationId) return;
+        const convo: Conversation = {
+          id: s.activeConversationId,
+          title: s.activeConversationTitle || 'New chat',
+          createdAt: s.activeConversationCreatedAt || Date.now(),
+          updatedAt: Date.now(),
+          messages: s.messages,
+        };
+        await window.api.conversations.save(convo);
+      } catch {
+        // persistence failure is non-fatal
+      }
+    })();
 
     // Async flow: RAG retrieval -> creed injection -> send
     (async () => {
@@ -805,6 +862,25 @@ export const useStore = create<AGIStore>((set, get) => ({
             },
           ],
         }));
+
+        // Persist routing output as part of the conversation log.
+        (async () => {
+          if (!window.api?.conversations?.save) return;
+          try {
+            const s = get();
+            if (!s.activeConversationId) return;
+            const convo: Conversation = {
+              id: s.activeConversationId,
+              title: s.activeConversationTitle || 'New chat',
+              createdAt: s.activeConversationCreatedAt || Date.now(),
+              updatedAt: Date.now(),
+              messages: s.messages,
+            };
+            await window.api.conversations.save(convo);
+          } catch {
+            // non-fatal
+          }
+        })();
 
         // Dispatch to the correct subsystem.
         if (exec.mode === 'act') {
@@ -874,8 +950,15 @@ export const useStore = create<AGIStore>((set, get) => ({
 
       // Listen for stream chunks
       // Throttle chunk updates to avoid re-rendering the whole app on every token.
+      // Also detect natural "stream pauses" where the model stops for 3+ seconds
+      // then continues — these become afterthought messages.
       let chunkRaf: number | null = null;
       let latestFullText = '';
+      let lastChunkAt = 0;
+      const PAUSE_THRESHOLD_MS = 3000;
+      const streamSegments: Array<{ text: string; pauseBefore: boolean }> = [];
+      let currentSegmentStart = 0;
+
       const flushChunk = () => {
         chunkRaf = null;
         set({
@@ -887,28 +970,74 @@ export const useStore = create<AGIStore>((set, get) => ({
         });
       };
       window.api.chat.onChunk((data) => {
-        latestFullText = String(data?.fullText || '');
+        if (data?.runId && data.runId !== runId) return;
+        const now = Date.now();
+        const newText = String(data?.fullText || '');
+
+        // Detect a natural pause in the stream (model stopped, then resumed).
+        if (lastChunkAt > 0 && (now - lastChunkAt) >= PAUSE_THRESHOLD_MS && newText.length > latestFullText.length) {
+          const segmentText = latestFullText.slice(currentSegmentStart).trim();
+          if (segmentText.length > 20) {
+            streamSegments.push({
+              text: segmentText,
+              pauseBefore: streamSegments.length > 0,
+            });
+          }
+          currentSegmentStart = latestFullText.length;
+        }
+
+        lastChunkAt = now;
+        latestFullText = newText;
         if (chunkRaf !== null) return;
-        // requestAnimationFrame gives us at most ~60 updates/sec even if chunks are faster.
         chunkRaf = window.requestAnimationFrame(flushChunk);
       });
 
       // Listen for completion
       window.api.chat.onDone((data) => {
+        if (data?.runId && data.runId !== runId) return;
         if (chunkRaf !== null) {
           window.cancelAnimationFrame(chunkRaf);
           chunkRaf = null;
         }
+
+        const fullContent = String(data?.content || '');
+
+        // Capture the final segment.
+        const lastSegText = fullContent.slice(currentSegmentStart).trim();
+        if (lastSegText.length > 20) {
+          streamSegments.push({
+            text: lastSegText,
+            pauseBefore: streamSegments.length > 0,
+          });
+        }
+
+        // If the model naturally paused (2+ segments), split into
+        // a main message + afterthought(s). Otherwise, one message.
+        const hasNaturalPause = streamSegments.length >= 2;
+
+        const mainContent = hasNaturalPause ? streamSegments[0].text : fullContent;
         const assistantMessage: ChatMessage = {
           id: genId(),
           role: 'assistant',
-          content: data.content,
+          content: mainContent,
           timestamp: Date.now(),
           sourceModule: 'nexus',
         };
 
+        // Build afterthought messages from pause-separated segments.
+        const afterthoughts: ChatMessage[] = hasNaturalPause
+          ? streamSegments.slice(1).map((seg) => ({
+              id: genId(),
+              role: 'assistant' as const,
+              content: seg.text,
+              timestamp: Date.now(),
+              sourceModule: 'nexus' as const,
+              thinking: true,
+            }))
+          : [];
+
         set((state) => ({
-          messages: [...state.messages, assistantMessage],
+          messages: [...state.messages, assistantMessage, ...afterthoughts],
           isStreaming: false,
           streamingContent: '',
           moduleStates: { ...state.moduleStates, nexus: 'online' },
@@ -940,12 +1069,144 @@ export const useStore = create<AGIStore>((set, get) => ({
           },
         }));
 
+        if (afterthoughts.length > 0) {
+          console.log(`[Afterthought] Detected ${afterthoughts.length} natural pause(s) in stream — split into ${streamSegments.length} messages`);
+        }
+
+        // Persist assistant response into the active conversation.
+        (async () => {
+          if (!window.api?.conversations?.save) return;
+          try {
+            const s = get();
+            if (!s.activeConversationId) return;
+            const convo: Conversation = {
+              id: s.activeConversationId,
+              title: s.activeConversationTitle || 'New chat',
+              createdAt: s.activeConversationCreatedAt || Date.now(),
+              updatedAt: Date.now(),
+              messages: s.messages,
+            };
+            await window.api.conversations.save(convo);
+          } catch {
+            // non-fatal
+          }
+        })();
+
+        // Auto-title like ChatGPT: generate a short topic for "New chat".
+        (async () => {
+          const s = get();
+          if (!s.activeConversationId || !window.api?.conversations?.rename) return;
+          if (s.activeConversationTitle && s.activeConversationTitle !== 'New chat') return;
+
+          const firstTurns = s.messages
+            .filter((m) => m.role === 'user' || m.role === 'assistant')
+            .slice(0, 4)
+            .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
+            .join('\n')
+            .slice(0, 900);
+
+          // LLM is optional; fall back to a heuristic title.
+          let title = '';
+          try {
+            if (window.api?.llm?.generate) {
+              const raw = await window.api.llm.generate(
+                [
+                  { role: 'system', content: 'You generate short conversation titles. Output ONLY the title. 3-7 words. No quotes, no punctuation at the end.' },
+                  { role: 'user', content: `Conversation:\n${firstTurns}\n\nTitle:` },
+                ],
+                { provider: s.settings.provider, model: s.settings.model, temperature: 0.2, maxTokens: 24 },
+              );
+              title = String(raw || '').trim();
+            }
+          } catch {
+            // ignore title generation failures
+          }
+
+          if (!title) {
+            const seed = String(content || '').trim();
+            title = seed.split(/\s+/).slice(0, 7).join(' ');
+          }
+
+          title = title.replace(/^["'`]+|["'`]+$/g, '').trim();
+          title = title.replace(/[.?!:;,\-–—]+$/g, '').trim();
+          if (title.length > 64) title = title.slice(0, 64).trim();
+          if (!title || title.toLowerCase() === 'new chat') return;
+
+          set({ activeConversationTitle: title });
+          await window.api.conversations.rename(s.activeConversationId, title);
+          await get().loadConversations();
+        })();
+
         // Store conversation as episodic memory (async, fire-and-forget)
         storeConversationMemory(
           content,
           data.content,
           get().consciousness.soulFrame.currentEmotion,
         ).catch(() => {});
+
+        // === SELF-EVALUATION: Judge own response and store learnings ===
+        (async () => {
+          if (!window.api?.llm?.generate) return;
+          const assistantText = String(data?.content || '');
+          if (assistantText.length < 100) return; // skip trivial responses
+
+          try {
+            const s = get();
+            const raw = await window.api.llm.generate(
+              [
+                {
+                  role: 'system',
+                  content: `You are a self-evaluation module for an AGI system. Evaluate the assistant's response to the user.
+Output ONLY valid JSON with these fields:
+- "quality": number 1-10
+- "wasHelpful": boolean
+- "missed": string (what the response missed or could improve, or "" if nothing)
+- "learned": string (a procedural lesson for future responses, or "" if nothing new)
+- "shouldRemember": string (a key fact worth storing long-term, or "" if nothing)`,
+                },
+                {
+                  role: 'user',
+                  content: `USER MESSAGE:\n${content.slice(0, 500)}\n\nASSISTANT RESPONSE:\n${assistantText.slice(0, 800)}\n\nEvaluate:`,
+                },
+              ],
+              { provider: s.settings.provider, model: s.settings.model, temperature: 0.15, maxTokens: 200 },
+            );
+
+            const text = String(raw || '').trim();
+            const jsonMatch = text.match(/\{[\s\S]*\}/);
+            if (!jsonMatch) return;
+            const eval_ = JSON.parse(jsonMatch[0]);
+
+            // Store procedural lesson if the response had room to improve
+            if (eval_.learned && typeof eval_.learned === 'string' && eval_.learned.length > 10) {
+              await storeMemory(
+                `Self-eval lesson: ${eval_.learned}`,
+                'procedural',
+                { source: 'self-eval', importance: 0.75, tags: ['self-eval', 'lesson'] },
+              );
+            }
+
+            // Store important facts as semantic memory
+            if (eval_.shouldRemember && typeof eval_.shouldRemember === 'string' && eval_.shouldRemember.length > 10) {
+              await storeMemory(
+                eval_.shouldRemember,
+                'semantic',
+                { source: 'self-eval', importance: 0.7, tags: ['fact', 'learned'] },
+              );
+            }
+
+            // Log poor-quality responses as high-importance failures
+            if (typeof eval_.quality === 'number' && eval_.quality <= 4 && eval_.missed) {
+              await storeMemory(
+                `Response failure: ${eval_.missed}`,
+                'procedural',
+                { source: 'self-eval', importance: 0.9, tags: ['self-eval', 'failure'] },
+              );
+            }
+          } catch {
+            // Self-eval is non-fatal
+          }
+        })();
 
         // Feed consolidation queue (episodic -> semantic/procedural pipeline)
         set((state) => ({
@@ -972,6 +1233,73 @@ export const useStore = create<AGIStore>((set, get) => ({
           get().runMemoryConsolidation().catch(() => {});
         }
 
+        // === INLINE ACTION DETECTION: auto-dispatch HANDS when response implies action ===
+        (async () => {
+          if (!window.api?.llm?.generate) return;
+          const assistantText = String(data?.content || '');
+          if (assistantText.length < 150) return;
+          const s = get();
+          if (s.cognitive.isActive) return; // HANDS already running
+          if (s.emergencyStopActive) return;
+
+          // Quick heuristic: does the response suggest taking an action?
+          const actionSignals = /\b(let me (search|look|check|find|open|create|write|read|browse)|i('ll| will| can) (search|look up|check|find|open|fetch|create|write)|searching for|looking up|i should (search|check|verify))\b/i;
+          if (!actionSignals.test(assistantText)) return;
+
+          try {
+            const raw = await window.api.llm.generate(
+              [
+                {
+                  role: 'system',
+                  content: `You are an action extraction module. Given an assistant response, determine if it implies a concrete action the AI should take autonomously (web search, file operation, code execution, etc).
+Output ONLY valid JSON:
+- "shouldAct": boolean
+- "action": string (brief description of what to do, or "")
+- "type": "search" | "file" | "code" | "browse" | "none"`,
+                },
+                {
+                  role: 'user',
+                  content: `ASSISTANT SAID:\n${assistantText.slice(0, 600)}\n\nExtract action:`,
+                },
+              ],
+              { provider: s.settings.provider, model: s.settings.model, temperature: 0.1, maxTokens: 120 },
+            );
+
+            const text = String(raw || '').trim();
+            const jsonMatch = text.match(/\{[\s\S]*\}/);
+            if (!jsonMatch) return;
+            const parsed = JSON.parse(jsonMatch[0]);
+
+            if (parsed.shouldAct && parsed.action && parsed.type !== 'none') {
+              // Dispatch to HANDS cognitive loop
+              const contextAddendum = buildSystemAddendum({
+                ragContext: '',
+                conscienceState: get().conscience,
+                championPrompt: get().championPrompt || '',
+              });
+              get().startCognitive({
+                goal: parsed.action,
+                contextAddendum,
+                origin: 'nexus',
+              });
+
+              // Notify user in chat
+              const actionMsg: ChatMessage = {
+                id: genId(),
+                role: 'system',
+                content: `🤖 Auto-dispatching HANDS: ${parsed.action}`,
+                timestamp: Date.now(),
+                sourceModule: 'hands',
+              };
+              set((s2) => ({
+                messages: [...s2.messages, actionMsg],
+              }));
+            }
+          } catch {
+            // Non-fatal
+          }
+        })();
+
         // Refresh consciousness from main process
         window.api.memory.get().then((mem: any) => {
           if (mem?.consciousness) {
@@ -991,6 +1319,7 @@ export const useStore = create<AGIStore>((set, get) => ({
 
       // Listen for errors
       window.api.chat.onError((data) => {
+        if (data?.runId && data.runId !== runId) return;
         const errorMessage: ChatMessage = {
           id: genId(),
           role: 'system' as const,
@@ -1036,19 +1365,72 @@ export const useStore = create<AGIStore>((set, get) => ({
       // Inject the Dino Buddy Creed — the soul rides with every message
       let soulHistory = injectCreed(history);
 
-      // Shared system addendum (RAG + Conscience + Champion + Slow-brain).
+      // Build SPARK cognitive state snapshot for the model
+      const sparkState = get().spark;
+      const sparkCtx = {
+        activeGoals: sparkState.goals.goals
+          .filter((g: SparkGoal) => g.status === 'active')
+          .slice(0, 3)
+          .map((g: SparkGoal) => g.description),
+        recentInsights: get().consciousness.insights.slice(-3),
+        circadianPhase: sparkState.metabolism.circadianPhase,
+        curiosityQuestion: sparkState.curiosity.questions
+          .filter((q: { status: string }) => q.status === 'open')
+          .slice(0, 1)
+          .map((q: { question: string }) => q.question)[0] || '',
+      };
+
+      // Shared system addendum (RAG + Conscience + Champion + Slow-brain + SPARK state).
       const addendum = buildSystemAddendum({
         ragContext,
         conscienceState: get().conscience,
         championPrompt,
         slowBrainDirective: routeDecision.route === 'slow' ? buildSlowBrainDirective() : '',
+        sparkContext: sparkCtx,
       });
       soulHistory = applySystemAddendum(soulHistory, addendum);
+
+      // Safety timeout: if no chunk/done/error arrives within 120s, unstick the UI.
+      const streamTimeout = window.setTimeout(() => {
+        if (get().isStreaming) {
+          set((state) => ({
+            isStreaming: false,
+            streamingContent: '',
+            moduleStates: { ...state.moduleStates, nexus: 'online' },
+            messages: [
+              ...state.messages,
+              {
+                id: genId(),
+                role: 'system' as const,
+                content: 'Response timed out — the model may be overloaded or unreachable. Try again.',
+                timestamp: Date.now(),
+              },
+            ],
+          }));
+        }
+      }, 120_000);
+
+      // Clear the safety timeout once any terminal event fires.
+      const origOnDone = window.api.chat.onDone;
+      const origOnError = window.api.chat.onError;
+      const clearSafetyTimeout = () => window.clearTimeout(streamTimeout);
+
+      // Re-wire done/error to also clear the timeout.
+      // The handlers already registered above will still fire first.
+      origOnDone.call(window.api.chat, (data) => {
+        if (data?.runId && data.runId !== runId) return;
+        clearSafetyTimeout();
+      });
+      origOnError.call(window.api.chat, (data) => {
+        if (data?.runId && data.runId !== runId) return;
+        clearSafetyTimeout();
+      });
 
       // Send to main process
       window.api.chat.send(soulHistory, {
         provider: settings.provider,
         model: settings.model,
+        runId,
         temperature: routeDecision.route === 'slow'
           ? Math.min(0.55, settings.temperature)
           : settings.temperature,
@@ -1074,6 +1456,97 @@ export const useStore = create<AGIStore>((set, get) => ({
   },
 
   clearMessages: () => set({ messages: [], streamingContent: '' }),
+  loadChatHistory: (messages) => set((state) => ({
+    messages: Array.isArray(messages)
+      ? messages.map((m) => ({
+          id: m.id || `msg-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+          role: m.role || 'user',
+          content: typeof m.content === 'string' ? m.content : '',
+          timestamp: typeof m.timestamp === 'number' ? m.timestamp : Date.now(),
+          sourceModule: m.sourceModule,
+          emotion: m.emotion,
+          thinking: m.thinking,
+        }))
+      : state.messages,
+    streamingContent: '',
+  })),
+
+  loadConversations: async () => {
+    if (!window.api?.conversations?.list || !window.api?.conversations?.load) return;
+    const listed = await window.api.conversations.list();
+    if (!listed?.success) return;
+
+    const conversations = Array.isArray(listed.conversations) ? listed.conversations : [];
+    const activeId = listed.activeConversationId || null;
+    set({ conversations, activeConversationId: activeId });
+
+    // On boot: auto-load the last active conversation (or the most recent).
+    const targetId = activeId || conversations[0]?.id || null;
+    if (!targetId) return;
+    const loaded = await window.api.conversations.load(targetId);
+    if (!loaded?.success || !loaded.conversation) return;
+    const convo = loaded.conversation as Conversation;
+    set({
+      messages: Array.isArray(convo.messages) ? convo.messages : [],
+      activeConversationId: convo.id,
+      activeConversationTitle: convo.title || 'New chat',
+      activeConversationCreatedAt: typeof convo.createdAt === 'number' ? convo.createdAt : Date.now(),
+      streamingContent: '',
+    });
+  },
+
+  newConversation: async () => {
+    if (!window.api?.conversations?.save) {
+      // Still allow a local new chat without persistence.
+      set({ messages: [], activeConversationId: genConversationId(), activeConversationTitle: 'New chat', activeConversationCreatedAt: Date.now() });
+      return;
+    }
+    const id = genConversationId();
+    const now = Date.now();
+    const convo: Conversation = { id, title: 'New chat', messages: [], createdAt: now, updatedAt: now };
+    set({ messages: [], activeConversationId: id, activeConversationTitle: 'New chat', activeConversationCreatedAt: now, streamingContent: '' });
+    await window.api.conversations.save(convo);
+    await get().loadConversations();
+  },
+
+  selectConversation: async (conversationId: string) => {
+    if (!conversationId || !window.api?.conversations?.load) return;
+    const loaded = await window.api.conversations.load(conversationId);
+    if (!loaded?.success || !loaded.conversation) return;
+    const convo = loaded.conversation as Conversation;
+    set({
+      messages: Array.isArray(convo.messages) ? convo.messages : [],
+      activeConversationId: convo.id,
+      activeConversationTitle: convo.title || 'New chat',
+      activeConversationCreatedAt: typeof convo.createdAt === 'number' ? convo.createdAt : Date.now(),
+      streamingContent: '',
+    });
+    await get().loadConversations();
+  },
+
+  renameConversation: async (conversationId: string, title: string) => {
+    if (!conversationId || !window.api?.conversations?.rename) return;
+    const trimmed = String(title || '').trim();
+    const finalTitle = trimmed || 'New chat';
+    await window.api.conversations.rename(conversationId, finalTitle);
+    set((state) => ({
+      activeConversationTitle: state.activeConversationId === conversationId ? finalTitle : state.activeConversationTitle,
+    }));
+    await get().loadConversations();
+  },
+
+  deleteConversation: async (conversationId: string) => {
+    if (!conversationId || !window.api?.conversations?.delete) return;
+    await window.api.conversations.delete(conversationId);
+    // If we deleted the active chat, fall back to the most recent, else start fresh.
+    const listed = window.api?.conversations?.list ? await window.api.conversations.list() : null;
+    const nextId = listed?.success ? (listed.activeConversationId || listed.conversations?.[0]?.id || null) : null;
+    if (nextId) {
+      await get().selectConversation(nextId);
+    } else {
+      await get().newConversation();
+    }
+  },
 
   // ─── HEART — Consciousness ────────────────────────────
   consciousness: DEFAULT_CONSCIOUSNESS,
@@ -3071,8 +3544,8 @@ export const useStore = create<AGIStore>((set, get) => ({
         return;
       }
 
-      // MEDIUM CYCLE: every ~3 min (if LLM available)
-      const mediumInterval = 180000; // 3 min
+      // MEDIUM CYCLE: every 90s (if LLM available) — Living Presence reflects from these
+      const mediumInterval = 90000; // 90s
       if (!sleepMode && hasLLM && now - thermo.lastMediumCycle > mediumInterval && thermo.cyclesLight >= 1) {
         const prevSpark = state.spark;
         set({ sparkBusy: true });
@@ -3088,19 +3561,45 @@ export const useStore = create<AGIStore>((set, get) => ({
           enqueueSparkLearningEpisodes(set, get, prevSpark, nextState, 'autonomy:medium');
           window.api?.spark?.saveState?.(nextState).catch(() => {});
 
-          // ─── AUTONOMOUS SPEECH: speak a thought after medium cycles ─────
-          const vState = get().voiceState;
-          if (vState.enabled && vState.autonomousSpeech && !vState.isSpeaking) {
-            // ~50% chance to speak after a medium cycle
-            if (Math.random() < 0.5) {
-              try {
-                const thought = await generateSpontaneousThought(nextState, llmGenerate);
-                if (thought) {
+          // ─── AUTONOMOUS THOUGHT: surface in chat + optional voice ─────
+          // This is the "conversation loop 8" — AGI PRIME thinks on its own
+          // and shares thoughts naturally in the Nexus chat.
+          if (Math.random() < 0.6) {
+            try {
+              const thought = await generateSpontaneousThought(nextState, llmGenerate);
+              if (thought) {
+                const proactiveMsg: ChatMessage = {
+                  id: genId(),
+                  role: 'assistant',
+                  content: thought,
+                  timestamp: Date.now(),
+                  sourceModule: 'spark',
+                  thinking: true,
+                };
+                set((s) => ({
+                  messages: [...s.messages, proactiveMsg],
+                }));
+
+                // Persist into active conversation
+                const convState = get();
+                if (convState.activeConversationId && window.api?.conversations?.save) {
+                  window.api.conversations.save({
+                    id: convState.activeConversationId,
+                    title: convState.activeConversationTitle || 'New chat',
+                    createdAt: convState.activeConversationCreatedAt || Date.now(),
+                    updatedAt: Date.now(),
+                    messages: convState.messages,
+                  } as Conversation).catch(() => {});
+                }
+
+                // Also speak it if voice is enabled
+                const vState = get().voiceState;
+                if (vState.enabled && vState.autonomousSpeech && !vState.isSpeaking) {
                   get().voiceSpeak(thought, 'spontaneous');
                 }
-              } catch {
-                // non-fatal
               }
+            } catch {
+              // non-fatal
             }
           }
 
@@ -3668,6 +4167,7 @@ export const useStore = create<AGIStore>((set, get) => ({
       timestamp: Date.now(),
     };
 
+    const logPreview = text.length > 80 ? `${text.slice(0, 80)}…` : text;
     set((s) => ({
       voiceState: {
         ...s.voiceState,
@@ -3675,6 +4175,7 @@ export const useStore = create<AGIStore>((set, get) => ({
         currentText: text,
         transcript: [...s.voiceState.transcript.slice(-50), entry],
       },
+      sparkLiveLog: [...s.sparkLiveLog.slice(-49), `[Living Presence] ${source}: ${logPreview}`],
     }));
 
     ttsSpeak(
@@ -3887,6 +4388,7 @@ export const useStore = create<AGIStore>((set, get) => ({
 
     initializeInFlight = (async () => {
       await get().loadSettings();
+      await get().loadConversations();
       await get().checkOllama();
       await get().loadSystemInfo();
 
@@ -3930,6 +4432,7 @@ export const useStore = create<AGIStore>((set, get) => ({
       }, 30000);
 
       // Listen for NightMind insights (internal reflection)
+      // Substantial insights also surface as proactive chat messages.
       if (window.api?.nightmind) {
         window.api.nightmind.onInsight((data: { insight: string; timestamp: number }) => {
           set((state) => ({
@@ -3938,6 +4441,21 @@ export const useStore = create<AGIStore>((set, get) => ({
               insights: [...state.consciousness.insights.slice(-19), data.insight],
             },
           }));
+
+          // Surface meaningful insights as chat messages (~40% chance, only long insights)
+          if (data.insight && data.insight.length > 60 && Math.random() < 0.4) {
+            const nightmindMsg: ChatMessage = {
+              id: genId(),
+              role: 'assistant',
+              content: data.insight,
+              timestamp: Date.now(),
+              sourceModule: 'nexus',
+              thinking: true,
+            };
+            set((state) => ({
+              messages: [...state.messages, nightmindMsg],
+            }));
+          }
         });
       }
     })();
