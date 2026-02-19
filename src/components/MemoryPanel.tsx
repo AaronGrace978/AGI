@@ -18,7 +18,7 @@ interface DisplayMemory {
 const PAGE_SIZE = 60;
 const SEARCH_TOPK = 40;
 const CONTENT_PREVIEW_CHARS = 320;
-const LEGACY_PREVIEW_COUNT = 5;
+const LEGACY_PREVIEW_COUNT = 12;
 
 function formatTimestamp(ts: number): string {
   if (!ts) return 'n/a';
@@ -114,7 +114,12 @@ export default function MemoryPanel() {
 
   useEffect(() => {
     void loadOverview();
-  }, [loadOverview]);
+    const unsubscribe = window.api?.nightmind?.onInsight?.(() => {
+      void loadOverview();
+      if (!isSearching) void loadMemories(false);
+    });
+    return () => { unsubscribe?.(); };
+  }, [loadOverview, loadMemories, isSearching]);
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedQuery(query), 250);

@@ -4167,13 +4167,65 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
       workingMemory.push(...initialObservations.slice(0, 3));
     }
 
-    const READ_ONLY_ACTIONS = new Set([
-      'read_file', 'list_directory', 'search_files', 'clipboard_read',
-      'system_info', 'list_processes', 'web_fetch', 'web_search',
-      'web_screenshot', 'screenshot_desktop', 'analyze_screen',
-      'get_screen_dimensions', 'get_foreground_window', 'get_mouse_position',
+    const PARALLEL_SAFE_ACTIONS = new Set([
+      'read_file',
+      'list_directory',
+      'search_files',
+      'clipboard_read',
+      'system_info',
+      'list_processes',
+      'web_fetch',
+      'web_search',
+      'web_screenshot',
+      'screenshot_desktop',
+      'analyze_screen',
+      'get_screen_dimensions',
+      'get_foreground_window',
+      'get_mouse_position',
       'list_custom_tools',
     ]);
+
+    const isParallelSafeAction = (action) => PARALLEL_SAFE_ACTIONS.has(action);
+    const ENFORCE_ACTION_GATES = true;
+    const READ_ONLY_ACTIONS = new Set(PARALLEL_SAFE_ACTIONS);
+    const REVERSIBLE_ACTIONS = new Set([
+      'write_file',
+      'rename_file',
+      'create_directory',
+      'mouse_move',
+      'mouse_scroll',
+      'keyboard_type',
+    ]);
+    const HIGH_RISK_ACTIONS = new Set([
+      'delete_file',
+      'execute_command',
+      'execute_tool',
+      'create_tool',
+      'open_url',
+      'open_file',
+      'open_application',
+      'mouse_click',
+      'mouse_drag',
+      'keyboard_press',
+      'keyboard_shortcut',
+    ]);
+
+    const classifyExecutionTier = (action) => {
+      if (READ_ONLY_ACTIONS.has(action)) return 'read-only';
+      if (REVERSIBLE_ACTIONS.has(action)) return 'reversible';
+      if (HIGH_RISK_ACTIONS.has(action)) return 'high-risk';
+      return 'high-risk';
+    };
+
+    const mapActionToPolicyGate = (action) => {
+      if (action === 'execute_command') return 'exec';
+      if (action === 'web_fetch' || action === 'web_search' || action === 'web_screenshot' || action === 'open_url') return 'network';
+      if (action === 'write_file' || action === 'delete_file' || action === 'rename_file' || action === 'create_directory') return 'fs-write';
+      if (action === 'screenshot_desktop' || action === 'analyze_screen' || action === 'get_screen_dimensions' || action === 'get_foreground_window') return 'screen';
+      if (action === 'mouse_move' || action === 'mouse_click' || action === 'mouse_scroll' || action === 'mouse_drag' || action === 'keyboard_type' || action === 'keyboard_press' || action === 'keyboard_shortcut') return 'input-sim';
+      if (action === 'create_tool') return 'tool-create';
+      return null;
+    };
 
     for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
       const iterationStartedAt = Date.now();
@@ -4386,66 +4438,6 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
             return { success: false, error: `Unknown action: ${action}` };
         }
       }
-
-      const PARALLEL_SAFE_ACTIONS = new Set([
-        'read_file',
-        'list_directory',
-        'search_files',
-        'clipboard_read',
-        'system_info',
-        'list_processes',
-        'web_fetch',
-        'web_search',
-        'web_screenshot',
-        'screenshot_desktop',
-        'analyze_screen',
-        'get_screen_dimensions',
-        'get_foreground_window',
-        'get_mouse_position',
-        'list_custom_tools',
-      ]);
-
-      const isParallelSafeAction = (action) => PARALLEL_SAFE_ACTIONS.has(action);
-      const ENFORCE_ACTION_GATES = true;
-      const READ_ONLY_ACTIONS = new Set(PARALLEL_SAFE_ACTIONS);
-      const REVERSIBLE_ACTIONS = new Set([
-        'write_file',
-        'rename_file',
-        'create_directory',
-        'mouse_move',
-        'mouse_scroll',
-        'keyboard_type',
-      ]);
-      const HIGH_RISK_ACTIONS = new Set([
-        'delete_file',
-        'execute_command',
-        'execute_tool',
-        'create_tool',
-        'open_url',
-        'open_file',
-        'open_application',
-        'mouse_click',
-        'mouse_drag',
-        'keyboard_press',
-        'keyboard_shortcut',
-      ]);
-
-      const classifyExecutionTier = (action) => {
-        if (READ_ONLY_ACTIONS.has(action)) return 'read-only';
-        if (REVERSIBLE_ACTIONS.has(action)) return 'reversible';
-        if (HIGH_RISK_ACTIONS.has(action)) return 'high-risk';
-        return 'high-risk';
-      };
-
-      const mapActionToPolicyGate = (action) => {
-        if (action === 'execute_command') return 'exec';
-        if (action === 'web_fetch' || action === 'web_search' || action === 'web_screenshot' || action === 'open_url') return 'network';
-        if (action === 'write_file' || action === 'delete_file' || action === 'rename_file' || action === 'create_directory') return 'fs-write';
-        if (action === 'screenshot_desktop' || action === 'analyze_screen' || action === 'get_screen_dimensions' || action === 'get_foreground_window') return 'screen';
-        if (action === 'mouse_move' || action === 'mouse_click' || action === 'mouse_scroll' || action === 'mouse_drag' || action === 'keyboard_type' || action === 'keyboard_press' || action === 'keyboard_shortcut') return 'input-sim';
-        if (action === 'create_tool') return 'tool-create';
-        return null;
-      };
 
       const evaluateActionGate = (action, stepParams) => {
         const tier = classifyExecutionTier(action);
