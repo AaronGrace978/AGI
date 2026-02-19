@@ -194,6 +194,7 @@ export default function NexusPanel() {
   const streamingContent = useStore((s) => s.streamingContent);
   const sendMessage = useStore((s) => s.sendMessage);
   const activeConversationTitle = useStore((s) => s.activeConversationTitle);
+  const activeConversationId = useStore((s) => s.activeConversationId);
   const consciousness = useStore((s) => s.consciousness);
   const settings = useStore((s) => s.settings);
   const dualBrain = useStore((s) => s.dualBrain);
@@ -203,12 +204,25 @@ export default function NexusPanel() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const messagesAreaRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const shouldScrollToBottomRef = useRef(true);
 
-  usePinnedAutoScroll(
+  const { scrollToBottomNow } = usePinnedAutoScroll(
     messagesAreaRef,
     [messages.length, streamingContent],
     { behavior: 'auto', bottomThresholdPx: 64 },
   );
+
+  // When opening or switching conversations, start at the bottom so you see latest messages
+  useEffect(() => {
+    shouldScrollToBottomRef.current = true;
+  }, [activeConversationId]);
+  useEffect(() => {
+    if (messages.length === 0) return;
+    if (!shouldScrollToBottomRef.current) return;
+    shouldScrollToBottomRef.current = false;
+    const raf = requestAnimationFrame(() => scrollToBottomNow());
+    return () => cancelAnimationFrame(raf);
+  }, [messages, scrollToBottomNow]);
 
   useEffect(() => {
     if (textareaRef.current) {

@@ -21,6 +21,7 @@ export interface SystemAddendumInput {
   championPrompt?: string | null;
   slowBrainDirective?: string;
   sparkContext?: SparkContextSnapshot | null;
+  pieContext?: string;
 }
 
 export function buildSystemAddendum(input: SystemAddendumInput): string {
@@ -43,6 +44,11 @@ export function buildSystemAddendum(input: SystemAddendumInput): string {
 
   if (input.slowBrainDirective) {
     chunks.push(input.slowBrainDirective.trim());
+  }
+
+  // Inject PIE engine results — empirically locked programs
+  if (input.pieContext) {
+    chunks.push(input.pieContext.trim());
   }
 
   // Inject SPARK cognitive state — goals, insights, curiosity

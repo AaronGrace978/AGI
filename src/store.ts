@@ -75,6 +75,7 @@ import {
   runMediumCycle,
   createGoal,
 } from './prime/spark';
+import { detectARCTask, runPIE, formatPIEContext } from './prime/pie';
 import {
   createDefaultGauntletCapabilities,
   runCapabilityGauntlet,
@@ -1380,13 +1381,80 @@ Output ONLY valid JSON:
           .map((q: { question: string }) => q.question)[0] || '',
       };
 
-      // Shared system addendum (RAG + Conscience + Champion + Slow-brain + SPARK state).
+      // PIE — Parallel Invariant Engine: detect ARC tasks and run deterministic program induction
+      let pieContextStr = '';
+      let pieDirectAnswer: string | null = null;
+      const arcDetection = detectARCTask(content);
+      if (arcDetection && arcDetection.trainingPairs.length >= 2) {
+        const pieResult = runPIE(arcDetection.trainingPairs, arcDetection.testInput ?? undefined);
+        if (pieResult.lockedProgram) {
+          const nextPie = {
+            active: true,
+            trainingPairs: arcDetection.trainingPairs,
+            candidates: pieResult.candidates.slice(0, 50),
+            survivors: pieResult.survivors.slice(0, 50),
+            lockedProgram: pieResult.lockedProgram,
+            lockedProgramLabel: pieResult.lockedProgramLabel,
+            falsificationLog: pieResult.candidates
+              .flatMap((c) => c.falsifications)
+              .filter((f) => !f.passed)
+              .slice(0, 100),
+            adversarialTests: pieResult.adversarialTests,
+            totalRuns: (get().spark.pie?.totalRuns ?? 0) + 1,
+            lastRunAt: Date.now(),
+          };
+          set((s) => ({ spark: { ...s.spark, pie: nextPie } }));
+          pieContextStr = formatPIEContext(nextPie);
+
+          // If the user explicitly asks for output-only, bypass LLM and reply deterministically.
+          const wantsOutputOnly =
+            /return\\s+only\\s+the\\s+output\\s+grid|output\\s+grid\\s+only|no\\s+explanation/i.test(content);
+          if (wantsOutputOnly && pieResult.testOutput) {
+            pieDirectAnswer = pieResult.testOutput.map((r) => r.join(' ')).join('\\n');
+          }
+        }
+      }
+
+      if (pieDirectAnswer) {
+        const assistantMsg: ChatMessage = {
+          id: genId(),
+          role: 'assistant',
+          content: pieDirectAnswer,
+          timestamp: Date.now(),
+          sourceModule: 'spark',
+        };
+
+        set((s) => ({
+          isStreaming: false,
+          streamingContent: '',
+          moduleStates: { ...s.moduleStates, nexus: 'online' },
+          messages: [...s.messages, assistantMsg],
+          consciousness: { ...s.consciousness, presence: 'present' },
+        }));
+
+        // Persist into active conversation (best-effort)
+        const convState = get();
+        if (convState.activeConversationId && window.api?.conversations?.save) {
+          window.api.conversations.save({
+            id: convState.activeConversationId,
+            title: convState.activeConversationTitle || 'New chat',
+            createdAt: convState.activeConversationCreatedAt || Date.now(),
+            updatedAt: Date.now(),
+            messages: convState.messages,
+          } as Conversation).catch(() => {});
+        }
+
+        return;
+      }
+
+      // Shared system addendum (RAG + Conscience + Champion + Slow-brain + SPARK state + PIE).
       const addendum = buildSystemAddendum({
         ragContext,
         conscienceState: get().conscience,
         championPrompt,
         slowBrainDirective: routeDecision.route === 'slow' ? buildSlowBrainDirective() : '',
         sparkContext: sparkCtx,
+        pieContext: pieContextStr,
       });
       soulHistory = applySystemAddendum(soulHistory, addendum);
 

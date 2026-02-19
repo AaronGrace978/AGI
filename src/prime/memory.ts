@@ -256,11 +256,16 @@ export async function listVectorMemories(options?: {
   if (!window.api?.memory?.listVectors) return { total: 0, memories: [] };
   try {
     const result = await window.api.memory.listVectors(options);
+    const coerceLayer = (layer: unknown): VectorMemory['layer'] | undefined => {
+      if (layer === 'working' || layer === 'short-term' || layer === 'long-term' || layer === 'core') return layer;
+      return undefined;
+    };
     return {
       total: result.total ?? 0,
       memories: (result.memories || []).map((m) => ({
         ...m,
         type: m.type as MemoryType,
+        layer: coerceLayer((m as any).layer),
       })),
     };
   } catch {

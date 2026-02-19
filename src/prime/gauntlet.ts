@@ -5,6 +5,7 @@ import type {
   GauntletProvenance,
 } from '../types';
 import type { GenerateFn } from './runtime';
+import { runPIEBenchmarkSuite } from './pie';
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -120,6 +121,18 @@ function keywordFallbackScore(response: string, capability: GauntletCapability):
 
 export function createDefaultGauntletCapabilities(): GauntletCapability[] {
   return [
+    {
+      id: 'pie-arc-bench',
+      name: 'PIE ARC Bench (Deterministic)',
+      description:
+        'Runs deterministic PIE grid benchmarks (solve-rate, runtime, robustness).',
+      category: 'reasoning',
+      testPrompt:
+        'DETERMINISTIC: Evaluate PIE on built-in grid bench suite. (No LLM required.)',
+      judgeCriteria:
+        'solve rate, runtime, robustness pass-rate',
+      weight: 1.6,
+    },
     {
       id: 'reasoning-depth',
       name: 'Reasoning Depth',
@@ -304,6 +317,19 @@ export async function runCapabilityGauntlet(params: {
 
     const t0 = Date.now();
     try {
+      if (capability.id === 'pie-arc-bench') {
+        const report = runPIEBenchmarkSuite();
+        const score = report.score;
+        results.push({
+          capabilityId: capability.id,
+          score,
+          passed: score >= 0.7,
+          summary: `PIE bench: solved ${report.solved}/${report.total}, avg ${report.avgMs.toFixed(0)}ms, robustness ${(report.robustnessPassRate * 100).toFixed(0)}%`,
+          latencyMs: Date.now() - t0,
+          provenance: 'synthetic',
+        });
+        continue;
+      }
       if (generate) {
         const candidateResponse = await generate(
           [

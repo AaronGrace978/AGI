@@ -809,10 +809,122 @@ export interface SparkState {
   goals: GoalState;
   selfmod: SelfModState;
   temporal: TemporalState;
+  pie: PIEState;
   thermo: SparkThermodynamics;
   logs: string[];
   lastCycleAt: number;
   uptime: number;
+}
+
+// ─── PIE: Parallel Invariant Engine ─────────────────────────────
+// Not narrative. Not explanation. Deterministic program induction.
+// Operates below language: enumerate → execute → falsify → lock.
+
+export type Grid = number[][];
+
+export type GridPrimitiveType =
+  | 'propagate_right'
+  | 'propagate_left'
+  | 'propagate_down'
+  | 'propagate_up'
+  | 'row_nearest_nonzero_fill'
+  | 'anchor_cols_mode_ge2'
+  | 'anchor_cols_bottom_keep_first_two_last'
+  | 'fill_last_two_with_rightmost_nonzero'
+  // Parameterized primitives (AST steps with args)
+  | 'translate_xy'
+  | 'recolor_replace'
+  | 'keep_k_largest_components_4'
+  // Object / shape primitives (4-connected)
+  | 'keep_largest_component_4'
+  | 'crop_to_bbox_nonzero'
+  | 'crop_to_bbox_largest_component_4'
+  | 'paint_bbox_nonzero_on_blank'
+  | 'paint_bbox_largest_component_4_on_blank'
+  | 'translate_nonzero_to_origin'
+  | 'translate_largest_component_4_to_origin'
+  | 'floodfill_zeros_from_origin_with_border_mode'
+  | 'floodfill_zeros_from_origin_with_nonzero_mode'
+  | 'fill_column_mode'
+  | 'fill_row_mode'
+  | 'fill_row_max'
+  | 'fill_column_max'
+  | 'tile_majority_row'
+  | 'tile_majority_col'
+  | 'transpose'
+  | 'rotate_cw'
+  | 'rotate_ccw'
+  | 'mirror_h'
+  | 'mirror_v'
+  | 'strip_zeros_to_value'
+  | 'identity';
+
+export interface GridPrimitive {
+  type: GridPrimitiveType;
+  label: string;
+  complexity: number; // MDL cost
+}
+
+export interface GridProgram {
+  id: string;
+  primitives: GridPrimitiveType[];
+  steps?: Array<{
+    prim: GridPrimitiveType;
+    args?: Record<string, number>;
+  }>;
+  complexity: number; // sum of primitive complexities
+  label: string;
+}
+
+export interface TrainingPair {
+  input: Grid;
+  output: Grid;
+}
+
+export interface FalsificationResult {
+  programId: string;
+  pairIndex: number;
+  input: Grid;
+  expected: Grid;
+  actual: Grid;
+  passed: boolean;
+  diff: number; // count of cells that differ
+  diffSamples?: Array<{ r: number; c: number; expected: number; actual: number }>;
+}
+
+export interface ProgramCandidate {
+  id: string;
+  program: GridProgram;
+  passCount: number;
+  totalPairs: number;
+  failedPairs: number[];
+  falsifications: FalsificationResult[];
+  eliminated: boolean;
+  eliminationReason?: string;
+}
+
+export interface AdversarialTest {
+  type: 'rotation' | 'noise_injection' | 'scale' | 'value_swap' | 'row_permutation' | 'col_permutation';
+  input: Grid;
+  description: string;
+  programStillValid: boolean;
+}
+
+export interface PIEState {
+  active: boolean;
+  trainingPairs: TrainingPair[];
+  candidates: ProgramCandidate[];
+  survivors: ProgramCandidate[];
+  lockedProgram: GridProgram | null;
+  lockedProgramLabel: string;
+  falsificationLog: FalsificationResult[];
+  adversarialTests: AdversarialTest[];
+  totalRuns: number;
+  lastRunAt: number;
+  autoTuneEnabled?: boolean;
+  lastAutoTuneAt?: number;
+  lastAutoTuneScore?: number; // 0-1 composite bench score
+  lastAutoTuneNotes?: string[];
 }
 
 // ─── CONSCIENCE: Ethical Reasoning Engine ────────────────────────
@@ -1103,8 +1215,22 @@ declare global {
       llm: {
         generate: (
           messages: Array<{ role: string; content: string }>,
-          config?: { temperature?: number; maxTokens?: number },
+          config?: {
+            // Common generation controls
+            temperature?: number;
+            maxTokens?: number;
+            // Model routing controls (used by the app)
+            provider?: string;
+            model?: string;
+            runId?: string;
+            // Allow forward-compatible fields without breaking types
+            [key: string]: unknown;
+          },
         ) => Promise<string>;
+      };
+      operatorProfile?: {
+        get: () => Promise<unknown>;
+        save: (profile: unknown) => Promise<void>;
       };
       system: {
         info: () => Promise<{

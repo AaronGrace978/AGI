@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════
 //  SPARK — Self-Propagating Autonomous Reasoning Kernel
-//  The cognitive architecture. Seven engines. One mind.
+//  The cognitive architecture. Nine engines. One mind.
 //
 //  1. SYMBOLIC REASONER  — Real math. Real logic. No hallucination.
 //  2. WORLD MODEL        — Dynamic knowledge graph.
@@ -10,8 +10,11 @@
 //  6. SELF-MODIFICATION  — Strategy evolution, tool generation.
 //  7. TEMPORAL REASONER  — Causal chains, prediction, learning.
 //  8. KERNEL             — Orchestrates the cycle.
+//  9. PIE                — Parallel Invariant Engine.
+//                          Deterministic program induction below language.
 //
 //  "The pain wasn't wasted. The pain was research."
+//  "Now the research compiles."
 // ═══════════════════════════════════════════════════════════════
 
 import type { GenerateFn } from './runtime';
@@ -40,6 +43,10 @@ import type {
   TemporalPrediction,
   MetaPrediction,
 } from '../types';
+import { createDefaultPIEState, detectARCTask, runPIE, formatPIEContext } from './pie';
+export { createDefaultPIEState, detectARCTask, runPIE, formatPIEContext } from './pie';
+export type { PIERunResult, DetectedARCTask } from './pie';
+import { evolvePIESearchDefaults } from './pie-evolve';
 
 // ═══════════════════════════════════════════════════════════════
 //  1. SYMBOLIC REASONER — Real math. Real logic. No hallucination.
@@ -1077,8 +1084,9 @@ export function createDefaultSparkState(): SparkState {
       activePredictions: [],
       predictionAccuracy: 0,
     },
+    pie: createDefaultPIEState(),
     thermo: { ...DEFAULT_THERMO },
-    logs: ['SPARK kernel initialized. Seven engines standing by. Awaiting ignition.'],
+    logs: ['SPARK kernel initialized. Nine engines standing by. PIE armed. Awaiting ignition.'],
     lastCycleAt: 0,
     uptime: 0,
   };
@@ -1169,6 +1177,42 @@ export async function runSparkCycle(
     }
   } catch {
     onLog('  Curiosity engine error');
+  }
+
+  // 2.5. PIE — Parallel Invariant Engine (deterministic, no LLM)
+  const arcTask = detectARCTask(input);
+  if (arcTask && arcTask.trainingPairs.length >= 2) {
+    onLog('◇ PIE: ARC-style task detected — activating Parallel Invariant Engine...');
+    onLog(`  Training pairs: ${arcTask.trainingPairs.length}, Test input: ${arcTask.testInput ? 'yes' : 'no'}`);
+    const pieResult = runPIE(arcTask.trainingPairs, arcTask.testInput ?? undefined);
+    onLog(`  Programs enumerated: ${pieResult.totalProgramsTested}`);
+    onLog(`  Eliminated: ${pieResult.eliminatedCount}`);
+    onLog(`  Survivors: ${pieResult.survivorCount}`);
+    if (pieResult.lockedProgram) {
+      onLog(`  ✓ LOCKED: "${pieResult.lockedProgramLabel}" (MDL=${pieResult.lockedProgram.complexity})`);
+      if (pieResult.testOutput) {
+        onLog(`  ✓ Test output: [${pieResult.testOutput.map(r => r.join(',')).join(' | ')}]`);
+      }
+      const advPassed = pieResult.adversarialTests.filter(t => t.programStillValid).length;
+      onLog(`  Adversarial: ${advPassed}/${pieResult.adversarialTests.length} passed`);
+    } else {
+      onLog('  ✗ No program in DSL explains all training pairs — LLM reasoning required');
+    }
+    next.pie = {
+      active: true,
+      trainingPairs: arcTask.trainingPairs,
+      candidates: pieResult.candidates.slice(0, 50),
+      survivors: pieResult.survivors.map(s => s),
+      lockedProgram: pieResult.lockedProgram,
+      lockedProgramLabel: pieResult.lockedProgramLabel,
+      falsificationLog: pieResult.candidates
+        .flatMap(c => c.falsifications)
+        .filter(f => !f.passed)
+        .slice(0, 100),
+      adversarialTests: pieResult.adversarialTests,
+      totalRuns: (next.pie?.totalRuns ?? 0) + 1,
+      lastRunAt: Date.now(),
+    };
   }
 
   // 3. HYBRID REASONING — Symbolic verification
@@ -1412,6 +1456,34 @@ export async function runDeepThought(
   // 5. Meta-cognition
   const calibration = calculateCalibration(next.metacognition.predictions);
   next.metacognition.calibrationScore = calibration;
+
+  // 6. PIE auto-tune (deterministic): evolve PIE search defaults using bench suite.
+  // This is "fitness pressure" at the architecture level: search knobs get tuned
+  // by deterministic performance, not narrative.
+  try {
+    const now = Date.now();
+    const pie = next.pie || createDefaultPIEState();
+    const enabled = pie.autoTuneEnabled !== false;
+    const last = pie.lastAutoTuneAt || 0;
+    const cooldownMs = 20 * 60 * 1000; // 20 min
+    if (enabled && (now - last) >= cooldownMs) {
+      onLog('◇ PIE: Auto-tuning search defaults (deterministic bench)...');
+      const rep = evolvePIESearchDefaults({ seed: now, iterations: 18 });
+      next.pie = {
+        ...pie,
+        autoTuneEnabled: true,
+        lastAutoTuneAt: now,
+        lastAutoTuneScore: rep.bestScore,
+        lastAutoTuneNotes: rep.notes.slice(-8),
+      };
+      onLog(
+        `  PIE tune: ${(rep.baselineScore * 100).toFixed(1)}% -> ${(rep.bestScore * 100).toFixed(1)}% (iters=${rep.iterations})`,
+      );
+      if (rep.notes.length > 0) onLog(`  ${rep.notes[rep.notes.length - 1]}`);
+    }
+  } catch {
+    onLog('  PIE auto-tune failed (non-fatal)');
+  }
 
   next.logs = [
     ...next.logs,
