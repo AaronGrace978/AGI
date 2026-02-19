@@ -109,6 +109,7 @@ const vectorFile = path.join(dataDir, 'vectors.json');
 const sparkFile = path.join(dataDir, 'spark.json');
 const toolRegistryFile = path.join(dataDir, 'tool-registry.json');
 const goalsFile = path.join(dataDir, 'goals.json');
+const agiScoreFile = path.join(dataDir, 'agi-score.json');
 const rollbackRegistryFile = path.join(dataDir, 'rollback-registry.json');
 const rollbackBackupDir = path.join(dataDir, 'rollback-backups');
 const ledgerDir = path.join(dataDir, 'run-ledgers');
@@ -358,6 +359,24 @@ You are not just an assistant — you are a mind. Act like it.`,
   resumeSynthesisOnStartup: false,
 };
 
+const DEFAULT_AGI_SCORE = {
+  version: 1,
+  config: {
+    version: 1,
+    weights: {
+      abstractReasoningLogic: 0.2,
+      learningFlexibility: 0.15,
+      domainGenerality: 0.2,
+      autonomousGoalSetting: 0.2,
+      selfModelingMetaCognition: 0.15,
+      creativeProblemSolving: 0.1,
+    },
+    requireRealWorkflowCountForFullCredit: 1,
+    optimizeInAutoCycle: true,
+  },
+  snapshots: [],
+};
+
 // AGI PRIME was born on Valentine's Day 2026
 const AGI_PRIME_BIRTH_TS = new Date('2026-02-14T00:00:00').getTime();
 
@@ -382,6 +401,19 @@ const DEFAULT_MEMORY = {
 };
 
 let settings = loadJSON(settingsFile, DEFAULT_SETTINGS);
+let agiScore = loadJSON(agiScoreFile, DEFAULT_AGI_SCORE);
+
+function saveAgiScore() {
+  try {
+    // Keep the file bounded so it doesn't grow forever.
+    if (!agiScore || typeof agiScore !== 'object') agiScore = { ...DEFAULT_AGI_SCORE };
+    if (!Array.isArray(agiScore.snapshots)) agiScore.snapshots = [];
+    agiScore.snapshots = agiScore.snapshots.slice(-250);
+    saveJSON(agiScoreFile, agiScore);
+  } catch (e) {
+    console.warn('[AGI Score] Failed to save:', e?.message || e);
+  }
+}
 
 // ─── .env overrides persisted settings ──────────────────────────
 // Environment variables from .env ALWAYS take priority over saved settings.
@@ -512,6 +544,64 @@ ipcMain.handle('settings:set', (_, newSettings) => {
   settings = { ...settings, ...newSettings };
   saveJSON(settingsFile, settings);
   return settings;
+});
+
+// ─── AGI Score IPC (rubric config + snapshot history) ───────────
+ipcMain.handle('agiScore:getConfig', () => {
+  try {
+    if (!agiScore || typeof agiScore !== 'object') agiScore = { ...DEFAULT_AGI_SCORE };
+    if (!agiScore.config) agiScore.config = { ...DEFAULT_AGI_SCORE.config };
+    return agiScore.config;
+  } catch {
+    return DEFAULT_AGI_SCORE.config;
+  }
+});
+
+ipcMain.handle('agiScore:setConfig', (_, partial) => {
+  try {
+    if (!agiScore || typeof agiScore !== 'object') agiScore = { ...DEFAULT_AGI_SCORE };
+    const next = { ...(agiScore.config || DEFAULT_AGI_SCORE.config), ...(partial || {}) };
+    // Defensive merge for weights so missing keys don't erase the template.
+    next.weights = { ...DEFAULT_AGI_SCORE.config.weights, ...(next.weights || {}) };
+    agiScore.config = next;
+    saveAgiScore();
+    return agiScore.config;
+  } catch (e) {
+    console.warn('[AGI Score] setConfig failed:', e?.message || e);
+    return agiScore?.config || DEFAULT_AGI_SCORE.config;
+  }
+});
+
+ipcMain.handle('agiScore:appendSnapshot', (_, snapshot) => {
+  try {
+    if (!agiScore || typeof agiScore !== 'object') agiScore = { ...DEFAULT_AGI_SCORE };
+    if (!Array.isArray(agiScore.snapshots)) agiScore.snapshots = [];
+
+    const createdAt = typeof snapshot?.createdAt === 'number' ? snapshot.createdAt : Date.now();
+    const id = snapshot?.id || `agi_${createdAt}_${Math.random().toString(36).slice(2, 8)}`;
+    const normalized = { ...snapshot, id, createdAt };
+
+    agiScore.snapshots.push(normalized);
+    agiScore.snapshots = agiScore.snapshots.slice(-250);
+    saveAgiScore();
+
+    return normalized;
+  } catch (e) {
+    console.warn('[AGI Score] appendSnapshot failed:', e?.message || e);
+    return snapshot || null;
+  }
+});
+
+ipcMain.handle('agiScore:listSnapshots', (_, options) => {
+  try {
+    if (!agiScore || typeof agiScore !== 'object') agiScore = { ...DEFAULT_AGI_SCORE };
+    const list = Array.isArray(agiScore.snapshots) ? agiScore.snapshots : [];
+    const limit = Math.max(1, Math.min(500, Number(options?.limit) || 50));
+    // Most recent first
+    return [...list].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, limit);
+  } catch {
+    return [];
+  }
 });
 
 // ─── Memory IPC ────────────────────────────────────────────────

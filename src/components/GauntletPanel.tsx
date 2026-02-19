@@ -44,6 +44,7 @@ function polylinePoints(values: number[], width: number, height: number): string
 
 export default function GauntletPanel() {
   const gauntlet = useStore((s) => s.gauntlet);
+  const agiScore = useStore((s) => s.agiScore);
   const startGauntlet = useStore((s) => s.startGauntlet);
   const cancelGauntlet = useStore((s) => s.cancelGauntlet);
   const resetGauntlet = useStore((s) => s.resetGauntlet);
@@ -76,6 +77,15 @@ export default function GauntletPanel() {
   const passPoints = useMemo(
     () => polylinePoints(trendRuns.map((run) => run.passRate), 280, 84),
     [trendRuns],
+  );
+
+  const agiTrend = useMemo(
+    () => agiScore.snapshots.slice(0, 12).reverse(),
+    [agiScore.snapshots],
+  );
+  const agiPoints = useMemo(
+    () => polylinePoints(agiTrend.map((s) => Math.max(0, Math.min(1, (s.total || 0) / 10))), 280, 84),
+    [agiTrend],
   );
   const [provenanceFilter, setProvenanceFilter] = useState<GauntletProvenance | 'all'>('all');
   const filteredResults = gauntlet.results.filter((result) =>
@@ -123,6 +133,10 @@ export default function GauntletPanel() {
             <div><span>Progress</span><strong>{gauntlet.currentIndex}/{gauntlet.baselineCapabilities.length}</strong></div>
             <div><span>Overall score</span><strong>{(gauntlet.overallScore * 100).toFixed(1)}%</strong></div>
             <div><span>Pass rate</span><strong>{(gauntlet.passRate * 100).toFixed(1)}%</strong></div>
+            <div>
+              <span>AGI score</span>
+              <strong>{agiScore.latest ? `${agiScore.latest.total.toFixed(2)}/10` : 'n/a'}</strong>
+            </div>
             {gauntlet.phase === 'completed' && gauntlet.results.length > 0 && (
               <div>
                 <span>Grade</span>
@@ -152,6 +166,41 @@ export default function GauntletPanel() {
             <button onClick={cancelGauntletAutoCycle} disabled={!autoCycleRunning}>Cancel Auto Cycle</button>
             <button onClick={resetGauntlet} disabled={running || autoCycleRunning}>Reset</button>
           </div>
+        </section>
+
+        <section className="forge-card">
+          <h3>AGI Score (Weighted Rubric)</h3>
+          {!agiScore.latest ? (
+            <p className="forge-empty">Run GAUNTLET to generate an AGI score snapshot.</p>
+          ) : (
+            <>
+              <div className="forge-metrics">
+                <div><span>Total</span><strong>{agiScore.latest.total.toFixed(2)} / 10</strong></div>
+                <div><span>Reasoning</span><strong>{agiScore.latest.subscores.abstractReasoningLogic.toFixed(2)}</strong></div>
+                <div><span>Flexibility</span><strong>{agiScore.latest.subscores.learningFlexibility.toFixed(2)}</strong></div>
+                <div><span>Generality</span><strong>{agiScore.latest.subscores.domainGenerality.toFixed(2)}</strong></div>
+                <div><span>Goal-setting</span><strong>{agiScore.latest.subscores.autonomousGoalSetting.toFixed(2)}</strong></div>
+                <div><span>Meta-cognition</span><strong>{agiScore.latest.subscores.selfModelingMetaCognition.toFixed(2)}</strong></div>
+                <div><span>Creativity</span><strong>{agiScore.latest.subscores.creativeProblemSolving.toFixed(2)}</strong></div>
+              </div>
+              {agiTrend.length >= 2 && (
+                <div className="gauntlet-trend" style={{ marginTop: 10 }}>
+                  <div className="gauntlet-trend-header">
+                    <span>Last {agiTrend.length} snapshots</span>
+                  </div>
+                  <svg className="gauntlet-trend-chart" viewBox="0 0 280 84" preserveAspectRatio="none" aria-label="AGI score trend chart">
+                    <polyline className="gauntlet-trend-line score" points={agiPoints} />
+                  </svg>
+                  <div className="gauntlet-trend-legend">
+                    <span className="score">AGI total</span>
+                  </div>
+                </div>
+              )}
+              {agiScore.lastError && (
+                <p className="forge-stop">AGI score error: {agiScore.lastError}</p>
+              )}
+            </>
+          )}
         </section>
 
         <section className="forge-card">
@@ -209,6 +258,9 @@ export default function GauntletPanel() {
             <p className="forge-empty">No auto-cycle summary yet.</p>
           ) : (
             <div className="forge-metrics">
+              <div><span>AGI before</span><strong>{typeof gauntlet.autoCycleSummary.beforeAgiScore === 'number' ? gauntlet.autoCycleSummary.beforeAgiScore.toFixed(2) : 'n/a'}</strong></div>
+              <div><span>AGI after</span><strong>{typeof gauntlet.autoCycleSummary.afterAgiScore === 'number' ? gauntlet.autoCycleSummary.afterAgiScore.toFixed(2) : 'n/a'}</strong></div>
+              <div><span>AGI delta</span><strong>{typeof gauntlet.autoCycleSummary.deltaAgiScore === 'number' ? gauntlet.autoCycleSummary.deltaAgiScore.toFixed(2) : 'n/a'}</strong></div>
               <div><span>Score before</span><strong>{(gauntlet.autoCycleSummary.beforeScore * 100).toFixed(1)}%</strong></div>
               <div><span>Score after</span><strong>{(gauntlet.autoCycleSummary.afterScore * 100).toFixed(1)}%</strong></div>
               <div><span>Score delta</span><strong>{(gauntlet.autoCycleSummary.deltaScore * 100).toFixed(1)}%</strong></div>

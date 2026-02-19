@@ -351,6 +351,9 @@ export interface GauntletState {
     afterPassRate: number;
     deltaScore: number;
     deltaPassRate: number;
+    beforeAgiScore?: number; // 0..10
+    afterAgiScore?: number;  // 0..10
+    deltaAgiScore?: number;  // 0..10
   } | null;
   curriculum: {
     level: number;
@@ -360,6 +363,47 @@ export interface GauntletState {
     totalPromotions: number;
     recentFailures: string[];
     logs: string[];
+  };
+}
+
+// ─── AGI SCORE: Weighted rubric (0–10) ──────────────────────────
+
+export type AgiSubscoreKey =
+  | 'abstractReasoningLogic'
+  | 'learningFlexibility'
+  | 'domainGenerality'
+  | 'autonomousGoalSetting'
+  | 'selfModelingMetaCognition'
+  | 'creativeProblemSolving';
+
+export type AgiSubscores = Record<AgiSubscoreKey, number>; // each 0..10
+
+export type AgiRubricWeights = Record<AgiSubscoreKey, number>; // arbitrary positive weights (normalized at runtime)
+
+export interface AgiRubricConfig {
+  version: number;
+  weights: AgiRubricWeights;
+  // Defensive anti-gaming knobs: keep minimal, but persistent.
+  requireRealWorkflowCountForFullCredit: number; // e.g. 1 means: if 0, domain generality is capped.
+  optimizeInAutoCycle: boolean; // when true, Auto Cycle focuses Forge on weakest subscores
+}
+
+export interface AgiScoreSnapshot {
+  id: string;
+  createdAt: number;
+  rubricVersion: number;
+  weights: AgiRubricWeights;
+  subscores: AgiSubscores;
+  total: number; // 0..10 weighted total
+  inputs: {
+    gauntletRunId?: string;
+    gauntletOverallScore?: number; // 0..1
+    gauntletPassRate?: number; // 0..1
+    gauntletProvenance?: {
+      synthetic?: { overallScore: number; passRate: number; count: number };
+      'real-workflow'?: { overallScore: number; passRate: number; count: number };
+    };
+    notes?: string;
   };
 }
 
@@ -1160,6 +1204,12 @@ declare global {
       settings: {
         get: () => Promise<Settings>;
         set: (s: Partial<Settings>) => Promise<Settings>;
+      };
+      agiScore: {
+        getConfig: () => Promise<AgiRubricConfig>;
+        setConfig: (config: Partial<AgiRubricConfig>) => Promise<AgiRubricConfig>;
+        appendSnapshot: (snapshot: AgiScoreSnapshot) => Promise<AgiScoreSnapshot | null>;
+        listSnapshots: (options?: { limit?: number }) => Promise<AgiScoreSnapshot[]>;
       };
       memory: {
         get: () => Promise<unknown>;

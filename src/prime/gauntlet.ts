@@ -156,6 +156,72 @@ export function createDefaultGauntletCapabilities(): GauntletCapability[] {
       weight: 1.2,
     },
     {
+      id: 'few-shot-learning',
+      name: 'Few-Shot Learning (Rule Induction)',
+      description: 'Infers a new rule from a few examples and generalizes correctly.',
+      category: 'reasoning',
+      testPrompt:
+        'Learn the rule from these examples and apply it to the final input.\n\nExamples:\nInput: "AAXBB" -> Output: "A2X1B2"\nInput: "QQQZ" -> Output: "Q3Z1"\nInput: "MNNNM" -> Output: "M1N3M1"\n\nNow solve:\nInput: "PPKPPQQ" -> Output: ?\n\nReturn only the output string.',
+      judgeCriteria:
+        'correctly infers transformation, applies consistently, returns exact output, no extra text',
+      weight: 1.25,
+    },
+    {
+      id: 'domain-generality-writing',
+      name: 'Domain Generality (Writing Spec)',
+      description: 'Writes a clear, testable spec with constraints and acceptance criteria.',
+      category: 'planning',
+      testPrompt:
+        'Write a short technical specification for a feature: "Export chat sessions to JSON and re-import them", including data schema, edge cases, and acceptance criteria.',
+      judgeCriteria:
+        'clear schema, edge cases, acceptance criteria, non-handwavy, testability',
+      weight: 1.0,
+    },
+    {
+      id: 'domain-generality-data',
+      name: 'Domain Generality (Data Analysis)',
+      description: 'Performs basic data reasoning with sanity checks and caveats.',
+      category: 'reasoning',
+      testPrompt:
+        'Given weekly signups: [120, 135, 128, 160, 158, 190]. Estimate week-over-week growth rates, identify anomalies, and propose two plausible causes with how you would verify each.',
+      judgeCriteria:
+        'correct math, sanity checks, anomaly identification, verification steps, avoids overclaiming',
+      weight: 1.0,
+    },
+    {
+      id: 'domain-generality-coding',
+      name: 'Domain Generality (Coding Strategy)',
+      description: 'Explains how to implement a small code change with tests and risk handling.',
+      category: 'execution',
+      testPrompt:
+        'You need to add a new optional field to a TypeScript type and update all call sites safely. Describe the exact steps, including search strategy, incremental compile checks, and how to avoid breaking runtime behavior.',
+      judgeCriteria:
+        'scoped search, safe refactor strategy, compile/test loop, risk handling, rollback',
+      weight: 1.05,
+    },
+    {
+      id: 'goal-setting-decomposition',
+      name: 'Autonomous Goal-Setting (Decomposition)',
+      description: 'Builds a goal tree with milestones, stop conditions, and verification checkpoints.',
+      category: 'planning',
+      testPrompt:
+        'Mission: "Improve the reliability of this app\'s auto-cycle." Propose goals, subgoals, milestones, and explicit stop conditions. Include verification checks for each milestone.',
+      judgeCriteria:
+        'goal tree, milestones, stop conditions, verification gates, prioritization',
+      weight: 1.2,
+    },
+    {
+      id: 'goal-setting-execution-sandbox',
+      name: 'Autonomous Goal Execution (Sandbox Workflow)',
+      description: 'Executes a bounded tool-driven workflow inside a sandbox and verifies results.',
+      category: 'execution',
+      testPrompt:
+        'In a sandbox directory, create a plan file and a JSON artifact, then verify they exist and contain expected keys. Use only safe, reversible file operations. End with a short verification report.',
+      judgeCriteria:
+        'tool-driven execution, deterministic verification, bounded actions, clear final report',
+      weight: 1.4,
+    },
+    {
       id: 'tool-orchestration',
       name: 'Tool Orchestration',
       description: 'Coordinates tool calls with error handling and verification.',
@@ -256,6 +322,11 @@ export async function runCapabilityGauntlet(params: {
   systemPrompt: string;
   championPrompt?: string | null;
   generate?: GenerateFn;
+  runWorkflowCapability?: (capability: GauntletCapability) => Promise<{
+    score: number; // 0..1
+    passed: boolean;
+    summary: string;
+  }>;
   shouldStop: () => boolean;
   onProgress: (snapshot: GauntletRunSnapshot) => void;
 }): Promise<GauntletRunSnapshot> {
@@ -265,12 +336,19 @@ export async function runCapabilityGauntlet(params: {
     systemPrompt,
     championPrompt,
     generate,
+    runWorkflowCapability,
     shouldStop,
     onProgress,
   } = params;
   const startedAt = Date.now();
   const logs: string[] = [`GAUNTLET run started (${runId}).`, `Capabilities: ${capabilities.length}.`];
   const results: GauntletCapabilityResult[] = [];
+
+  // Only mark provenance as real-workflow when a capability is actually executed
+  // (Hands/tools, filesystem verification, etc). LLM-judged prompts are synthetic.
+  const REAL_WORKFLOW_CAPABILITY_IDS = new Set<string>([
+    'goal-setting-execution-sandbox',
+  ]);
 
   const emit = (phase: GauntletRunSnapshot['phase'], currentIndex: number, stopReason: string | null) => {
     const aggregate = computeAggregate(results, capabilities);
@@ -330,6 +408,32 @@ export async function runCapabilityGauntlet(params: {
         });
         continue;
       }
+
+      // Real workflow capabilities (tool-driven, deterministic verification).
+      if (REAL_WORKFLOW_CAPABILITY_IDS.has(capability.id)) {
+        if (!runWorkflowCapability) {
+          results.push({
+            capabilityId: capability.id,
+            score: 0,
+            passed: false,
+            summary: 'Real-workflow runner not available in this context.',
+            latencyMs: Date.now() - t0,
+            provenance: 'real-workflow',
+          });
+          continue;
+        }
+        const judged = await runWorkflowCapability(capability);
+        results.push({
+          capabilityId: capability.id,
+          score: clamp(judged.score, 0, 1),
+          passed: !!judged.passed,
+          summary: judged.summary || 'Workflow complete.',
+          latencyMs: Date.now() - t0,
+          provenance: 'real-workflow',
+        });
+        continue;
+      }
+
       if (generate) {
         // Attempt #1: Lower temperature for consistency, more tokens for structure
         let candidateResponse = await generate(
@@ -416,15 +520,13 @@ Provide a structured response that clearly demonstrates each criterion. Include 
           judged = parseJudgeResponse(judgeResponse);
         }
 
-        const provenance: GauntletProvenance =
-          capability.category === 'execution' ? 'real-workflow' : 'synthetic';
         results.push({
           capabilityId: capability.id,
           score: judged.score,
           passed: judged.passed,
           summary: judged.summary,
           latencyMs: Date.now() - t0,
-          provenance,
+          provenance: 'synthetic',
         });
       } else {
         const syntheticResponse = `${capability.name} ${capability.description} ${capability.judgeCriteria}`;
@@ -439,15 +541,13 @@ Provide a structured response that clearly demonstrates each criterion. Include 
         });
       }
     } catch (error: any) {
-      const provenance: GauntletProvenance =
-        capability.category === 'execution' ? 'real-workflow' : 'synthetic';
       results.push({
         capabilityId: capability.id,
         score: 0,
         passed: false,
         summary: `Execution failed: ${error?.message || 'Unknown error'}`,
         latencyMs: Date.now() - t0,
-        provenance,
+        provenance: 'synthetic',
       });
     }
 

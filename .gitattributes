@@ -1,0 +1,2 @@
+Memory/*.json filter=lfs diff=lfs merge=lfs -text
+AGIPRIME/Memory/*.json filter=lfs diff=lfs merge=lfs -text

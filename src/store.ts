@@ -44,6 +44,8 @@ import type {
   OperatorObservation,
   SynthesisSessionState,
   CognitiveStartRequest,
+  AgiRubricConfig,
+  AgiScoreSnapshot,
 } from './types';
 import {
   createDefaultSuite,
@@ -88,6 +90,10 @@ import {
   getGreeting,
 } from './prime/voice';
 import { routeToBrain, buildSlowBrainDirective } from './prime/router';
+import {
+  DEFAULT_AGI_RUBRIC_CONFIG,
+  computeAgiScoreSnapshot,
+} from './prime/agi-score';
 import {
   createDefaultCurriculumState,
   updateCurriculumFromRun,
@@ -425,6 +431,7 @@ function createDefaultGauntletState(): GauntletState {
 function buildForgeAdaptiveSuite(
   baseSuite: ForgeBenchmark[],
   gauntlet: GauntletState,
+  agiScore: AGIStore['agiScore'],
 ): { suite: ForgeBenchmark[]; adaptiveCount: number } {
   const latestCompleted = gauntlet.history.find((run) => run.phase === 'completed');
   if (!latestCompleted || latestCompleted.results.length === 0) {
@@ -436,10 +443,6 @@ function buildForgeAdaptiveSuite(
     .sort((a, b) => a.score - b.score)
     .filter((r) => !r.passed)
     .slice(0, 3);
-
-  if (weakest.length === 0) {
-    return { suite: baseSuite, adaptiveCount: 0 };
-  }
 
   const adaptiveBenchmarks: ForgeBenchmark[] = weakest
     .map((result, index) => {
@@ -464,9 +467,53 @@ function buildForgeAdaptiveSuite(
     })
     .filter((b): b is ForgeBenchmark => !!b);
 
+  // If enabled, target the weakest AGI subscores by injecting drills
+  // for representative gauntlet capabilities (even if they technically passed).
+  const subscoreBenchmarks: ForgeBenchmark[] = [];
+  if (agiScore?.config?.optimizeInAutoCycle && agiScore.latest) {
+    const subs = agiScore.latest.subscores;
+    const sorted = (Object.keys(subs) as Array<keyof typeof subs>)
+      .map((k) => ({ key: k, value: Number(subs[k]) || 0 }))
+      .sort((a, b) => a.value - b.value)
+      .slice(0, 2);
+
+    const keyToCaps: Record<string, string[]> = {
+      abstractReasoningLogic: ['reasoning-depth'],
+      learningFlexibility: ['few-shot-learning'],
+      domainGenerality: ['domain-generality-coding', 'domain-generality-data', 'domain-generality-writing'],
+      autonomousGoalSetting: ['goal-setting-decomposition', 'goal-setting-execution-sandbox'],
+      selfModelingMetaCognition: ['failure-recovery-playbook', 'self-correction'],
+      creativeProblemSolving: ['creative-transfer'],
+    };
+
+    for (const item of sorted) {
+      const capIds = keyToCaps[item.key as string] || [];
+      for (const capId of capIds) {
+        const cap = capById.get(capId);
+        if (!cap) continue;
+        const weightBoost = Math.max(1, (10 - item.value) / 8); // 1..~1.25
+        subscoreBenchmarks.push({
+          id: `agi-adaptive-${item.key}-${cap.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          prompt: `AGI subscore drill (${item.key}): ${cap.name}. Current subscore ${item.value.toFixed(2)}/10.\n\nTask:\n${cap.testPrompt}\n\nConstraints:\n- Be concrete and testable.\n- Include verification + rollback.\n- Avoid generic advice.`,
+          expectedKeywords: [
+            'step',
+            'verify',
+            'risk',
+            'rollback',
+            'assumption',
+            'fallback',
+          ],
+          evaluationType: 'llm-judge',
+          judgeCriteria: `${cap.judgeCriteria}. This drill is explicitly targeting AGI subscore "${item.key}" — reward concrete execution strategy and verifiable outcomes.`,
+          weight: cap.weight * weightBoost,
+        });
+      }
+    }
+  }
+
   return {
-    suite: [...baseSuite, ...adaptiveBenchmarks],
-    adaptiveCount: adaptiveBenchmarks.length,
+    suite: [...baseSuite, ...adaptiveBenchmarks, ...subscoreBenchmarks],
+    adaptiveCount: adaptiveBenchmarks.length + subscoreBenchmarks.length,
   };
 }
 
@@ -654,6 +701,16 @@ interface AGIStore {
   startGauntletAutoCycle: () => Promise<void>;
   cancelGauntletAutoCycle: () => void;
 
+  // AGI SCORE — Weighted rubric + history
+  agiScore: {
+    config: AgiRubricConfig;
+    snapshots: AgiScoreSnapshot[];
+    latest: AgiScoreSnapshot | null;
+    lastError: string | null;
+  };
+  agiScoreLoad: () => Promise<void>;
+  agiScoreSetConfig: (partial: Partial<AgiRubricConfig>) => Promise<void>;
+
   // SOVEREIGN — Owner command center (with champion deployment)
   sovereign: SovereignState;
   sovereignPolicy: OwnerPolicy;
@@ -663,6 +720,31 @@ interface AGIStore {
   startSovereign: () => Promise<void>;
   killSovereign: () => void;
   resetSovereign: () => void;
+
+  // SELF-MOD — Opt-in code self-modification pipeline
+  selfMod: {
+    enabled: boolean;
+    repoRoot: string;
+    request: string;
+    running: boolean;
+    phase: 'idle' | 'hands' | 'tests' | 'gauntlet' | 'rollback' | 'complete' | 'failed';
+    logs: string[];
+    lastResult: {
+      success: boolean;
+      testsPassed?: boolean;
+      gauntletScoreBefore?: number;
+      gauntletScoreAfter?: number;
+      gauntletDelta?: number;
+      agiBefore?: number;
+      agiAfter?: number;
+      agiDelta?: number;
+      rolledBack?: boolean;
+    } | null;
+  };
+  selfModSetEnabled: (enabled: boolean) => void;
+  selfModSetRepoRoot: (path: string) => void;
+  selfModSetRequest: (text: string) => void;
+  selfModRun: () => Promise<void>;
 
   // HARDENING — Health posture (used to gate deployments)
   hardening: {
@@ -2656,7 +2738,7 @@ Output ONLY valid JSON:
       ...ledgerBenchmarks,
       ...current.baselineSuite,
     ];
-    const adaptive = buildForgeAdaptiveSuite(baseSuite, get().gauntlet);
+    const adaptive = buildForgeAdaptiveSuite(baseSuite, get().gauntlet, get().agiScore);
     const strictEvalMode = current.strictEvalMode;
     const verifierFirst = current.verifierFirst;
 
@@ -2853,6 +2935,78 @@ Output ONLY valid JSON:
   // ─── GAUNTLET — Capability Benchmark Harness ───────────
   gauntlet: createDefaultGauntletState(),
 
+  // ─── AGI SCORE — Weighted rubric + history ─────────────
+  agiScore: {
+    config: DEFAULT_AGI_RUBRIC_CONFIG,
+    snapshots: [],
+    latest: null,
+    lastError: null,
+  },
+
+  agiScoreLoad: async () => {
+    if (!window.api?.agiScore) return;
+    try {
+      const [config, snapshots] = await Promise.all([
+        window.api.agiScore.getConfig(),
+        window.api.agiScore.listSnapshots({ limit: 60 }),
+      ]);
+      const mergedConfig = {
+        ...DEFAULT_AGI_RUBRIC_CONFIG,
+        ...(config || {}),
+        weights: {
+          ...DEFAULT_AGI_RUBRIC_CONFIG.weights,
+          ...((config as any)?.weights || {}),
+        },
+      };
+      set((state) => ({
+        agiScore: {
+          ...state.agiScore,
+          config: mergedConfig,
+          snapshots: Array.isArray(snapshots) ? snapshots : [],
+          latest: Array.isArray(snapshots) && snapshots.length > 0 ? snapshots[0] : state.agiScore.latest,
+          lastError: null,
+        },
+      }));
+    } catch (e: any) {
+      set((state) => ({
+        agiScore: {
+          ...state.agiScore,
+          config: state.agiScore.config || DEFAULT_AGI_RUBRIC_CONFIG,
+          lastError: e?.message || 'Failed to load AGI score.',
+        },
+      }));
+    }
+  },
+
+  agiScoreSetConfig: async (partial) => {
+    if (!window.api?.agiScore) return;
+    try {
+      const updated = await window.api.agiScore.setConfig(partial);
+      const mergedConfig = {
+        ...DEFAULT_AGI_RUBRIC_CONFIG,
+        ...((updated || {}) as any),
+        weights: {
+          ...DEFAULT_AGI_RUBRIC_CONFIG.weights,
+          ...(((updated as any)?.weights) || {}),
+        },
+      };
+      set((state) => ({
+        agiScore: {
+          ...state.agiScore,
+          config: mergedConfig,
+          lastError: null,
+        },
+      }));
+    } catch (e: any) {
+      set((state) => ({
+        agiScore: {
+          ...state.agiScore,
+          lastError: e?.message || 'Failed to update AGI score config.',
+        },
+      }));
+    }
+  },
+
   startGauntlet: async (capabilitiesOverride) => {
     if (get().gauntlet.activeRunId) return;
 
@@ -2912,6 +3066,108 @@ Output ONLY valid JSON:
         systemPrompt: get().settings.systemPrompt || 'You are AGI PRIME.',
         championPrompt: get().championPrompt,
         generate: hasLLM ? llmGenerate : undefined,
+        runWorkflowCapability: async (capability) => {
+          // Real workflow: execute a bounded Hands run inside a temp sandbox.
+          if (capability.id !== 'goal-setting-execution-sandbox') {
+            return { score: 0, passed: false, summary: 'No workflow runner defined for this capability.' };
+          }
+          if (!window.api?.agent?.systemDetails || !window.api?.agent?.createDir || !window.api?.agent?.readFile) {
+            return { score: 0, passed: false, summary: 'Hands tools unavailable for workflow execution.' };
+          }
+          if (get().cognitive.isActive) {
+            return { score: 0, passed: false, summary: 'Hands is already active; cannot run workflow capability concurrently.' };
+          }
+
+          const t0 = Date.now();
+          const sys = await window.api.agent.systemDetails() as any;
+          const tempDir = (sys && (sys.tempDir as string)) || '';
+          const sep = tempDir.includes('\\') ? '\\' : '/';
+          const sandboxDir = `${tempDir || '.'}${sep}agi-prime-gauntlet${sep}${runId}`;
+
+          const mk = await window.api.agent.createDir(sandboxDir) as any;
+          if (!mk?.success) {
+            return { score: 0, passed: false, summary: `Failed to create sandbox: ${mk?.error || 'unknown error'}` };
+          }
+
+          const planPath = `${sandboxDir}${sep}plan.md`;
+          const artifactPath = `${sandboxDir}${sep}artifact.json`;
+
+          // Drive the existing Hands cognitive loop (tool-first autonomy) in a strictly bounded sandbox.
+          get().startCognitive({
+            goal: [
+              'GAUNTLET REAL-WORKFLOW CAPABILITY:',
+              `Sandbox directory: ${sandboxDir}`,
+              '',
+              'Task:',
+              `1) Create a markdown plan file at: ${planPath}`,
+              '   - Must contain headings: "Goal", "Subgoals", "Verification".',
+              `2) Create a JSON artifact at: ${artifactPath}`,
+              '   - Must be valid JSON and include keys: "goal", "subgoals", "verifiedAt".',
+              '3) Verify both files exist by reading them back.',
+              '',
+              'Constraints:',
+              '- Use only safe, reversible file operations (create/write).',
+              '- Do not execute shell commands.',
+              '- Do not touch any path outside the sandbox directory.',
+              '- Stop once verification is complete.',
+            ].join('\n'),
+            origin: 'gauntlet',
+          });
+
+          // Wait for completion (bounded).
+          const timeoutMs = 75_000;
+          await new Promise<void>((resolve) => {
+            const started = Date.now();
+            const timer = window.setInterval(() => {
+              if (!get().cognitive.isActive) {
+                window.clearInterval(timer);
+                resolve();
+                return;
+              }
+              if (Date.now() - started > timeoutMs) {
+                window.clearInterval(timer);
+                get().killCognitive();
+                resolve();
+              }
+            }, 250);
+          });
+
+          const phase = get().cognitive.phase;
+          const planRead = await window.api.agent.readFile(planPath) as any;
+          const artifactRead = await window.api.agent.readFile(artifactPath) as any;
+
+          const planOk =
+            !!planRead?.success &&
+            typeof planRead?.content === 'string' &&
+            /#?\s*Goal\b/i.test(planRead.content) &&
+            /#?\s*Subgoals\b/i.test(planRead.content) &&
+            /#?\s*Verification\b/i.test(planRead.content);
+
+          let artifactOk = false;
+          if (artifactRead?.success && typeof artifactRead?.content === 'string') {
+            try {
+              const parsed = JSON.parse(artifactRead.content);
+              artifactOk = !!parsed && typeof parsed === 'object'
+                && 'goal' in parsed && 'subgoals' in parsed && 'verifiedAt' in parsed;
+            } catch {
+              artifactOk = false;
+            }
+          }
+
+          const ok = phase === 'complete' && planOk && artifactOk;
+          const latencyMs = Date.now() - t0;
+
+          if (ok) {
+            return { score: 1.0, passed: true, summary: `Sandbox workflow verified in ${latencyMs}ms.` };
+          }
+          // Partial credit if it created at least one correct artifact.
+          const partial = (planOk ? 0.45 : 0) + (artifactOk ? 0.45 : 0) + (phase === 'complete' ? 0.1 : 0);
+          return {
+            score: Math.max(0, Math.min(0.9, partial)),
+            passed: false,
+            summary: `Workflow incomplete. phase=${phase}, planOk=${planOk}, artifactOk=${artifactOk} (${latencyMs}ms).`,
+          };
+        },
         shouldStop: () => get().gauntlet.activeRunId !== runId,
         onProgress: (snapshot) => {
           if (get().gauntlet.activeRunId !== runId) return;
@@ -2973,6 +3229,31 @@ Output ONLY valid JSON:
         },
         moduleStates: { ...state.moduleStates, gauntlet: 'online' },
       }));
+
+      // Compute + persist a weighted AGI score snapshot for this run.
+      try {
+        const snapshot = computeAgiScoreSnapshot({
+          config: get().agiScore.config || DEFAULT_AGI_RUBRIC_CONFIG,
+          gauntletRun: finalSnapshot,
+          gauntletCapabilities: capabilities,
+          notes: 'Computed from Gauntlet run completion.',
+        });
+        if (snapshot && window.api?.agiScore?.appendSnapshot) {
+          const persisted = await window.api.agiScore.appendSnapshot(snapshot);
+          if (persisted) {
+            set((state) => ({
+              agiScore: {
+                ...state.agiScore,
+                latest: persisted,
+                snapshots: [persisted, ...state.agiScore.snapshots].slice(0, 120),
+                lastError: null,
+              },
+            }));
+          }
+        }
+      } catch {
+        // Non-fatal: scoring persistence is additive telemetry.
+      }
 
       if (gauntletLedgerRunId) {
         void window.api.agent.ledgerAppend(gauntletLedgerRunId, 'run_completed', {
@@ -3175,6 +3456,18 @@ Output ONLY valid JSON:
         return;
       }
 
+      const latestAgi = get().agiScore.latest;
+      const beforeAgiScore =
+        (get().agiScore.snapshots.find((s) => s.inputs.gauntletRunId === baseline.runId)?.total)
+        ?? (latestAgi?.inputs.gauntletRunId === baseline.runId ? latestAgi.total : undefined);
+      const afterAgiScore =
+        (get().agiScore.snapshots.find((s) => s.inputs.gauntletRunId === after.runId)?.total)
+        ?? (latestAgi?.inputs.gauntletRunId === after.runId ? latestAgi.total : undefined);
+      const deltaAgiScore =
+        (typeof beforeAgiScore === 'number' && typeof afterAgiScore === 'number')
+          ? afterAgiScore - beforeAgiScore
+          : undefined;
+
       const summary = {
         startedAt,
         finishedAt: Date.now(),
@@ -3184,6 +3477,9 @@ Output ONLY valid JSON:
         afterPassRate: after.passRate,
         deltaScore: after.overallScore - baseline.overallScore,
         deltaPassRate: after.passRate - baseline.passRate,
+        beforeAgiScore,
+        afterAgiScore,
+        deltaAgiScore,
       };
 
       set((state) => ({
@@ -3195,7 +3491,7 @@ Output ONLY valid JSON:
           autoCycleSummary: summary,
           logs: [
             ...state.gauntlet.logs,
-            `AUTO CYCLE completed: score ${(summary.beforeScore * 100).toFixed(1)}% -> ${(summary.afterScore * 100).toFixed(1)}%, pass ${(summary.beforePassRate * 100).toFixed(1)}% -> ${(summary.afterPassRate * 100).toFixed(1)}%.`,
+            `AUTO CYCLE completed: AGI ${typeof summary.beforeAgiScore === 'number' ? summary.beforeAgiScore.toFixed(2) : 'n/a'} -> ${typeof summary.afterAgiScore === 'number' ? summary.afterAgiScore.toFixed(2) : 'n/a'} (Δ ${typeof summary.deltaAgiScore === 'number' ? summary.deltaAgiScore.toFixed(2) : 'n/a'}), score ${(summary.beforeScore * 100).toFixed(1)}% -> ${(summary.afterScore * 100).toFixed(1)}%, pass ${(summary.beforePassRate * 100).toFixed(1)}% -> ${(summary.afterPassRate * 100).toFixed(1)}%.`,
           ],
         },
         moduleStates: { ...state.moduleStates, gauntlet: 'online', forge: 'online' },
@@ -3414,6 +3710,342 @@ Output ONLY valid JSON:
       sovereignKillFlag: false,
       championPrompt: null,
       moduleStates: { ...state.moduleStates, sovereign: 'online' },
+    }));
+  },
+
+  // ─── SELF-MOD — Opt-in code self-modification pipeline ────────
+  selfMod: {
+    enabled: false,
+    repoRoot: 'G:\\AGIPRIME',
+    request: '',
+    running: false,
+    phase: 'idle',
+    logs: ['Self-mod pipeline idle (opt-in).'],
+    lastResult: null,
+  },
+
+  selfModSetEnabled: (enabled) => {
+    set((state) => ({
+      selfMod: {
+        ...state.selfMod,
+        enabled,
+        logs: [...state.selfMod.logs, `Self-mod ${enabled ? 'ENABLED' : 'disabled'}.`].slice(-140),
+      },
+    }));
+  },
+
+  selfModSetRepoRoot: (path) => {
+    set((state) => ({
+      selfMod: {
+        ...state.selfMod,
+        repoRoot: path,
+      },
+    }));
+  },
+
+  selfModSetRequest: (text) => {
+    set((state) => ({
+      selfMod: {
+        ...state.selfMod,
+        request: text,
+      },
+    }));
+  },
+
+  selfModRun: async () => {
+    const state = get();
+    if (!state.selfMod.enabled) return;
+    if (state.selfMod.running) return;
+    if (!window.api?.agent?.listRollbacks || !window.api?.agent?.executeRollback || !window.api?.agent?.ledgerCreateRun) {
+      set((s) => ({
+        selfMod: {
+          ...s.selfMod,
+          lastResult: { success: false },
+          logs: [...s.selfMod.logs, 'Self-mod failed: agent APIs unavailable.'].slice(-160),
+        },
+      }));
+      return;
+    }
+    if (!state.selfMod.request.trim()) {
+      set((s) => ({
+        selfMod: {
+          ...s.selfMod,
+          lastResult: { success: false },
+          logs: [...s.selfMod.logs, 'Self-mod aborted: request is empty.'].slice(-160),
+        },
+      }));
+      return;
+    }
+    if (state.cognitive.isActive) {
+      set((s) => ({
+        selfMod: {
+          ...s.selfMod,
+          lastResult: { success: false },
+          logs: [...s.selfMod.logs, 'Self-mod aborted: Hands is already running.'].slice(-160),
+        },
+      }));
+      return;
+    }
+
+    const startedAt = Date.now();
+    const baselineGauntlet = state.gauntlet.history.find((r) => r.phase === 'completed') || null;
+    const baselineGauntletScore = baselineGauntlet?.overallScore ?? null;
+    const baselineAgi = state.agiScore.latest?.total ?? null;
+    const repoRoot = state.selfMod.repoRoot.trim();
+
+    set((s) => ({
+      selfMod: {
+        ...s.selfMod,
+        running: true,
+        phase: 'hands',
+        lastResult: null,
+        logs: [
+          ...s.selfMod.logs,
+          `SELF-MOD started (${new Date(startedAt).toLocaleTimeString()}).`,
+          `Repo root: ${repoRoot || '(unset)'}`,
+        ].slice(-180),
+      },
+    }));
+
+    let ledgerRunId: string | null = null;
+    try {
+      const ledger = await window.api.agent.ledgerCreateRun('selfmod', {
+        startedAt,
+        repoRoot,
+        request: state.selfMod.request.slice(0, 1200),
+      });
+      if ((ledger as any)?.success && (ledger as any)?.runId) ledgerRunId = (ledger as any).runId as string;
+    } catch {
+      ledgerRunId = null;
+    }
+
+    const appendLedger = async (type: string, payload: Record<string, unknown>) => {
+      if (!ledgerRunId) return;
+      try { await window.api.agent.ledgerAppend(ledgerRunId, type, payload); } catch { /* ignore */ }
+    };
+
+    const finalizeLedger = async (summary: Record<string, unknown>) => {
+      if (!ledgerRunId) return;
+      try { await window.api.agent.ledgerFinalize(ledgerRunId, summary); } catch { /* ignore */ }
+    };
+
+    const listBefore = await window.api.agent.listRollbacks();
+    const beforeIds = new Set<string>(
+      (listBefore?.success ? listBefore.entries : []).map((e) => e.id),
+    );
+
+    await appendLedger('phase', { phase: 'hands', baselineGauntletScore, baselineAgi });
+
+    // Run Hands with a tightly scoped, test-and-verify objective.
+    get().startCognitive({
+      goal: [
+        'SELF-MOD PIPELINE (OPT-IN):',
+        '',
+        `Repo root: ${repoRoot}`,
+        '',
+        'Objective:',
+        '- Implement the requested code change in the repository.',
+        '- Keep changes minimal and easy to review.',
+        '- Prefer reversible operations (write/rename). Avoid deletes.',
+        '',
+        'Request:',
+        state.selfMod.request.trim(),
+        '',
+        'Hard constraints:',
+        `- Only touch files inside the repo root above (do not modify system files).`,
+        '- Do not run destructive commands.',
+        '- After edits, run: npm test (from repo root).',
+        '- If tests fail, stop and report failure (do not keep thrashing).',
+        '',
+        'Deliverables:',
+        '- A short summary of files changed and why.',
+        '- Test command output summary (pass/fail).',
+      ].join('\n'),
+      origin: 'selfmod',
+    });
+
+    // Wait for Hands to finish (bounded).
+    await new Promise<void>((resolve) => {
+      const timeoutMs = 6 * 60 * 1000;
+      const timer = window.setInterval(() => {
+        const st = get();
+        if (!st.cognitive.isActive) {
+          window.clearInterval(timer);
+          resolve();
+          return;
+        }
+        if (Date.now() - startedAt > timeoutMs) {
+          window.clearInterval(timer);
+          get().killCognitive();
+          resolve();
+        }
+      }, 400);
+    });
+
+    const handsPhase = get().cognitive.phase;
+    await appendLedger('hands_complete', { phase: handsPhase });
+
+    // Run tests (do this outside Hands so we can deterministically rollback if needed).
+    set((s) => ({
+      selfMod: {
+        ...s.selfMod,
+        phase: 'tests',
+        logs: [...s.selfMod.logs, 'SELF-MOD stage: tests (npm test).'].slice(-200),
+      },
+    }));
+
+    await appendLedger('phase', { phase: 'tests' });
+
+    const sysDetails = await window.api.agent.systemDetails() as any;
+    const platform = String(sysDetails?.platform || '').toLowerCase();
+    const isWin = platform.includes('win');
+    const testCmd = isWin
+      ? `cmd /c "cd /d \"${repoRoot}\" && npm test"`
+      : `bash -lc "cd \\\"${repoRoot}\\\" && npm test"`;
+
+    const testResult = await window.api.agent.execute(testCmd) as any;
+    const testsPassed = !!testResult?.success;
+    await appendLedger('tests', {
+      success: testsPassed,
+      stdout: String(testResult?.stdout || '').slice(0, 4000),
+      stderr: String(testResult?.stderr || '').slice(0, 2000),
+    });
+
+    // If tests fail, rollback and stop.
+    const rollbackNewEntries = async (): Promise<number> => {
+      const listed = await window.api.agent.listRollbacks();
+      const entries = (listed?.success ? listed.entries : []) as any[];
+      const newEntries = entries
+        .filter((e) => e && !beforeIds.has(e.id) && e.status === 'ready')
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      let applied = 0;
+      for (const entry of newEntries) {
+        const res = await window.api.agent.executeRollback(entry.id);
+        if ((res as any)?.success) applied += 1;
+      }
+      return applied;
+    };
+
+    if (!testsPassed) {
+      set((s) => ({
+        selfMod: {
+          ...s.selfMod,
+          phase: 'rollback',
+          logs: [...s.selfMod.logs, 'Tests FAILED. Rolling back changes...'].slice(-220),
+        },
+      }));
+      await appendLedger('phase', { phase: 'rollback', reason: 'tests_failed' });
+      const applied = await rollbackNewEntries();
+      await appendLedger('rollback', { applied });
+      await finalizeLedger({ success: false, testsPassed: false, rollbackApplied: applied });
+
+      set((s) => ({
+        selfMod: {
+          ...s.selfMod,
+          running: false,
+          phase: 'failed',
+          lastResult: { success: false, testsPassed: false, rolledBack: true },
+          logs: [...s.selfMod.logs, `Rollback applied to ${applied} change(s).`].slice(-240),
+        },
+      }));
+      return;
+    }
+
+    // Verification Gauntlet (short run) to catch behavioral regressions.
+    set((s) => ({
+      selfMod: {
+        ...s.selfMod,
+        phase: 'gauntlet',
+        logs: [...s.selfMod.logs, 'SELF-MOD stage: verification gauntlet.'].slice(-240),
+      },
+    }));
+    await appendLedger('phase', { phase: 'gauntlet' });
+
+    const caps = get().gauntlet.baselineCapabilities
+      .filter((c) => c.id !== 'goal-setting-execution-sandbox')
+      .slice(0, 6);
+
+    const beforeScore = baselineGauntletScore ?? (get().gauntlet.overallScore || 0);
+    await get().startGauntlet(caps);
+    const afterRun = get().gauntlet.history[0];
+    const afterScore = afterRun?.overallScore ?? get().gauntlet.overallScore;
+    const gauntletDelta = afterScore - beforeScore;
+
+    const agiAfter = get().agiScore.latest?.total ?? null;
+    const agiDelta = (typeof baselineAgi === 'number' && typeof agiAfter === 'number') ? agiAfter - baselineAgi : null;
+
+    await appendLedger('gauntlet', {
+      beforeScore,
+      afterScore,
+      gauntletDelta,
+      agiBefore: baselineAgi,
+      agiAfter,
+      agiDelta,
+    });
+
+    // Regression threshold: if verification score drops, rollback.
+    const regress = gauntletDelta < -0.01;
+    if (regress) {
+      set((s) => ({
+        selfMod: {
+          ...s.selfMod,
+          phase: 'rollback',
+          logs: [...s.selfMod.logs, `Regression detected (Δ ${(gauntletDelta * 100).toFixed(1)}%). Rolling back...`].slice(-260),
+        },
+      }));
+      await appendLedger('phase', { phase: 'rollback', reason: 'gauntlet_regression', gauntletDelta });
+      const applied = await rollbackNewEntries();
+      await appendLedger('rollback', { applied });
+      await finalizeLedger({ success: false, testsPassed: true, gauntletDelta, rollbackApplied: applied });
+
+      set((s) => ({
+        selfMod: {
+          ...s.selfMod,
+          running: false,
+          phase: 'failed',
+          lastResult: {
+            success: false,
+            testsPassed: true,
+            gauntletScoreBefore: beforeScore,
+            gauntletScoreAfter: afterScore,
+            gauntletDelta,
+            agiBefore: baselineAgi ?? undefined,
+            agiAfter: agiAfter ?? undefined,
+            agiDelta: agiDelta ?? undefined,
+            rolledBack: true,
+          },
+          logs: [...s.selfMod.logs, `Rollback applied to ${applied} change(s).`].slice(-280),
+        },
+      }));
+      return;
+    }
+
+    await finalizeLedger({
+      success: true,
+      testsPassed: true,
+      gauntletDelta,
+      agiDelta,
+      finishedAt: Date.now(),
+    });
+
+    set((s) => ({
+      selfMod: {
+        ...s.selfMod,
+        running: false,
+        phase: 'complete',
+        lastResult: {
+          success: true,
+          testsPassed: true,
+          gauntletScoreBefore: beforeScore,
+          gauntletScoreAfter: afterScore,
+          gauntletDelta,
+          agiBefore: baselineAgi ?? undefined,
+          agiAfter: agiAfter ?? undefined,
+          agiDelta: agiDelta ?? undefined,
+          rolledBack: false,
+        },
+        logs: [...s.selfMod.logs, `SELF-MOD complete. Tests PASS. Verification Δ ${(gauntletDelta * 100).toFixed(1)}%.`].slice(-280),
+      },
     }));
   },
 
@@ -4474,6 +5106,7 @@ Output ONLY valid JSON:
       await get().loadConversations();
       await get().checkOllama();
       await get().loadSystemInfo();
+      await get().agiScoreLoad();
 
       // Load persisted Operator Synthesis profile (set-and-forget)
       await get().loadOperatorProfile();

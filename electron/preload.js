@@ -92,6 +92,14 @@ contextBridge.exposeInMainWorld('api', {
     set: (newSettings) => ipcRenderer.invoke('settings:set', newSettings),
   },
 
+  // ─── AGI Score (rubric + history) ──────────────────────
+  agiScore: {
+    getConfig: () => ipcRenderer.invoke('agiScore:getConfig'),
+    setConfig: (config) => ipcRenderer.invoke('agiScore:setConfig', config),
+    appendSnapshot: (snapshot) => ipcRenderer.invoke('agiScore:appendSnapshot', snapshot),
+    listSnapshots: (options) => ipcRenderer.invoke('agiScore:listSnapshots', options),
+  },
+
   // ─── Operator Synthesis Profile ─────────────────────────
   operatorProfile: {
     get: () => ipcRenderer.invoke('operatorProfile:get'),

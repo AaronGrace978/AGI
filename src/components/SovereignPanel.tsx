@@ -33,6 +33,13 @@ export default function SovereignPanel() {
   const startSovereign = useStore((s) => s.startSovereign);
   const killSovereign = useStore((s) => s.killSovereign);
   const resetSovereign = useStore((s) => s.resetSovereign);
+  const agiScore = useStore((s) => s.agiScore);
+  const agiScoreSetConfig = useStore((s) => s.agiScoreSetConfig);
+  const selfMod = useStore((s) => s.selfMod);
+  const selfModSetEnabled = useStore((s) => s.selfModSetEnabled);
+  const selfModSetRepoRoot = useStore((s) => s.selfModSetRepoRoot);
+  const selfModSetRequest = useStore((s) => s.selfModSetRequest);
+  const selfModRun = useStore((s) => s.selfModRun);
 
   const logScrollRef = useRef<HTMLDivElement>(null);
   const [showPolicy, setShowPolicy] = useState(false);
@@ -225,6 +232,98 @@ export default function SovereignPanel() {
                 />
               </div>
             </div>
+
+            <h3 style={{ marginTop: 18 }}>AGI Score Rubric</h3>
+            <div className="policy-grid">
+              <div className="policy-field full">
+                <label>Latest AGI score</label>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                  <strong style={{ fontSize: 18 }}>
+                    {agiScore.latest ? `${agiScore.latest.total.toFixed(2)} / 10` : 'n/a'}
+                  </strong>
+                  {agiScore.lastError && (
+                    <span style={{ color: '#ff006e' }}>{agiScore.lastError}</span>
+                  )}
+                </div>
+              </div>
+
+              <div className="policy-field">
+                <label>Optimize Auto Cycle for AGI score</label>
+                <button
+                  className={`policy-toggle ${agiScore.config.optimizeInAutoCycle ? 'on' : ''}`}
+                  onClick={() => agiScoreSetConfig({ optimizeInAutoCycle: !agiScore.config.optimizeInAutoCycle })}
+                  disabled={isRunning}
+                  title="When enabled, Forge adaptive benchmarks target the weakest AGI subscores."
+                >
+                  {agiScore.config.optimizeInAutoCycle ? 'ENABLED' : 'OFF'}
+                </button>
+              </div>
+
+              <div className="policy-field">
+                <label>Require real-workflow evidence</label>
+                <input
+                  type="number" min={0} max={10}
+                  value={agiScore.config.requireRealWorkflowCountForFullCredit}
+                  onChange={(e) => agiScoreSetConfig({ requireRealWorkflowCountForFullCredit: Number(e.target.value) })}
+                  disabled={isRunning}
+                />
+              </div>
+
+              <div className="policy-field">
+                <label>Weight: Reasoning & logic</label>
+                <input
+                  type="number" min={0} max={1} step={0.01}
+                  value={agiScore.config.weights.abstractReasoningLogic}
+                  onChange={(e) => agiScoreSetConfig({ weights: { ...agiScore.config.weights, abstractReasoningLogic: Number(e.target.value) } })}
+                  disabled={isRunning}
+                />
+              </div>
+              <div className="policy-field">
+                <label>Weight: Learning flexibility</label>
+                <input
+                  type="number" min={0} max={1} step={0.01}
+                  value={agiScore.config.weights.learningFlexibility}
+                  onChange={(e) => agiScoreSetConfig({ weights: { ...agiScore.config.weights, learningFlexibility: Number(e.target.value) } })}
+                  disabled={isRunning}
+                />
+              </div>
+              <div className="policy-field">
+                <label>Weight: Domain generality</label>
+                <input
+                  type="number" min={0} max={1} step={0.01}
+                  value={agiScore.config.weights.domainGenerality}
+                  onChange={(e) => agiScoreSetConfig({ weights: { ...agiScore.config.weights, domainGenerality: Number(e.target.value) } })}
+                  disabled={isRunning}
+                />
+              </div>
+              <div className="policy-field">
+                <label>Weight: Goal-setting</label>
+                <input
+                  type="number" min={0} max={1} step={0.01}
+                  value={agiScore.config.weights.autonomousGoalSetting}
+                  onChange={(e) => agiScoreSetConfig({ weights: { ...agiScore.config.weights, autonomousGoalSetting: Number(e.target.value) } })}
+                  disabled={isRunning}
+                />
+              </div>
+              <div className="policy-field">
+                <label>Weight: Meta-cognition</label>
+                <input
+                  type="number" min={0} max={1} step={0.01}
+                  value={agiScore.config.weights.selfModelingMetaCognition}
+                  onChange={(e) => agiScoreSetConfig({ weights: { ...agiScore.config.weights, selfModelingMetaCognition: Number(e.target.value) } })}
+                  disabled={isRunning}
+                />
+              </div>
+              <div className="policy-field">
+                <label>Weight: Creativity</label>
+                <input
+                  type="number" min={0} max={1} step={0.01}
+                  value={agiScore.config.weights.creativeProblemSolving}
+                  onChange={(e) => agiScoreSetConfig({ weights: { ...agiScore.config.weights, creativeProblemSolving: Number(e.target.value) } })}
+                  disabled={isRunning}
+                />
+              </div>
+            </div>
           </div>
         )}
 
@@ -285,6 +384,81 @@ export default function SovereignPanel() {
 
         {/* ─── Hardening Health ──────────────────────────── */}
         <HardeningPanel />
+
+        {/* ─── Self-Mod Pipeline (Opt-in) ─────────────────── */}
+        <div className="sovereign-log" style={{ marginTop: 18 }}>
+          <h3>Self-Mod Pipeline (Opt-in)</h3>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+            <button
+              className={`sovereign-btn ${selfMod.enabled ? 'primary' : ''}`}
+              onClick={() => selfModSetEnabled(!selfMod.enabled)}
+              disabled={selfMod.running}
+              title="Enables the app to attempt self-modifying code changes. Use carefully."
+            >
+              {selfMod.enabled ? 'ENABLED' : 'DISABLED'}
+            </button>
+            <button
+              className="sovereign-btn"
+              onClick={() => selfModRun()}
+              disabled={!selfMod.enabled || selfMod.running || !selfMod.request.trim()}
+              title="Runs Hands -> npm test -> verification gauntlet -> rollback on regression."
+            >
+              {selfMod.running ? `RUNNING (${selfMod.phase})` : 'RUN SELF-MOD'}
+            </button>
+          </div>
+
+          <div className="sovereign-log-scroll" style={{ maxHeight: 420, marginTop: 10 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 10, paddingRight: 8 }}>
+              <div>
+                <label style={{ display: 'block', marginBottom: 6, opacity: 0.8 }}>Repo root (for npm test)</label>
+                <input
+                  type="text"
+                  value={selfMod.repoRoot}
+                  onChange={(e) => selfModSetRepoRoot(e.target.value)}
+                  disabled={selfMod.running}
+                  style={{ width: '100%' }}
+                  placeholder="e.g. G:\\AGIPRIME"
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', marginBottom: 6, opacity: 0.8 }}>Request</label>
+                <textarea
+                  value={selfMod.request}
+                  onChange={(e) => selfModSetRequest(e.target.value)}
+                  disabled={selfMod.running}
+                  style={{ width: '100%', minHeight: 90, resize: 'vertical' }}
+                  placeholder="Describe the code change you want the system to implement."
+                />
+              </div>
+              {selfMod.lastResult && (
+                <div style={{ padding: 10, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 6 }}>
+                  <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                    <strong style={{ color: selfMod.lastResult.success ? '#00ff41' : '#ff006e' }}>
+                      {selfMod.lastResult.success ? 'SUCCESS' : 'FAILED'}
+                    </strong>
+                    {typeof selfMod.lastResult.testsPassed === 'boolean' && (
+                      <span>tests: {selfMod.lastResult.testsPassed ? 'PASS' : 'FAIL'}</span>
+                    )}
+                    {typeof selfMod.lastResult.gauntletDelta === 'number' && (
+                      <span>gauntlet Δ {(selfMod.lastResult.gauntletDelta * 100).toFixed(1)}%</span>
+                    )}
+                    {typeof selfMod.lastResult.agiDelta === 'number' && (
+                      <span>AGI Δ {selfMod.lastResult.agiDelta.toFixed(2)}</span>
+                    )}
+                    {selfMod.lastResult.rolledBack && (
+                      <span>rollback: applied</span>
+                    )}
+                  </div>
+                </div>
+              )}
+              <div style={{ fontFamily: 'monospace', fontSize: 12, opacity: 0.9 }}>
+                {selfMod.logs.slice(-60).map((line, i) => (
+                  <div key={`${i}-${line}`}>{line}</div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
 
         {/* ─── Live Log ───────────────────────────────────── */}
         <div className="sovereign-log">
