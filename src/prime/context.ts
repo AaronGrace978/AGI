@@ -27,6 +27,18 @@ export interface SystemAddendumInput {
 export function buildSystemAddendum(input: SystemAddendumInput): string {
   const chunks: string[] = [];
 
+  // Runtime directive: this app is stateful and *does* persist context.
+  // Avoid the generic "I have no memory between sessions" disclaimer unless the data is truly missing.
+  chunks.push(
+    [
+      '=== RUNTIME DIRECTIVE ===',
+      '- You run inside AGI PRIME (a persistent desktop app). Conversation logs and memory context may be provided.',
+      '- If asked about past interactions: use the current chat + provided memory context; if missing, ask rather than inventing.',
+      '- Do not claim you are "stateless" or "cannot remember between sessions" as a blanket statement.',
+      '=== END DIRECTIVE ===',
+    ].join('\n'),
+  );
+
   if (input.ragContext) {
     chunks.push(input.ragContext.trim());
   }

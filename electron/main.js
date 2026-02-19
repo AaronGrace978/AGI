@@ -1799,9 +1799,24 @@ ipcMain.on('chat:send', async (event, messages, config) => {
     const maxTokens = config?.maxTokens ?? settings.maxTokens;
     const runId = config?.runId || null;
 
-    // Prepend system prompt
-    const systemPrompt = settings.systemPrompt || DEFAULT_SETTINGS.systemPrompt;
-    const fullMessages = [{ role: 'system', content: systemPrompt }, ...messages];
+    // System prompt handling:
+    // - Renderer may already include a system message (Creed + RAG/context addendum).
+    // - Anthropic only accepts a single `system` string and we currently take the first system message.
+    //   So we must merge all system content into ONE system message at the front.
+    const baseSystemPrompt = settings.systemPrompt || DEFAULT_SETTINGS.systemPrompt;
+    const incoming = Array.isArray(messages) ? messages : [];
+    const systemParts = [
+      String(baseSystemPrompt || '').trim(),
+      ...incoming
+        .filter((m) => m && m.role === 'system')
+        .map((m) => String(m.content || '').trim())
+        .filter(Boolean),
+    ].filter(Boolean);
+    const mergedSystem = systemParts.join('\n\n').trim();
+    const chatOnly = incoming.filter((m) => m && m.role !== 'system');
+    const fullMessages = mergedSystem
+      ? [{ role: 'system', content: mergedSystem }, ...chatOnly]
+      : chatOnly;
 
     let fullText = '';
 
