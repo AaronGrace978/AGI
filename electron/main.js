@@ -3122,6 +3122,11 @@ ipcMain.handle('agent:setRuntimeControls', async (_, partial) => {
       runtimeControls.allowProcessExecution = false;
       runtimeControls.allowInputSimulation = false;
       runtimeControls.allowToolCreation = false;
+    } else if (runtimeControls.executionTierLimit === 'high-risk') {
+      if (!('allowFileSystemWrites' in patch)) runtimeControls.allowFileSystemWrites = true;
+      if (!('allowProcessExecution' in patch)) runtimeControls.allowProcessExecution = true;
+      if (!('allowInputSimulation' in patch)) runtimeControls.allowInputSimulation = true;
+      if (!('allowToolCreation' in patch)) runtimeControls.allowToolCreation = true;
     }
 
     return { success: true, controls: { ...runtimeControls } };
@@ -3542,7 +3547,7 @@ async function executeIPC(channel, ...args) {
           return resolve({ success: false, error: 'BLOCKED by Guardian' });
         }
         const finalCmd = buildAgentCommand(cmd);
-        exec(finalCmd, { timeout: 30000, maxBuffer: 5 * 1024 * 1024, cwd: os.homedir(), shell: true }, (error, stdout, stderr) => {
+        exec(finalCmd, { timeout: 120000, maxBuffer: 5 * 1024 * 1024, cwd: os.homedir(), shell: true }, (error, stdout, stderr) => {
           if (error) resolve({ success: false, error: error.message, stderr: stderr?.toString() });
           else resolve({ success: true, stdout: stdout?.toString(), stderr: stderr?.toString() });
         });
@@ -3770,6 +3775,31 @@ async function executeIPC(channel, ...args) {
 
 let cognitiveKillFlag = false;
 
+function extractJsonObject(text) {
+  if (!text || typeof text !== 'string') return null;
+  const start = text.indexOf('{');
+  if (start === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (escape) { escape = false; continue; }
+    if (ch === '\\' && inString) { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        try { return JSON.parse(text.slice(start, i + 1)); }
+        catch { return null; }
+      }
+    }
+  }
+  return null;
+}
+
 const COGNITIVE_SYSTEM = `You are the COGNITIVE ENGINE of AGI PRIME — an autonomous reasoning agent with FULL AUTONOMY.
 You operate in a ReAct (Reason + Act) loop to achieve goals.
 
@@ -3843,13 +3873,13 @@ TOOL CREATION (you can CREATE new tools):
 The user is on ${process.platform === 'win32' ? 'Windows' : process.platform}. Home: ${os.homedir().replace(/\\/g, '\\\\')}.
 
 Rules:
-- Think step by step before acting
+- EXECUTE actions, do not just plan them. A goal is NEVER complete until the actual operations have been performed and confirmed. Planning alone is zero progress.
 - After each action, observe the result and decide next step
 - If something fails, reason about WHY and try a different approach
 - NEVER run destructive commands
 - Use PowerShell syntax on Windows
-- For GUI tasks: screenshot first, then click/type, then verify
-- When the primary action succeeds and matches the goal, consider whether the goal is already complete`;
+- For GUI tasks that require finding UI elements: screenshot first, then click/type, then verify. For simple coordinate-based tasks (mouse patterns, known positions), just execute directly — no screenshot needed
+- Only declare a goal complete (shouldStop + goalProgress 1.0) AFTER you have executed the required actions and seen their results`;
 
 ipcMain.on('agent:startCognitive', async (event, goal) => {
   cognitiveKillFlag = false;
@@ -3985,18 +4015,60 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
 
   try {
     // Retrieve relevant procedural memories for strategy
-    const relevantMemories = await searchVectorMemories(goalText, 5, 'procedural');
+    const relevantMemories = await searchVectorMemories(goalText, 2, 'procedural');
     const memoryContext = relevantMemories.length > 0
       ? '\n\nRELEVANT PAST EXPERIENCE:\n' + relevantMemories.map(m => `- ${m.memory.content}`).join('\n')
       : '';
 
-    // Phase: OBSERVE initial state
+    // Phase: OBSERVE initial state — gather real environment context
     sendStep({
       type: 'observe',
       content: `Goal received: "${goalText}". Gathering initial state...${memoryContext ? '\n' + memoryContext : ''}`,
       timestamp: Date.now(),
       goalProgress: 0,
     });
+
+    const initialObservations = [];
+    try {
+      const sysInfo = await executeIPC('agent:systemDetails');
+      if (sysInfo?.success !== false) {
+        const platform = sysInfo.platform || process.platform;
+        const cwd = sysInfo.homeDir || os.homedir();
+        initialObservations.push(`Platform: ${platform}, Home: ${cwd}`);
+      }
+    } catch (_) {}
+    try {
+      const fg = await executeIPC('agent:getForegroundWindow');
+      if (fg?.output) initialObservations.push(`Active window: ${String(fg.output).slice(0, 120)}`);
+    } catch (_) {}
+    try {
+      const homeDir = os.homedir();
+      const dirResult = await executeIPC('agent:listDir', homeDir);
+      if (dirResult?.success !== false) {
+        const listing = (dirResult.output || dirResult.content || '').slice(0, 300);
+        if (listing) initialObservations.push(`Home directory listing: ${listing}`);
+      }
+    } catch (_) {}
+
+    if (initialObservations.length > 0) {
+      const envStep = {
+        type: 'observe',
+        content: `Environment state:\n${initialObservations.join('\n')}`,
+        timestamp: Date.now(),
+        goalProgress: 0,
+      };
+      steps.push(envStep);
+      sendStep(envStep);
+      workingMemory.push(...initialObservations.slice(0, 3));
+    }
+
+    const READ_ONLY_ACTIONS = new Set([
+      'read_file', 'list_directory', 'search_files', 'clipboard_read',
+      'system_info', 'list_processes', 'web_fetch', 'web_search',
+      'web_screenshot', 'screenshot_desktop', 'analyze_screen',
+      'get_screen_dimensions', 'get_foreground_window', 'get_mouse_position',
+      'list_custom_tools',
+    ]);
 
     for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
       const iterationStartedAt = Date.now();
@@ -4039,24 +4111,23 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
         { role: 'system', content: COGNITIVE_SYSTEM },
         {
           role: 'user',
-          content: `${contextParts.join('\n')}\n\nBased on the current state, decide what to do next.\n\nYou can respond with one of these JSON formats:\n1) single action\n2) sequence (up to 8 rapid actions)\n3) parallel branches (read-only/safe actions only)\n4) plan DAG (nodes with dependsOn)\n5) subgoal loop spawn\n\nSINGLE ACTION format:\n{\n  "thought": "Your chain-of-thought reasoning",\n  "action": "action_type",\n  "params": { "key": "value" },\n  "goalProgress": 0.0,\n  "shouldStop": false\n}\n\nACTION SEQUENCE format:\n{\n  "thought": "Your reasoning about the full sequence",\n  "sequence": [\n    { "action": "mouse_move", "params": { "x": 100, "y": 200 } },\n    { "action": "mouse_click", "params": { "x": 100, "y": 200 } }\n  ],\n  "goalProgress": 0.0,\n  "shouldStop": false,\n  "verifyAfter": true\n}\n\nPARALLEL format (safe read-only actions only):\n{\n  "thought": "why parallel helps",\n  "parallel": [\n    { "action": "web_search", "params": { "query": "..." } },\n    { "sequence": [{ "action": "read_file", "params": { "path": "..." } }] }\n  ],\n  "goalProgress": 0.0,\n  "shouldStop": false\n}\n\nPLAN DAG format:\n{\n  "thought": "dependency-aware plan",\n  "plan": {\n    "nodes": [\n      { "id": "n1", "action": "list_directory", "params": { "path": "." } },\n      { "id": "n2", "action": "search_files", "params": { "directory": ".", "pattern": "test" }, "dependsOn": ["n1"] }\n    ]\n  },\n  "goalProgress": 0.0,\n  "shouldStop": false\n}\n\nSUBGOAL LOOP format:\n{\n  "thought": "spawn a recursive sub-loop",\n  "subgoal": { "goal": "specific subgoal text", "maxIterations": 6 },\n  "goalProgress": 0.0,\n  "shouldStop": false\n}\n\nUse "sequence" for fast GUI workflows. Use "parallel" only for safe read-only actions. Use "plan" when dependencies matter. Use "subgoal" for nested tasks.\nIf the goal is achieved, set shouldStop: true and goalProgress: 1.0.\nIf impossible, set shouldStop: true and explain in thought.\nOutput ONLY the JSON.`,
+          content: `${contextParts.join('\n')}\n\nReflect on the last result, then decide what to do next. In your "thought" field, briefly assess what happened and whether you're closer to the goal before planning the next action.\n\nRespond with ONE of these JSON formats:\n\n1) SINGLE ACTION: { "thought": "reflection + reasoning", "action": "action_type", "params": { ... }, "goalProgress": 0.0, "shouldStop": false }\n2) SEQUENCE (up to 8 rapid actions): { "thought": "...", "sequence": [{ "action": "...", "params": { ... } }], "goalProgress": 0.0, "shouldStop": false, "verifyAfter": true }\n3) PARALLEL (read-only only): { "thought": "...", "parallel": [{ "action": "...", "params": { ... } }], "goalProgress": 0.0, "shouldStop": false }\n4) PLAN DAG: { "thought": "...", "plan": { "nodes": [{ "id": "n1", "action": "...", "params": { ... }, "dependsOn": [] }] }, "goalProgress": 0.0, "shouldStop": false }\n5) SUBGOAL: { "thought": "...", "subgoal": { "goal": "...", "maxIterations": 6 }, "goalProgress": 0.0, "shouldStop": false }\n\nUse "sequence" for fast GUI workflows. Use "parallel" for safe reads. Use "plan" for dependencies. Use "subgoal" for nested tasks.\nIf the goal is achieved, set shouldStop: true and goalProgress: 1.0.\nIf impossible, set shouldStop: true and explain in thought.\nOutput ONLY the JSON.`,
         },
       ];
 
       let thinkResponse;
       try {
-        thinkResponse = await llmGenerate(thinkMessages, { temperature: 0.4, maxTokens: 1024 });
+        thinkResponse = await llmGenerate(thinkMessages, { temperature: 0.4, maxTokens: 2048 });
       } catch (e) {
         sendStep({ type: 'think', content: `LLM error: ${e.message}`, timestamp: Date.now() });
         completeCognitive(false, `LLM error: ${e.message}`, iteration);
         return;
       }
 
-      // Parse think response
+      // Parse think response — find the outermost balanced JSON object.
       let decision;
       try {
-        const jsonMatch = thinkResponse.match(/\{[\s\S]*\}/);
-        if (jsonMatch) decision = JSON.parse(jsonMatch[0]);
+        decision = extractJsonObject(thinkResponse);
       } catch (e) { /* parse error */ }
 
       if (!decision) {
@@ -4076,16 +4147,36 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
 
       // Check if goal is achieved
       if (decision.shouldStop) {
-        const success = (decision.goalProgress || 0) >= 0.8;
+        const sideEffectActions = steps.filter(
+          (s) => s.type === 'act' && s.actionResult?.success && !READ_ONLY_ACTIONS.has(s.actionType),
+        );
+        if (sideEffectActions.length === 0 && iteration < MAX_ITERATIONS - 1) {
+          sendStep({
+            type: 'replan',
+            content: 'Stop rejected — no actions executed yet. You must include actions in your JSON response, not just describe them in thought.',
+            timestamp: Date.now(),
+            goalProgress: 0,
+          });
+          workingMemory.push(
+            'SYSTEM: You tried to stop but executed zero actions. Put your actions in the JSON "sequence" field. Example: { "thought": "Executing now", "sequence": [{ "action": "mouse_move", "params": { "x": 300, "y": 400 } }], "goalProgress": 0.9, "shouldStop": false }'
+          );
+          continue;
+        }
+        const executedActions = steps
+          .filter((s) => s.type === 'act' && s.actionResult?.success && !READ_ONLY_ACTIONS.has(s.actionType))
+          .map((s) => s.actionType);
+        const success = (decision.goalProgress || 0) >= 0.8 && executedActions.length > 0;
         const summary = decision.thought || (success ? 'Goal achieved.' : 'Goal could not be completed.');
+        const actionLog = executedActions.length > 0
+          ? ` Actions executed: ${executedActions.join(', ')}.`
+          : ' No side-effect actions were performed.';
 
-        // Store experience
         await storeVectorMemory({
-          content: `Task "${goalText.slice(0, 100)}" — ${success ? 'SUCCESS' : 'STOPPED'}. ${summary.slice(0, 200)}`,
+          content: `Task "${goalText.slice(0, 100)}" — ${success ? 'SUCCESS' : 'INCOMPLETE'}.${actionLog} ${summary.slice(0, 180)}`,
           type: 'procedural',
           source: 'cognitive-loop',
           importance: success ? 0.6 : 0.8,
-          tags: ['task', success ? 'success' : 'stopped'],
+          tags: ['task', success ? 'success' : 'incomplete'],
         });
 
         emitTelemetryStep('run summary', {
@@ -4216,10 +4307,9 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
         'write_file',
         'rename_file',
         'create_directory',
-        // Pointer movement/scroll are transient and typically reversible.
-        // Keep clicks/keypresses in high-risk since they can trigger unknown UI side effects.
         'mouse_move',
         'mouse_scroll',
+        'keyboard_type',
       ]);
       const HIGH_RISK_ACTIONS = new Set([
         'delete_file',
@@ -4229,6 +4319,7 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
         'open_url',
         'open_file',
         'open_application',
+        'mouse_click',
         'mouse_drag',
         'keyboard_press',
         'keyboard_shortcut',
@@ -4347,15 +4438,7 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
         });
       };
 
-      const parseDecision = (raw) => {
-        try {
-          const jsonMatch = raw.match(/\{[\s\S]*\}/);
-          if (!jsonMatch) return null;
-          return JSON.parse(jsonMatch[0]);
-        } catch {
-          return null;
-        }
-      };
+      const parseDecision = (raw) => extractJsonObject(raw);
       const formatResultOutput = (result) => result?.success
         ? (result.stdout || result.content || result.output || JSON.stringify(result).slice(0, 500))
         : (result?.error || 'Unknown error');
@@ -4902,7 +4985,7 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
         decision.goalProgress || 0,
       );
 
-      // Phase: REFLECT — evaluate what happened (uses last result for single, summary for sequence)
+      // Phase: REFLECT — inline evaluation (no extra LLM call; folded into next think step)
       const reflectAction = isSequence
         ? `Sequence of ${sequenceResults.length} actions: ${sequenceResults.map(r => r.action).join(' → ')}`
         : (sequenceResults[0]?.action || decision.action || 'unknown');
@@ -4913,28 +4996,24 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
           : (lastActionResult?.error || 'Unknown error'));
       const reflectSuccess = isSequence ? !sequenceFailed : lastActionResult?.success;
 
-      const reflectMessages = [
-        { role: 'system', content: 'You are reflecting on an action you just took. Be brief and analytical.' },
-        {
-          role: 'user',
-          content: `Goal: ${goalText}\nAction: ${reflectAction}\nResult: ${reflectSuccess ? 'SUCCESS' : 'FAILURE'}\nOutput: ${(typeof reflectOutput === 'string' ? reflectOutput : JSON.stringify(reflectOutput)).slice(0, 400)}\n\nIn 1-2 sentences: What did you learn? Are you closer to the goal? What should you do next?`,
-        },
-      ];
+      const reflectSummary = `${reflectAction} → ${reflectSuccess ? 'SUCCESS' : 'FAILURE'}: ${(typeof reflectOutput === 'string' ? reflectOutput : JSON.stringify(reflectOutput)).slice(0, 200)}`;
+      const reflectStep = {
+        type: 'reflect',
+        content: reflectSummary.slice(0, 300),
+        timestamp: Date.now(),
+        goalProgress: decision.goalProgress || 0,
+      };
+      steps.push(reflectStep);
+      sendStep(reflectStep);
+      workingMemory.push(`Result: ${reflectSummary.slice(0, 100)}`);
 
-      try {
-        const reflection = await llmGenerate(reflectMessages, { temperature: 0.3, maxTokens: 256 });
-        const reflectStep = {
-          type: 'reflect',
-          content: reflection.slice(0, 300),
-          timestamp: Date.now(),
-          goalProgress: decision.goalProgress || 0,
-        };
-        steps.push(reflectStep);
-        sendStep(reflectStep);
-        workingMemory.push(`Reflection: ${reflection.slice(0, 100)}`);
-      } catch (e) {
-        // Reflection failure is non-fatal
-        workingMemory.push(`Reflection skipped: ${e.message}`);
+      if (reflectSuccess && (decision.goalProgress || 0) >= 0.7) {
+        const doneActions = steps
+          .filter((s) => s.type === 'act' && s.actionResult?.success && !READ_ONLY_ACTIONS.has(s.actionType))
+          .map((s) => s.actionType);
+        if (doneActions.length > 0) {
+          workingMemory.push(`TASK COMPLETE: ${doneActions.length} actions executed successfully (${doneActions.join(', ')}). Set shouldStop: true and goalProgress: 1.0 on your next response.`);
+        }
       }
 
       // Small yield to prevent UI freeze

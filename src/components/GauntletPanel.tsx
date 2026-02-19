@@ -9,6 +9,27 @@ function msToDuration(ms: number): string {
   return `${mins}m ${rem}s`;
 }
 
+function computeGrade(overallScore: number, passRate: number): { grade: string; color: string } {
+  // A+ criteria: perfect or near-perfect (>= 0.95 score AND >= 1.00 pass-rate)
+  if (overallScore >= 0.95 && passRate >= 1.0) {
+    return { grade: 'A+', color: '#00ff41' };
+  }
+  // A criteria: excellent (>= 0.90 score AND >= 0.90 pass-rate)
+  if (overallScore >= 0.90 && passRate >= 0.90) {
+    return { grade: 'A', color: '#4ade80' };
+  }
+  // B+ criteria: good (>= 0.80 score AND >= 0.80 pass-rate)
+  if (overallScore >= 0.80 && passRate >= 0.80) {
+    return { grade: 'B+', color: '#a3d977' };
+  }
+  // B criteria: acceptable (>= 0.70 score AND >= 0.70 pass-rate)
+  if (overallScore >= 0.70 && passRate >= 0.70) {
+    return { grade: 'B', color: '#fbbf24' };
+  }
+  // C criteria: needs improvement (< 0.70)
+  return { grade: 'C', color: '#f87171' };
+}
+
 function polylinePoints(values: number[], width: number, height: number): string {
   if (values.length === 0) return '';
   if (values.length === 1) return `0,${height / 2} ${width},${height / 2}`;
@@ -60,6 +81,10 @@ export default function GauntletPanel() {
   const filteredResults = gauntlet.results.filter((result) =>
     provenanceFilter === 'all' ? true : (result.provenance || 'synthetic') === provenanceFilter,
   );
+  const grade = useMemo(
+    () => computeGrade(gauntlet.overallScore, gauntlet.passRate),
+    [gauntlet.overallScore, gauntlet.passRate],
+  );
 
   return (
     <div className="forge-panel">
@@ -68,8 +93,25 @@ export default function GauntletPanel() {
           <h2>⚔ GAUNTLET MODULE</h2>
           <p>Capability benchmark harness for planning, reasoning, robustness, and self-correction</p>
         </div>
-        <div className={`forge-status ${gauntlet.phase}`}>
-          {gauntlet.phase.toUpperCase()}
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <div className={`forge-status ${gauntlet.phase}`}>
+            {gauntlet.phase.toUpperCase()}
+          </div>
+          {gauntlet.phase === 'completed' && gauntlet.results.length > 0 && (
+            <div
+              style={{
+                padding: '4px 12px',
+                borderRadius: 4,
+                backgroundColor: grade.color,
+                color: '#000',
+                fontWeight: 'bold',
+                fontSize: 14,
+                letterSpacing: 0.5,
+              }}
+            >
+              {grade.grade}
+            </div>
+          )}
         </div>
       </div>
 
@@ -81,6 +123,12 @@ export default function GauntletPanel() {
             <div><span>Progress</span><strong>{gauntlet.currentIndex}/{gauntlet.baselineCapabilities.length}</strong></div>
             <div><span>Overall score</span><strong>{(gauntlet.overallScore * 100).toFixed(1)}%</strong></div>
             <div><span>Pass rate</span><strong>{(gauntlet.passRate * 100).toFixed(1)}%</strong></div>
+            {gauntlet.phase === 'completed' && gauntlet.results.length > 0 && (
+              <div>
+                <span>Grade</span>
+                <strong style={{ color: grade.color }}>{grade.grade}</strong>
+              </div>
+            )}
             <div><span>Elapsed</span><strong>{elapsed}</strong></div>
             <div><span>History runs</span><strong>{gauntlet.history.length}</strong></div>
             <div><span>Auto cycle</span><strong>{gauntlet.autoCycleStage.toUpperCase()}</strong></div>

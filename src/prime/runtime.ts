@@ -10,6 +10,7 @@ import type {
   ForgeCandidate,
   ForgeGenerationReport,
   ForgeRunConfig,
+  GauntletCapability,
 } from '../types';
 import { verifyResponse } from './verifier';
 
@@ -248,6 +249,26 @@ async function evaluateWithLLM(
   const totalScore = clamp(benchmarkScore * 0.75 + passRate * 0.25 - tempPenalty, 0, 1);
 
   return { benchmarkScore, passRate, totalScore };
+}
+
+// ─── Convert Gauntlet Capabilities to Forge Benchmarks ──────────
+
+export function gauntletCapabilitiesToForgeBenchmarks(
+  capabilities: GauntletCapability[],
+): ForgeBenchmark[] {
+  return capabilities
+    .filter((cap) => cap.id !== 'pie-arc-bench') // Skip deterministic PIE bench
+    .map((cap) => ({
+      id: `gauntlet-${cap.id}`,
+      prompt: cap.testPrompt,
+      expectedKeywords: cap.judgeCriteria
+        .split(/[,;]/)
+        .map((s) => s.trim().toLowerCase())
+        .filter((s) => s.length >= 4),
+      evaluationType: 'llm-judge' as const,
+      judgeCriteria: cap.judgeCriteria,
+      weight: cap.weight,
+    }));
 }
 
 // ─── Default Benchmark Suite (real tasks) ──────────────────────

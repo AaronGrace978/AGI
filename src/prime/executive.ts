@@ -38,9 +38,11 @@ function isLikelyArenaRequest(text: string): boolean {
     /^\/(arena|mind)\b/i.test(text.trim());
 }
 
-function isLikelyImproveRequest(_text: string): boolean {
-  // Only explicit /forge, /evolve, /improve (handled above) route to FORGE/SOVEREIGN.
-  return false;
+function isLikelyImproveRequest(text: string): boolean {
+  const t = text.trim().toLowerCase();
+  // Lightweight heuristic: users often type "forge: ..." without a slash.
+  // Keep it conservative so normal conversation doesn't get hijacked.
+  return /^(forge|evolve|improve)\s*[:\-]/i.test(t) || /\b(forge|evolve|self[-\s]?improve|improvement)\b/i.test(t);
 }
 
 export function executiveRoute(params: {

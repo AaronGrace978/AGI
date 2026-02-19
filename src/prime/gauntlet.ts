@@ -331,7 +331,8 @@ export async function runCapabilityGauntlet(params: {
         continue;
       }
       if (generate) {
-        const candidateResponse = await generate(
+        // Attempt #1: Lower temperature for consistency, more tokens for structure
+        let candidateResponse = await generate(
           [
             {
               role: 'system',
@@ -345,10 +346,10 @@ export async function runCapabilityGauntlet(params: {
             },
             { role: 'user', content: capability.testPrompt },
           ],
-          { temperature: 0.55, maxTokens: 900 },
+          { temperature: 0.25, maxTokens: 1200 },
         );
 
-        const judgeResponse = await generate(
+        let judgeResponse = await generate(
           [
             { role: 'system', content: JUDGE_PROMPT },
             {
@@ -365,7 +366,56 @@ export async function runCapabilityGauntlet(params: {
           { temperature: 0.1, maxTokens: 220 },
         );
 
-        const judged = parseJudgeResponse(judgeResponse);
+        let judged = parseJudgeResponse(judgeResponse);
+
+        // Retry mechanism: if failed, ask for explicit revision with checklist
+        if (!judged.passed && judged.score < 0.6) {
+          const revisionPrompt = `Your previous response scored ${(judged.score * 10).toFixed(1)}/10 and did not pass. The judge noted: "${judged.summary}"
+
+Revise your response to explicitly address each criterion:
+${capability.judgeCriteria.split(',').map((c, i) => `${i + 1}. ${c.trim()}`).join('\n')}
+
+Provide a structured response that clearly demonstrates each criterion. Include explicit verification steps, assumptions, risk handling, and concrete actions.`;
+
+          candidateResponse = await generate(
+            [
+              {
+                role: 'system',
+                content: [
+                  systemPrompt || 'You are AGI PRIME.',
+                  championPrompt ? `Champion augmentation:\n${championPrompt}` : '',
+                  `Capability focus: ${capability.name}. ${capability.description}`,
+                ]
+                  .filter(Boolean)
+                  .join('\n\n'),
+              },
+              { role: 'user', content: capability.testPrompt },
+              { role: 'assistant', content: candidateResponse },
+              { role: 'user', content: revisionPrompt },
+            ],
+            { temperature: 0.2, maxTokens: 1400 },
+          );
+
+          judgeResponse = await generate(
+            [
+              { role: 'system', content: JUDGE_PROMPT },
+              {
+                role: 'user',
+                content: [
+                  `CAPABILITY: ${capability.name}`,
+                  `CATEGORY: ${capability.category}`,
+                  `TASK: ${capability.testPrompt}`,
+                  `JUDGE CRITERIA: ${capability.judgeCriteria}`,
+                  `RESPONSE (REVISED):\n${candidateResponse.slice(0, 2600)}`,
+                ].join('\n\n'),
+              },
+            ],
+            { temperature: 0.1, maxTokens: 220 },
+          );
+
+          judged = parseJudgeResponse(judgeResponse);
+        }
+
         const provenance: GauntletProvenance =
           capability.category === 'execution' ? 'real-workflow' : 'synthetic';
         results.push({

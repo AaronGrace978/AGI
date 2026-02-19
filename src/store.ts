@@ -50,6 +50,7 @@ import {
   createSeedCandidate,
   evaluateGeneration,
   evaluateSeed,
+  gauntletCapabilitiesToForgeBenchmarks,
 } from './prime/runtime';
 import type { GenerateFn } from './prime/runtime';
 import type { OwnerPolicy, AutonomyLevel } from './prime/policy';
@@ -1406,11 +1407,14 @@ Output ONLY valid JSON:
           set((s) => ({ spark: { ...s.spark, pie: nextPie } }));
           pieContextStr = formatPIEContext(nextPie);
 
-          // If the user explicitly asks for output-only, bypass LLM and reply deterministically.
+          // If PIE can compute a test output, prefer returning it deterministically.
+          // This is a direct accuracy boost for ARC-style tasks and avoids LLM pattern drift.
           const wantsOutputOnly =
             /return\\s+only\\s+the\\s+output\\s+grid|output\\s+grid\\s+only|no\\s+explanation/i.test(content);
-          if (wantsOutputOnly && pieResult.testOutput) {
-            pieDirectAnswer = pieResult.testOutput.map((r) => r.join(' ')).join('\\n');
+          const hasExplicitTest = !!arcDetection.testInput;
+          if ((wantsOutputOnly || hasExplicitTest) && pieResult.testOutput) {
+            // Use real newlines so the grid renders correctly in chat.
+            pieDirectAnswer = pieResult.testOutput.map((r) => r.join(' ')).join('\n');
           }
         }
       }
@@ -1767,7 +1771,6 @@ Output ONLY valid JSON:
   startCognitive: (goal: CognitiveStartRequest) => {
     if (!window.api?.agent?.startCognitive) return;
     if (get().emergencyStopActive) return;
-    void get().syncRuntimeControls();
 
     const req: { goal: string; contextAddendum?: string; origin?: string; goalId?: string } =
       typeof goal === 'string'
@@ -1937,8 +1940,12 @@ Output ONLY valid JSON:
 
       // Store a compact procedural memory episode so future runs can recall it.
       if (goal) {
+        const actSteps = get().cognitive.steps
+          .filter((s) => s.type === 'act' && s.actionResult?.success && s.actionType)
+          .map((s) => s.actionType as string);
+        const actionLog = actSteps.length > 0 ? `\nActions performed: ${actSteps.join(', ')}` : '\nNo actions were performed.';
         window.api?.memory?.storeVector?.({
-          content: `Procedure: ${goal}\nOutcome: ${data.success ? 'success' : 'fail'}\nSummary: ${String(data.summary || '').slice(0, 600)}`,
+          content: `Procedure: ${goal}\nOutcome: ${data.success ? 'success' : 'fail'}${actionLog}\nSummary: ${String(data.summary || '').slice(0, 500)}`,
           type: 'procedural',
           source: 'hands-cognitive',
           importance: data.success ? 0.72 : 0.68,
@@ -2014,8 +2021,13 @@ Output ONLY valid JSON:
       }));
     });
 
-    window.api.agent.startCognitive(req);
-    void get().refreshRollbacks();
+    get().syncRuntimeControls().then(() => {
+      window.api.agent.startCognitive(req);
+      void get().refreshRollbacks();
+    }).catch(() => {
+      window.api.agent.startCognitive(req);
+      void get().refreshRollbacks();
+    });
   },
 
   killCognitive: () => {
@@ -3269,7 +3281,10 @@ Output ONLY valid JSON:
 
     const policy = get().sovereignPolicy;
     const ledgerBenchmarks = await deriveForgeBenchmarksFromLedgers(3);
-    const suite = [...ledgerBenchmarks, ...get().forge.baselineSuite];
+    const gauntletBenchmarks = gauntletCapabilitiesToForgeBenchmarks(
+      get().gauntlet.baselineCapabilities,
+    );
+    const suite = [...ledgerBenchmarks, ...get().forge.baselineSuite, ...gauntletBenchmarks];
     const seed = Date.now();
 
     const result = await runSovereignLoop({

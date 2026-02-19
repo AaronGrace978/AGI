@@ -831,6 +831,9 @@ export type GridPrimitiveType =
   | 'anchor_cols_mode_ge2'
   | 'anchor_cols_bottom_keep_first_two_last'
   | 'fill_last_two_with_rightmost_nonzero'
+  | 'reflect_row_runs_len2_across_zero_divider'
+  | 'paint_divider_col_with_leftmost_color'
+  | 'extend_dominant_bbox_right_one'
   // Parameterized primitives (AST steps with args)
   | 'translate_xy'
   | 'recolor_replace'

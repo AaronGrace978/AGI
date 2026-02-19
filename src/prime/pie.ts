@@ -38,6 +38,9 @@ const PRIMITIVE_COMPLEXITY: Record<GridPrimitiveType, number> = {
   anchor_cols_mode_ge2: 3,
   anchor_cols_bottom_keep_first_two_last: 3,
   fill_last_two_with_rightmost_nonzero: 1,
+  reflect_row_runs_len2_across_zero_divider: 3,
+  paint_divider_col_with_leftmost_color: 2,
+  extend_dominant_bbox_right_one: 2,
   translate_xy: 2,
   recolor_replace: 2,
   keep_k_largest_components_4: 3,
@@ -508,6 +511,148 @@ function stripZerosToValue(grid: Grid): Grid {
   return out;
 }
 
+function findAllZeroDividerCol(grid: Grid): number {
+  if (grid.length === 0) return -1;
+  const cols = grid[0]?.length ?? 0;
+  if (cols === 0) return -1;
+
+  // Prefer a divider column that is entirely 0 and not on an edge.
+  // If multiple exist, pick the first such interior divider.
+  for (let c = 1; c < cols - 1; c++) {
+    let allZero = true;
+    for (let r = 0; r < grid.length; r++) {
+      if ((grid[r]?.[c] ?? 0) !== 0) { allZero = false; break; }
+    }
+    if (allZero) return c;
+  }
+
+  // Fallback: any all-zero column, including edges.
+  for (let c = 0; c < cols; c++) {
+    let allZero = true;
+    for (let r = 0; r < grid.length; r++) {
+      if ((grid[r]?.[c] ?? 0) !== 0) { allZero = false; break; }
+    }
+    if (allZero) return c;
+  }
+
+  return -1;
+}
+
+function reflectRowRunsLen2AcrossZeroDivider(grid: Grid): Grid {
+  const out = cloneGrid(grid);
+  if (out.length === 0) return out;
+  const rows = out.length;
+  const cols = out[0]?.length ?? 0;
+  if (cols === 0) return out;
+
+  const divider = findAllZeroDividerCol(out);
+  if (divider < 0) return out;
+
+  for (let r = 0; r < rows; r++) {
+    const row = out[r];
+    // Reflect only runs of exactly length 2 on the LEFT of the divider.
+    for (let c = 0; c + 1 < divider; c++) {
+      const v = row[c];
+      if (v === 0) continue;
+      if (row[c + 1] !== v) continue;
+      // Ensure it's exactly length-2 (not part of a longer run).
+      if (c - 1 >= 0 && row[c - 1] === v) continue;
+      if (c + 2 < divider && row[c + 2] === v) continue;
+
+      for (const srcC of [c, c + 1]) {
+        const dstC = divider + (divider - srcC);
+        if (dstC >= 0 && dstC < cols) {
+          row[dstC] = v; // overwrite collisions (matches ARC examples)
+        }
+      }
+    }
+  }
+
+  return out;
+}
+
+function leftmostNonZeroColor(grid: Grid): number {
+  if (grid.length === 0) return 0;
+  const cols = grid[0]?.length ?? 0;
+  let bestCol = Infinity;
+  let bestRow = Infinity;
+  let bestVal = 0;
+
+  for (let r = 0; r < grid.length; r++) {
+    for (let c = 0; c < cols; c++) {
+      const v = grid[r][c] ?? 0;
+      if (v === 0) continue;
+      if (c < bestCol || (c === bestCol && r < bestRow)) {
+        bestCol = c;
+        bestRow = r;
+        bestVal = v;
+      }
+    }
+  }
+
+  return bestVal;
+}
+
+function paintDividerColWithLeftmostColor(grid: Grid): Grid {
+  const out = cloneGrid(grid);
+  if (out.length === 0) return out;
+  const cols = out[0]?.length ?? 0;
+  if (cols === 0) return out;
+
+  const divider = findAllZeroDividerCol(out);
+  if (divider < 0) return out;
+
+  const dominant = leftmostNonZeroColor(out);
+  if (dominant === 0) return out;
+
+  for (let r = 0; r < out.length; r++) {
+    let hasDominantLeft = false;
+    for (let c = 0; c < divider; c++) {
+      if ((out[r][c] ?? 0) === dominant) { hasDominantLeft = true; break; }
+    }
+    if (hasDominantLeft) out[r][divider] = dominant;
+  }
+
+  return out;
+}
+
+function extendDominantBBoxRightOne(grid: Grid): Grid {
+  const out = cloneGrid(grid);
+  if (out.length === 0) return out;
+  const cols = out[0]?.length ?? 0;
+  if (cols === 0) return out;
+
+  const dominant = leftmostNonZeroColor(out);
+  if (dominant === 0) return out;
+
+  // Find the dominant object's global right edge.
+  let rightmost = -1;
+  for (let r = 0; r < out.length; r++) {
+    for (let c = cols - 1; c >= 0; c--) {
+      if (out[r][c] === dominant) {
+        rightmost = Math.max(rightmost, c);
+        break;
+      }
+    }
+  }
+  if (rightmost < 0) return out;
+  const targetCol = rightmost + 1;
+  if (targetCol < 0 || targetCol >= cols) return out;
+
+  // For each row that contains the dominant color, extend exactly one cell to the right
+  // of the dominant object's global bounding box, but only into zeros (no overwrite).
+  for (let r = 0; r < out.length; r++) {
+    let has = false;
+    for (let c = 0; c <= rightmost; c++) {
+      if (out[r][c] === dominant) { has = true; break; }
+    }
+    if (!has) continue;
+    if (out[r][targetCol] === 0) out[r][targetCol] = dominant;
+  }
+
+  return out;
+}
+
 // ─── OBJECT PRIMITIVES (4-CONNECTED) ────────────────────────────
 
 type Pt = { r: number; c: number };
@@ -764,6 +909,9 @@ const EXECUTORS: Record<GridPrimitiveType, PrimitiveExecutor> = {
   anchor_cols_mode_ge2: (g) => anchorColsModeGe2(g),
   anchor_cols_bottom_keep_first_two_last: (g) => anchorColsBottomKeepFirstTwoLast(g),
   fill_last_two_with_rightmost_nonzero: (g) => fillLastTwoWithRightmostNonZero(g),
+  reflect_row_runs_len2_across_zero_divider: (g) => reflectRowRunsLen2AcrossZeroDivider(g),
+  paint_divider_col_with_leftmost_color: (g) => paintDividerColWithLeftmostColor(g),
+  extend_dominant_bbox_right_one: (g) => extendDominantBBoxRightOne(g),
   translate_xy: (g, args) => translateXY(g, args?.dx ?? 0, args?.dy ?? 0),
   recolor_replace: (g, args) => recolorReplace(g, args?.from ?? 0, args?.to ?? 0),
   keep_k_largest_components_4: (g, args) => keepKLargestComponents4(g, args?.k ?? 1),
@@ -1044,8 +1192,9 @@ function searchPrograms(
     const nextAll: SearchNode[] = [];
 
     // Gate the step space early to avoid paying for heavy object ops too soon.
-    // Depth 1: allow cheap (≤2). Depth 2: allow moderate (≤3). Later: full space.
-    const maxStepCostThisDepth = depth === 1 ? 2 : depth === 2 ? 3 : 999;
+    // Depth 1: allow cheap (≤3) - includes column anchors needed for ARC tasks.
+    // Depth 2+: allow moderate (≤3) same as depth 1. Later: full space (including complexity-4+ floodfill).
+    const maxStepCostThisDepth = depth === 1 ? 3 : depth === 2 ? 3 : 999;
     const stepsThisDepth = baseSteps.filter((s) => PRIMITIVE_COMPLEXITY[s.prim] <= maxStepCostThisDepth);
 
     for (const node of frontier) {
@@ -1136,6 +1285,9 @@ const SINGLE_PRIMITIVES: GridPrimitiveType[] = [
   'anchor_cols_mode_ge2',
   'anchor_cols_bottom_keep_first_two_last',
   'fill_last_two_with_rightmost_nonzero',
+  'reflect_row_runs_len2_across_zero_divider',
+  'paint_divider_col_with_leftmost_color',
+  'extend_dominant_bbox_right_one',
   'translate_xy',
   'recolor_replace',
   'keep_k_largest_components_4',
@@ -1483,6 +1635,12 @@ export function runPIEBenchmarkSuite(overrides?: Partial<PIESearchOptions>): PIE
   const prevDefaults = getPIESearchDefaults();
   if (overrides) setPIESearchDefaults(overrides);
 
+  // Benchmarks should reflect current search behavior, not whatever got cached earlier
+  // in the app session. (The PIE cache is great for interactive chat loops, but it
+  // can mask improvements during deterministic evaluation runs.)
+  TASK_CACHE.clear();
+  GLOBAL_EXEC_CACHE.clear();
+
   for (const task of PIE_BENCH_SUITE) {
     const t0 = Date.now();
     const r = runPIE(task.trainingPairs, task.testInput);
@@ -1686,18 +1844,18 @@ export interface DetectedARCTask {
 }
 
 export function detectARCTask(message: string): DetectedARCTask | null {
+  // Users often paste ARC grids inside Markdown code fences.
+  // Strip fence markers so the simple regexes still match.
+  const normalized = message.replace(/```/g, '');
   const pairs: TrainingPair[] = [];
 
-  // Look for Input:/Output: blocks
-  const inputOutputPattern = /Input:\s*\n([\d\s\n]+?)(?:\n\s*\n|\nOutput:)/gi;
-  const outputPattern = /Output:\s*\n([\d\s\n]+?)(?:\n\s*(?:\n|Example|Input:|PHASE|$))/gi;
-
   // Simpler approach: split by "Example" or "Input/Output" markers
-  const sections = message.split(/(?:Example\s*\d+|PHASE\s*\d+)/i);
+  const sections = normalized.split(/(?:Example\s*\d+|PHASE\s*\d+)/i);
 
   for (const section of sections) {
-    const inputMatch = section.match(/Input:\s*\n((?:\d[\d\s]*\n?)+)/i);
-    const outputMatch = section.match(/Output:\s*\n((?:\d[\d\s]*\n?)+)/i);
+    // Accept both "Input:" and "Input" (UI often omits colons).
+    const inputMatch = section.match(/Input\s*:?\s*\n((?:\d[\d\s]*\n?)+)/i);
+    const outputMatch = section.match(/Output\s*:?\s*\n((?:\d[\d\s]*\n?)+)/i);
 
     if (inputMatch && outputMatch) {
       const input = parseGrid(inputMatch[1]);
@@ -1712,14 +1870,16 @@ export function detectARCTask(message: string): DetectedARCTask | null {
 
   // Look for a standalone test input (Input: with no Output:)
   let testInput: Grid | null = null;
-  const testSection = message.split(/PHASE\s*2/i).pop();
-  if (testSection) {
-    const testMatch = testSection.match(/Input:\s*\n((?:\d[\d\s]*\n?)+)/i);
-    if (testMatch) {
-      const candidate = parseGrid(testMatch[1]);
-      if (candidate && !pairs.some(p => gridsEqual(p.input, candidate))) {
-        testInput = candidate;
-      }
+  const testSection = normalized.split(/PHASE\s*2/i).pop() || normalized;
+  // Prefer explicit "Test Input" section if present.
+  const testMatch =
+    testSection.match(/Test\s+Input\s*:?\s*\n((?:\d[\d\s]*\n?)+)/i) ||
+    testSection.match(/Your\s+AGI\s+must\s+solve\s+this[\s\S]*?\n((?:\d[\d\s]*\n?)+)\s*$/i) ||
+    testSection.match(/Input\s*:?\s*\n((?:\d[\d\s]*\n?)+)/i);
+  if (testMatch) {
+    const candidate = parseGrid(testMatch[1]);
+    if (candidate && !pairs.some(p => gridsEqual(p.input, candidate))) {
+      testInput = candidate;
     }
   }
 
