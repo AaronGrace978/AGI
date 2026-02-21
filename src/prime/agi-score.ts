@@ -148,10 +148,42 @@ function computeSubscoresFromGauntlet(params: {
   };
 }
 
+export interface NeuralCapabilitySignals {
+  modelsLoaded: boolean;
+  averageConfidence: number;     // 0-1 from recent predictions
+  bestTrainingLoss: number;      // lower is better
+  trainingDomainCount: number;   // how many distinct apps/tasks
+}
+
+function blendNeuralSignals(
+  subscores: AgiSubscores,
+  neural: NeuralCapabilitySignals,
+): AgiSubscores {
+  const out = { ...subscores };
+
+  const loadedBoost = neural.modelsLoaded ? 0.15 : 0;
+  const confBoost = clamp01(neural.averageConfidence) * 0.1;
+  const lossBoost = clamp01(1 - neural.bestTrainingLoss) * 0.08;
+  const diversityBoost = clamp01(neural.trainingDomainCount / 5) * 0.07;
+
+  // learningFlexibility: having learned action policies is direct evidence of learning
+  out.learningFlexibility = clamp(
+    out.learningFlexibility + to10(loadedBoost + confBoost + lossBoost), 0, 10,
+  );
+
+  // domainGenerality: more diverse training data = more general
+  out.domainGenerality = clamp(
+    out.domainGenerality + to10(loadedBoost * 0.5 + diversityBoost), 0, 10,
+  );
+
+  return out;
+}
+
 export function computeAgiScoreSnapshot(params: {
   config?: AgiRubricConfig | null;
   gauntletRun?: GauntletRunSnapshot | null;
   gauntletCapabilities?: GauntletCapability[] | null;
+  neuralCapabilities?: NeuralCapabilitySignals | null;
   id?: string;
   createdAt?: number;
   notes?: string;
@@ -161,7 +193,12 @@ export function computeAgiScoreSnapshot(params: {
   if (!run || !caps || !Array.isArray(run.results) || caps.length === 0) return null;
 
   const cfg = params.config ?? DEFAULT_AGI_RUBRIC_CONFIG;
-  const subscores = computeSubscoresFromGauntlet({ run, capabilities: caps, config: cfg });
+  let subscores = computeSubscoresFromGauntlet({ run, capabilities: caps, config: cfg });
+
+  if (params.neuralCapabilities) {
+    subscores = blendNeuralSignals(subscores, params.neuralCapabilities);
+  }
+
   const total = computeWeightedTotal(subscores, cfg.weights);
 
   const createdAt = params.createdAt ?? Date.now();

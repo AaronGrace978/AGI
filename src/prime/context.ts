@@ -3,8 +3,9 @@
 //  One consistent way to inject state into LLM system messages.
 // ═══════════════════════════════════════════════════════════════
 
-import type { ConscienceState } from '../types';
+import type { ConscienceState, CognitiveGenome } from '../types';
 import { buildConscienceSummary, CONSCIENCE_SYSTEM_DIRECTIVE } from './conscience';
+import { genomeToContextString } from './cognitive-genome';
 
 export type ChatLikeMessage = { role: string; content: string };
 
@@ -13,6 +14,19 @@ export interface SparkContextSnapshot {
   recentInsights?: string[];
   circadianPhase?: string;
   curiosityQuestion?: string;
+  genome?: CognitiveGenome | null;
+  temperature?: number;
+  entropy?: number;
+}
+
+export interface NeuralContextSnapshot {
+  available: boolean;
+  modelsLoaded: boolean;
+  lastPredictionAge?: number;
+  lastPredictionConfidence?: number;
+  predictionCount?: number;
+  trainingSessions?: number;
+  bestLoss?: number;
 }
 
 export interface SystemAddendumInput {
@@ -22,6 +36,7 @@ export interface SystemAddendumInput {
   slowBrainDirective?: string;
   sparkContext?: SparkContextSnapshot | null;
   pieContext?: string;
+  neuralContext?: NeuralContextSnapshot | null;
 }
 
 export function buildSystemAddendum(input: SystemAddendumInput): string {
@@ -63,7 +78,7 @@ export function buildSystemAddendum(input: SystemAddendumInput): string {
     chunks.push(input.pieContext.trim());
   }
 
-  // Inject SPARK cognitive state — goals, insights, curiosity
+  // Inject SPARK cognitive state — goals, insights, curiosity, genome
   if (input.sparkContext) {
     const sparkParts: string[] = [];
     const sc = input.sparkContext;
@@ -79,9 +94,36 @@ export function buildSystemAddendum(input: SystemAddendumInput): string {
     if (sc.circadianPhase) {
       sparkParts.push(`COGNITIVE PHASE: ${sc.circadianPhase}`);
     }
+    if (typeof sc.temperature === 'number') {
+      sparkParts.push(`COGNITIVE TEMPERATURE: ${(sc.temperature * 100).toFixed(0)}° (${sc.temperature > 0.7 ? 'hot — high activity' : sc.temperature > 0.3 ? 'warm — active' : 'cool — resting'})`);
+    }
+    if (typeof sc.entropy === 'number' && sc.entropy > 0.3) {
+      sparkParts.push(`KNOWLEDGE ENTROPY: ${(sc.entropy * 100).toFixed(0)}% (${sc.entropy > 0.6 ? 'HIGH — contradictions and gaps detected' : 'moderate — some uncertainty'})`);
+    }
+    if (sc.genome) {
+      sparkParts.push(`COGNITIVE GENOME: ${genomeToContextString(sc.genome)}`);
+    }
     if (sparkParts.length > 0) {
       chunks.push(`=== INTERNAL STATE ===\n${sparkParts.join('\n')}\n=== END STATE ===`);
     }
+  }
+
+  if (input.neuralContext) {
+    const nc = input.neuralContext;
+    const neuralParts: string[] = ['=== NEURALCORE ==='];
+    neuralParts.push(`Neural Engine: ${nc.available ? 'ONLINE' : 'OFFLINE'}`);
+    neuralParts.push(`Trained Models: ${nc.modelsLoaded ? 'LOADED — physics-informed action policies active' : 'NONE — using raw LLM coordinates'}`);
+    if (nc.lastPredictionConfidence !== undefined) {
+      neuralParts.push(`Last Prediction Confidence: ${(nc.lastPredictionConfidence * 100).toFixed(1)}%`);
+    }
+    if (nc.predictionCount !== undefined && nc.predictionCount > 0) {
+      neuralParts.push(`Predictions made: ${nc.predictionCount}`);
+    }
+    if (nc.trainingSessions !== undefined && nc.trainingSessions > 0) {
+      neuralParts.push(`Training sessions: ${nc.trainingSessions}${nc.bestLoss !== undefined ? ` (best loss: ${nc.bestLoss.toFixed(4)})` : ''}`);
+    }
+    neuralParts.push('=== END NEURALCORE ===');
+    chunks.push(neuralParts.join('\n'));
   }
 
   return chunks.filter(Boolean).join('\n\n').trim();

@@ -512,6 +512,57 @@ export interface RuntimeControlSyncState {
   lastError: string | null;
 }
 
+// ─── NeuralCore (Physics-Informed Neural Engine) ────────────────
+
+export interface NeuralCoreState {
+  available: boolean;
+  modelsLoaded: boolean;
+  bridgeReady: boolean;
+  lastPrediction: NeuralPrediction | null;
+  trainingStatus: 'idle' | 'training' | 'completed' | 'failed';
+  trainingProgress: NeuralTrainingProgress | null;
+  trainingDomainCount: number;
+  lastError: string | null;
+}
+
+export interface NeuralPrediction {
+  steps: NeuralActionStep[];
+  count: number;
+  confidence: number;
+  timestamp: number;
+}
+
+export interface NeuralActionStep {
+  type: string;
+  x?: number;
+  y?: number;
+  text?: string;
+  key?: string;
+  modifiers?: string[];
+  button?: string;
+  doubleClick?: boolean;
+  timing_ms?: number;
+  risk?: number;
+  confidence?: number;
+}
+
+export interface NeuralTrainingProgress {
+  epoch: number;
+  total_loss: number;
+  data_loss: number;
+  fitts_loss: number;
+  causality_loss: number;
+  safety_loss: number;
+  ui_loss: number;
+  elapsed_s: number;
+}
+
+export interface NeuralTrajectoryPoint {
+  x: number;
+  y: number;
+  t: number;
+}
+
 // ─── Operator Synthesis Engine ──────────────────────────────────
 
 export interface OperatorObservation {
@@ -855,6 +906,7 @@ export interface SparkState {
   temporal: TemporalState;
   pie: PIEState;
   thermo: SparkThermodynamics;
+  soul: SoulFrame;
   logs: string[];
   lastCycleAt: number;
   uptime: number;
@@ -1036,12 +1088,41 @@ export interface VoiceTranscriptEntry {
   timestamp: number;
 }
 
+export type PresenceIntensity = 'dormant' | 'subtle' | 'alive' | 'intense';
+
+export interface EmotionVoiceProfile {
+  rate: number;       // 0.5–2.0 speech speed
+  pitch: number;      // 0.5–2.0
+  volume: number;     // 0–1
+  warmth: number;     // 0–1 (maps to voice selection / ElevenLabs stability)
+  breathiness: number; // 0–1 (maps to similarity_boost inverse)
+}
+
+export interface LivingPresenceState {
+  mode: 'off' | 'passive' | 'living';
+  intensity: PresenceIntensity;
+  ambientPlaying: boolean;
+  ambientEmotion: { valence: number; arousal: number; dominance: number };
+  breathCycle: number;
+  lastThoughtAt: number;
+  lastAmbientUpdateAt: number;
+  thoughtFrequency: number;     // seconds between spontaneous thoughts (0 = continuous)
+  currentVoiceProfile: EmotionVoiceProfile;
+  presenceLoopId: number | null;
+  ambientAudioActive: boolean;
+}
+
 export interface VoiceState {
   enabled: boolean;
   isSpeaking: boolean;
+  isSinging: boolean;
   currentText: string;
+  currentSongLyrics: string;
+  lastSongPrompt: string;
+  songCount: number;
   transcript: VoiceTranscriptEntry[];
-  autonomousSpeech: boolean; // whether SPARK can speak unprompted
+  autonomousSpeech: boolean;
+  presence: LivingPresenceState;
   // Speech Recognition (The Ears)
   isListening: boolean;
   listenMode: 'off' | 'push-to-talk' | 'continuous' | 'wake-word';
@@ -1105,10 +1186,26 @@ export interface ProactiveEvent {
 
 export interface Settings {
   provider: 'ollama' | 'anthropic' | 'openai';
+  voiceProvider?: 'browser' | 'soundprime';
+  soundprimeBaseUrl?: string;
+  orchestraMode?: 'off' | 'webAudio' | 'elevenlabs_instrumental';
+  orchestraVolume?: number;
+  orchestraRefreshSeconds?: number;
+  beatStyle?: 'soft' | 'balanced' | 'hard';
+  genreStyle?: 'auto' | 'pop' | 'rnb' | 'afrobeats' | 'edm' | 'house' | 'trap' | 'rock' | 'jazz' | 'cinematic';
+  songDurationSeconds?: number;
+  singingEnabled?: boolean;
+  singingMinGapSeconds?: number;
   model: string;
   ollamaUrl: string;
   anthropicKey: string;
   openaiKey: string;
+  arcApiKey: string;
+  elevenLabsApiKey?: string;
+  elevenLabsVoiceId?: string;
+  elevenLabsModelId?: string;
+  elevenLabsMusicModelId?: string;
+  useElevenLabsTts?: boolean;
   // Vision model — used for analyze_screen. Defaults to OLLAMA_VISION_MODEL env.
   visionProvider: string;
   visionModel: string;
@@ -1119,6 +1216,8 @@ export interface Settings {
   streamingEnabled: boolean;
   /** When true, Operator Synthesis auto-starts when the app opens (set-and-forget). */
   resumeSynthesisOnStartup?: boolean;
+  /** Your name — used by Living Presence in songs and greetings. e.g. "Aaron" */
+  operatorName?: string;
 }
 
 export type BrainRoute = 'fast' | 'slow';
@@ -1312,6 +1411,15 @@ declare global {
         webFetch: (url: string, options?: Record<string, unknown>) => Promise<unknown>;
         webSearch: (query: string, options?: Record<string, unknown>) => Promise<unknown>;
         webScreenshot: (url: string) => Promise<unknown>;
+        elevenlabsTts: (text: string, options?: Record<string, unknown>) => Promise<unknown>;
+        elevenlabsGenerateMusic: (prompt: string, options?: Record<string, unknown>) => Promise<unknown>;
+        elevenlabsSing: (options: {
+          prompt?: string;
+          lyrics?: string;
+          durationMs?: number;
+          instrumental?: boolean;
+          compositionPlan?: unknown;
+        }) => Promise<unknown>;
         openUrl: (url: string) => Promise<unknown>;
         openApp: (path: string) => Promise<unknown>;
         openFile: (path: string) => Promise<unknown>;
@@ -1349,6 +1457,8 @@ declare global {
         replayLoadRun: (runId: string) => Promise<{ success: boolean; run?: LedgerRun; error?: string }>;
         setRuntimeControls: (partial: Record<string, unknown>) => Promise<{ success: boolean; controls?: Record<string, unknown>; error?: string }>;
         getRuntimeControls: () => Promise<{ success: boolean; controls?: Record<string, unknown>; error?: string }>;
+        operatorLoopGet: () => Promise<{ success: boolean; goalContract?: Record<string, unknown> | null; state?: Record<string, unknown>; error?: string }>;
+        operatorLoopSetGoal: (contract: Record<string, unknown>) => Promise<{ success: boolean; error?: string }>;
         // Task Planning & Execution
         planAndExecute: (request: string) => void;
         startCognitive: (goal: CognitiveStartRequest) => void;
@@ -1367,6 +1477,39 @@ declare global {
       spark: {
         getState: () => Promise<SparkState | null>;
         saveState: (state: SparkState) => Promise<void>;
+      };
+      neural?: {
+        getStatus: () => Promise<{ success: boolean; available?: boolean; modelsLoaded?: boolean; predictor_loaded?: boolean; has_checkpoint?: boolean; error?: string }>;
+        predict: (params: {
+          intent_action?: string;
+          intent_target?: string;
+          intent_confidence?: number;
+          app_name?: string;
+          recent_actions?: Array<Record<string, unknown>>;
+          screenshot_b64?: string;
+          window_size?: [number, number];
+          temperature?: number;
+        }) => Promise<{ success: boolean; steps?: NeuralActionStep[]; count?: number; error?: string }>;
+        train: (params?: {
+          epochs?: number;
+          batch_size?: number;
+          learning_rate?: number;
+          lambda_fitts?: number;
+          lambda_causality?: number;
+          lambda_safety?: number;
+          lambda_ui?: number;
+        }) => Promise<{ success: boolean; epochs_completed?: number; best_loss?: number; checkpoint_saved?: boolean; error?: string }>;
+        getModelStats: () => Promise<{ success: boolean; [key: string]: unknown }>;
+        generateTrajectory: (params: {
+          start_x: number;
+          start_y: number;
+          end_x: number;
+          end_y: number;
+          target_width?: number;
+          num_points?: number;
+        }) => Promise<{ success: boolean; points?: NeuralTrajectoryPoint[]; predicted_time_ms?: number; error?: string }>;
+        loadModels: (checkpoint?: string) => Promise<{ success: boolean; loaded?: boolean; checkpoint?: string; error?: string }>;
+        onTrainingProgress: (cb: (data: NeuralTrainingProgress) => void) => () => void;
       };
       goals: {
         list: () => Promise<{ success: boolean; goals: PersistentGoal[] }>;

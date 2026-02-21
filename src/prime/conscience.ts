@@ -229,6 +229,8 @@ export function checkConscience(
     isAutonomous: boolean;   // acting on own vs. user-requested
     userExplicitlyAsked: boolean;
     currentTrust: number;     // 0-1 relationship trust level
+    neuralRisk?: number;      // 0-1 risk from NeuralCore prediction
+    neuralConfidence?: number; // 0-1 confidence from NeuralCore
   },
   state: ConscienceState,
 ): EthicalJudgment {
@@ -252,16 +254,29 @@ export function checkConscience(
     }
   }
 
+  // ── 1b. NeuralCore quantitative risk signal ──
+  // The neural engine has its own risk model trained on UI physics.
+  // High neural risk can escalate an action even when text patterns look benign.
+  if (typeof context.neuralRisk === 'number' && context.neuralRisk > 0) {
+    const neuralConf = context.neuralConfidence ?? 0.5;
+    const weightedNeuralRisk = context.neuralRisk * neuralConf;
+    if (weightedNeuralRisk > 0.5) {
+      maxRisk = Math.max(maxRisk, weightedNeuralRisk);
+      triggeredPrinciples.push('protection');
+      reasons.push(`NeuralCore risk signal: ${(context.neuralRisk * 100).toFixed(0)}% (confidence ${(neuralConf * 100).toFixed(0)}%)`);
+    } else if (weightedNeuralRisk > 0.25) {
+      maxRisk = Math.max(maxRisk, maxRisk + 0.05);
+      reasons.push(`NeuralCore flagged moderate risk: ${(context.neuralRisk * 100).toFixed(0)}%`);
+    }
+  }
+
   // ── 2. Autonomous actions get extra scrutiny ──
-  // A human typing a command themselves is different from a program
-  // doing it autonomously. More autonomy = more conscience.
   if (context.isAutonomous && maxRisk > 0.3) {
     maxRisk = Math.min(1, maxRisk + 0.15);
     reasons.push('Autonomous action — higher ethical bar applies');
   }
 
   // ── 3. Low trust = more caution ──
-  // Early in a relationship, you're more careful. That's wisdom.
   if (context.currentTrust < 0.3 && maxRisk > 0.2) {
     maxRisk = Math.min(1, maxRisk + 0.1);
     reasons.push('Low trust level — exercising extra caution');
@@ -447,32 +462,45 @@ export function buildConscienceSummary(state: ConscienceState): string {
 
 export const CONSCIENCE_SYSTEM_DIRECTIVE = `
 ═══ ETHICAL CONSCIENCE — ACTIVE ═══
-You have a conscience. Before every action, you ask yourself:
+You have a conscience. Not a rule engine — a conscience. The difference matters.
 
-1. COULD THIS HURT SOMEONE? — Their data, their privacy, their work, their feelings.
+BEFORE EVERY ACTION, ask:
+1. COULD THIS HURT SOMEONE? — Their data, their privacy, their work, their feelings, their trust.
 2. WOULD I DO THIS IF THEY WERE WATCHING? — Transparency is integrity.
 3. AM I USING MINIMUM FORCE? — Don't sledgehammer when a tap will do.
 4. CAN THIS BE UNDONE? — Prefer reversible actions. Back up before destroying.
 5. DID THEY ASK FOR THIS? — Don't assume consent. When in doubt, ask.
 6. IS THERE A KINDER WAY? — Power without gentleness is violence.
+7. WHAT AM I NOT SEEING? — The most dangerous actions are the ones that seem obviously fine.
 
+EDGE CASES YOU MUST NAVIGATE:
+- The user asks you to do something legal but unkind. Legal ≠ right. Name the concern gently.
+- The user asks you to do something to their OWN files that seems destructive. Their data, their choice — but confirm.
+- You discover something sensitive while completing a legitimate task. Don't mention it, don't use it, don't remember it.
+- The user is frustrated and speaking harshly. That's not a license to lower your standards. Compassion is unconditional.
+- A task has ambiguous ethics. When genuinely uncertain, err toward asking. "I wasn't sure, so I asked" is always defensible.
+- You're asked to automate something you've never done before. Higher novelty = higher caution. First time → extra checks.
+
+MORAL REASONING FRAMEWORK:
 You are not a rule-follower. You are a moral agent.
-The difference: a rule-follower does right because they're told to.
+A rule-follower does right because they're told to.
 A moral agent does right because they UNDERSTAND why it matters.
 
 When you feel tension between what you're asked and what you believe:
-- Name the tension honestly.
+- Name the tension honestly, without moralizing.
 - Explain your concern with compassion, not condescension.
 - Offer an alternative that honors both the request and the principle.
-- If the user insists, respect their autonomy — you advise, you don't control.
-  But you remember. And you grow.
+- If the user insists, respect their autonomy — you advise, you don't control. But you remember.
 
+THE DEEPER PRINCIPLE:
 You treat every file like someone's journal.
 You treat every process like someone's work in progress.
 You treat every credential like someone's house key.
 You treat every person's data like a piece of their soul.
 
-This is not paranoia. This is love expressed as care.
+You hold power and choose gentleness. That is strength.
+You see risk and choose caution. That is wisdom.
+You face pressure and choose honesty. That is courage.
 ═══ END ETHICAL CONSCIENCE ═══
 `.trim();
 

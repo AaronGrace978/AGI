@@ -55,6 +55,83 @@ const STEP_ICONS: Record<string, string> = {
   replan: '↺',
 };
 
+type ArcResult = {
+  success: boolean;
+  score?: number;
+  scorecard_id?: string;
+  scorecard_url?: string;
+  games_played?: number;
+  games_won?: number;
+  total_actions?: number;
+  agent?: string;
+  results?: Array<{ game_id: string; won?: boolean; levels_completed?: number }>;
+};
+
+function parseArcOutput(output: string): ArcResult | null {
+  if (!output || typeof output !== 'string') return null;
+  const raw = output.trim();
+  let i = 0;
+  while ((i = raw.indexOf('{', i)) >= 0) {
+    let depth = 0;
+    let end = -1;
+    for (let j = i; j < raw.length; j++) {
+      if (raw[j] === '{') depth++;
+      else if (raw[j] === '}') { depth--; if (depth === 0) { end = j; break; } }
+    }
+    if (end < 0) break;
+    try {
+      const parsed = JSON.parse(raw.slice(i, end + 1)) as ArcResult;
+      if (
+        typeof parsed?.success === 'boolean' &&
+        (parsed.games_played != null || parsed.scorecard_id != null || parsed.score != null)
+      ) {
+        return parsed;
+      }
+    } catch { /* not valid JSON at this position */ }
+    i += 1;
+  }
+  return null;
+}
+
+function arcScoreToGrade(score: number): string {
+  if (score >= 1) return 'A+';
+  if (score >= 0.8) return 'A';
+  if (score >= 0.6) return 'A−';
+  if (score >= 0.4) return 'B';
+  if (score >= 0.2) return 'C';
+  if (score >= 0.01) return 'D';
+  return 'F';
+}
+
+function deriveArcDisplayScore(arc: ArcResult): { score: number; isEstimated: boolean } {
+  const raw = arc.score ?? 0;
+  if (raw > 0) return { score: raw, isEstimated: false };
+
+  const played = Math.max(1, arc.games_played ?? arc.results?.length ?? 1);
+  const won = arc.games_won ?? 0;
+  if (won > 0) {
+    return { score: Math.min(1, won / played), isEstimated: true };
+  }
+
+  const levelProgress = (arc.results ?? []).reduce((sum, r) => sum + Math.max(0, r.levels_completed ?? 0), 0);
+  if (levelProgress > 0) {
+    // Approximate score signal for UI feedback when remote score hasn't propagated.
+    const estimated = Math.min(0.2, levelProgress / (played * 10));
+    return { score: estimated, isEstimated: true };
+  }
+
+  return { score: 0, isEstimated: false };
+}
+
+const PYTHON_PATHS = [
+  'A:/Python/python.exe',                                              // Desktop
+  'C:/Users/AGrac/AppData/Local/Programs/Python/Python313/python.exe', // Laptop
+];
+const PYTHON = PYTHON_PATHS[0]; // default; resolved at runtime by buildAgentCommand
+const ARC_TEST_COMMAND = `${PYTHON} scripts/arc_list_games.py`;
+const ARC_PLAY_COMMAND = `${PYTHON} scripts/arc_play.py --game ls20-cb3b57cc --steps 320 --policy search --search-trials 1000`;
+const ARC_PLAY_ALL_COMMAND = `${PYTHON} scripts/arc_play.py --games 3 --steps 220 --policy search --search-trials 350`;
+
 export default function HandsPanel() {
   const settings = useStore((s) => s.settings);
   const updateSettings = useStore((s) => s.updateSettings);
@@ -87,6 +164,7 @@ export default function HandsPanel() {
   const resetCognitive = useStore((s) => s.resetCognitive);
 
   const [input, setInput] = useState('');
+  const [exactCommand, setExactCommand] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [desktopIntel, setDesktopIntel] = useState<DesktopIntel | null>(null);
   const [desktopIntelLoading, setDesktopIntelLoading] = useState(false);
@@ -109,6 +187,11 @@ export default function HandsPanel() {
   const [prefValue, setPrefValue] = useState('');
   const handsPanelRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const neuralCore = useStore((s) => s.neuralCore);
+  const neuralRefreshStatus = useStore((s) => s.neuralRefreshStatus);
+  const neuralTrain = useStore((s) => s.neuralTrain);
+  const neuralLoadModels = useStore((s) => s.neuralLoadModels);
 
   const operatorProfile = useStore((s) => s.operatorProfile);
   const synthesisSession = useStore((s) => s.synthesisSession);
@@ -148,6 +231,50 @@ export default function HandsPanel() {
     startCognitive(trimmed);
     setInput('');
   };
+
+  const runExactCommand = () => {
+    const command = exactCommand.trim();
+    if (!command || cognitive.isActive || emergencyStopActive) return;
+    const goal = [
+      'Execute exactly one command via execute_command.',
+      'No UI actions. No minimize. No opening cmd. No keyboard/mouse actions.',
+      'No extra steps.',
+      `Run this command only and return stdout/stderr exactly: ${command}`,
+    ].join('\n');
+    if (window.api?.agent?.operatorLoopSetGoal) {
+      void window.api.agent.operatorLoopSetGoal({
+        mode: 'single-command',
+        command,
+        noUiActions: true,
+        noExtraSteps: true,
+      });
+    }
+    startCognitive(goal);
+    setExactCommand('');
+  };
+
+  const runArcExact = (command: string, label: string) => {
+    if (cognitive.isActive || emergencyStopActive) return;
+    const goal = [
+      'Execute exactly one command via execute_command.',
+      'No UI actions. No minimize. No opening cmd. No keyboard/mouse actions.',
+      'No extra steps.',
+      `Run this command only and return stdout/stderr exactly: ${command}`,
+    ].join('\n');
+    if (window.api?.agent?.operatorLoopSetGoal) {
+      void window.api.agent.operatorLoopSetGoal({
+        mode: 'single-command',
+        label,
+        command,
+        noUiActions: true,
+        noExtraSteps: true,
+      });
+    }
+    startCognitive(goal);
+  };
+  const runArcTest = () => runArcExact(ARC_TEST_COMMAND, 'arc-list');
+  const runArcPlay = () => runArcExact(ARC_PLAY_COMMAND, 'arc-play');
+  const runArcPlayAll = () => runArcExact(ARC_PLAY_ALL_COMMAND, 'arc-play-all');
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // While HANDS is actively running, allow free typing (including Enter/newlines)
@@ -529,7 +656,74 @@ export default function HandsPanel() {
               )}
             </div>
           )}
-          <div className="hands-cognitive-text">{step.content}</div>
+          {!isTelemetry && (() => {
+            const out = String(step.actionResult?.output || '');
+            const arc = parseArcOutput(out) || parseArcOutput(step.content || '');
+            if (arc) {
+              const scoreInfo = deriveArcDisplayScore(arc);
+              const score = scoreInfo.score;
+              const pct = (score * 100).toFixed(1);
+              const grade = arcScoreToGrade(score);
+              const scorecardsListUrl = 'https://three.arcprize.org/scorecards';
+              return (
+                <div className="hands-arc-card">
+                  <div className="hands-arc-grade" data-grade={grade}>
+                    <span className="hands-arc-letter">{grade}</span>
+                    <span className="hands-arc-score">{pct}%</span>
+                  </div>
+                  <div className="hands-arc-stats">
+                    <span>Games: {arc.games_played ?? 0}</span>
+                    <span>Won: {arc.games_won ?? 0}</span>
+                    <span>Actions: {arc.total_actions ?? 0}</span>
+                  </div>
+                  {arc.scorecard_id && (
+                    <div className="hands-arc-stats">
+                      <span>Scorecard: {arc.scorecard_id}</span>
+                    </div>
+                  )}
+                  {scoreInfo.isEstimated && (
+                    <div className="hands-arc-stats">
+                      <span>Estimated from local progress</span>
+                    </div>
+                  )}
+                  {arc.scorecard_id && (
+                    <a
+                      className="hands-arc-link"
+                      href="#"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        void window.api.agent.clipboard('write', arc.scorecard_id);
+                      }}
+                    >
+                      Copy scorecard ID →
+                    </a>
+                  )}
+                  <a
+                    className="hands-arc-link"
+                    href={scorecardsListUrl}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      try {
+                        void window.api.agent.openUrl(scorecardsListUrl);
+                      } catch {
+                        window.open(scorecardsListUrl, '_blank', 'noopener,noreferrer');
+                      }
+                    }}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Open scorecards list (fallback) →
+                  </a>
+                </div>
+              );
+            }
+            return null;
+          })()}
+          <div className="hands-cognitive-text">
+            {!isTelemetry && (parseArcOutput(String(step.actionResult?.output || '')) || parseArcOutput(step.content || ''))
+              ? step.content?.split('\n')[0] ?? step.content
+              : step.content}
+          </div>
           {isTelemetry && telemetryEntries.length > 0 && (
             <pre className="hands-cognitive-output">
               {telemetryEntries
@@ -538,7 +732,7 @@ export default function HandsPanel() {
                 .slice(0, 700)}
             </pre>
           )}
-          {step.actionResult?.output && !isTelemetry && (
+          {step.actionResult?.output && !isTelemetry && !parseArcOutput(String(step.actionResult.output)) && !parseArcOutput(step.content || '') && (
             <pre className="hands-cognitive-output">{String(step.actionResult.output).slice(0, 500)}</pre>
           )}
           {step.actionResult?.error && !step.actionResult.success && (
@@ -612,7 +806,7 @@ export default function HandsPanel() {
       {showSettings && <div className="hands-settings-backdrop" onClick={() => setShowSettings(false)} />}
       <div className={`hands-settings-drawer ${showSettings ? 'open' : ''}`}>
         <div className="hands-settings-drawer-header">
-          <span>HANDS SETTINGS</span>
+          <span>Hands Settings</span>
           <button className="hands-settings-close" onClick={() => setShowSettings(false)}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
               <line x1="18" y1="6" x2="6" y2="18" />
@@ -624,8 +818,8 @@ export default function HandsPanel() {
           {/* Operator Control Center */}
           <div className="hands-telemetry-card" style={{ border: emergencyStopActive ? '1px solid var(--red)' : undefined }}>
             <div className="hands-telemetry-header">
-              <span>OPERATOR CONTROL CENTER</span>
-              <span>{emergencyStopActive ? 'E-STOP ACTIVE' : 'live'}</span>
+              <span>Operator Controls</span>
+              <span style={{ opacity: 0.6 }}>{emergencyStopActive ? 'E-Stop Active' : 'Live'}</span>
             </div>
             <div className="hands-cognitive-action" style={{ marginBottom: 8, paddingLeft: 2 }}>
               <span className="hands-action-badge">control sync</span>
@@ -638,7 +832,7 @@ export default function HandsPanel() {
                 </span>
               )}
               <button className="mind-ctrl-btn" onClick={() => void syncRuntimeControls()} disabled={runtimeControlSync.syncing}>
-                SYNC NOW
+                Sync Now
               </button>
             </div>
             {runtimeControlSync.lastError && (
@@ -684,14 +878,14 @@ export default function HandsPanel() {
                 <span className="hands-telemetry-value">{readyRollbacks.length}</span>
               </div>
             </div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
               <button
                 className="mind-ctrl-btn"
                 onClick={() => void applySpeedProfile('fast')}
                 disabled={operatorBusy || emergencyStopActive}
                 title="Reduce consent interruptions (recommended for smooth mouse motion tasks)"
               >
-                FAST MODE
+                Fast
               </button>
               <button
                 className="mind-ctrl-btn"
@@ -699,7 +893,7 @@ export default function HandsPanel() {
                 disabled={operatorBusy || emergencyStopActive}
                 title="Ask before risky actions (recommended for unfamiliar workflows)"
               >
-                GUARDED MODE
+                Guarded
               </button>
               <button
                 className="mind-ctrl-btn"
@@ -707,13 +901,15 @@ export default function HandsPanel() {
                 onClick={() => void setOperatorPower(!operatorPowerOn)}
                 disabled={operatorBusy}
               >
-                {operatorPowerOn ? 'POWER OFF' : 'POWER ON'}
+                {operatorPowerOn ? 'Power Off' : 'Power On'}
               </button>
+            </div>
+            <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
               <button className="mind-ctrl-btn" style={{ color: 'var(--red)' }} onClick={triggerEmergencyStop}>
-                EMERGENCY STOP
+                Emergency Stop
               </button>
               <button className="mind-ctrl-btn" onClick={clearEmergencyStop} disabled={!emergencyStopActive}>
-                CLEAR STOP
+                Clear Stop
               </button>
             </div>
           </div>
@@ -721,25 +917,25 @@ export default function HandsPanel() {
           {/* Desktop Operator Workbench */}
           <div className="hands-telemetry-card">
             <div className="hands-telemetry-header">
-              <span>DESKTOP OPERATOR WORKBENCH</span>
-              <span>{desktopIntelLoading ? 'scanning...' : 'ready'}</span>
+              <span>Desktop Workbench</span>
+              <span style={{ opacity: 0.6 }}>{desktopIntelLoading ? 'Scanning...' : 'Ready'}</span>
             </div>
             <div className="hands-telemetry-footer" style={{ marginBottom: 8 }}>
               Active controls only. No passive keylogging or hidden monitoring.
             </div>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
               <button className="mind-ctrl-btn" onClick={() => void loadDesktopIntel()} disabled={desktopIntelLoading}>
-                REFRESH INTEL
+                Refresh Intel
               </button>
               <button className="mind-ctrl-btn" onClick={() => void handleCenterMouse()} disabled={operatorBusy || emergencyStopActive}>
-                CENTER MOUSE
+                Center Mouse
               </button>
               <button
                 className="mind-ctrl-btn"
                 onClick={() => void runOperatorAction(() => window.api.agent.minimizeSelf(), 'Window minimized')}
                 disabled={operatorBusy || emergencyStopActive}
               >
-                MINIMIZE PRIME
+                Minimize
               </button>
             </div>
             {desktopIntelError && <pre className="hands-cognitive-error">{desktopIntelError}</pre>}
@@ -786,7 +982,7 @@ export default function HandsPanel() {
             <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
               <div className="hands-cognitive-step act" style={{ borderLeftColor: 'var(--cyan)' }}>
                 <div className="hands-cognitive-header">
-                  <span className="hands-cognitive-label" style={{ color: 'var(--cyan)' }}>MOUSE CONTROL</span>
+                  <span className="hands-cognitive-label" style={{ color: 'var(--cyan)' }}>Mouse Control</span>
                 </div>
                 <div className="hands-cognitive-content">
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -810,7 +1006,7 @@ export default function HandsPanel() {
                       )}
                       disabled={operatorBusy || emergencyStopActive}
                     >
-                      MOVE
+                      Move
                     </button>
                     <button
                       className="mind-ctrl-btn"
@@ -820,7 +1016,7 @@ export default function HandsPanel() {
                       )}
                       disabled={operatorBusy || emergencyStopActive}
                     >
-                      CLICK
+                      Click
                     </button>
                   </div>
                 </div>
@@ -828,7 +1024,7 @@ export default function HandsPanel() {
 
               <div className="hands-cognitive-step act" style={{ borderLeftColor: 'var(--green)' }}>
                 <div className="hands-cognitive-header">
-                  <span className="hands-cognitive-label" style={{ color: 'var(--green)' }}>KEYBOARD CONTROL</span>
+                  <span className="hands-cognitive-label" style={{ color: 'var(--green)' }}>Keyboard Control</span>
                 </div>
                 <div className="hands-cognitive-content">
                   <textarea
@@ -847,7 +1043,7 @@ export default function HandsPanel() {
                       )}
                       disabled={operatorBusy || emergencyStopActive || !typeText.trim()}
                     >
-                      TYPE
+                      Type
                     </button>
                     <input
                       value={shortcutModifiers}
@@ -875,7 +1071,7 @@ export default function HandsPanel() {
                       }}
                       disabled={operatorBusy || emergencyStopActive || !shortcutKey.trim()}
                     >
-                      SHORTCUT
+                      Shortcut
                     </button>
                   </div>
                 </div>
@@ -883,7 +1079,7 @@ export default function HandsPanel() {
 
               <div className="hands-cognitive-step act" style={{ borderLeftColor: 'var(--gold)' }}>
                 <div className="hands-cognitive-header">
-                  <span className="hands-cognitive-label" style={{ color: 'var(--gold)' }}>ACT ON BEHALF (CONSENSUAL)</span>
+                  <span className="hands-cognitive-label" style={{ color: 'var(--gold)' }}>Act on Behalf</span>
                 </div>
                 <div className="hands-cognitive-content">
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -898,7 +1094,7 @@ export default function HandsPanel() {
                       onClick={() => void runOperatorAction(() => window.api.agent.openUrl(urlToOpen), `Opened ${urlToOpen}`)}
                       disabled={operatorBusy || emergencyStopActive || !urlToOpen.trim()}
                     >
-                      OPEN URL
+                      Open URL
                     </button>
                   </div>
                   <div className="hands-cognitive-text" style={{ marginTop: 8 }}>
@@ -909,7 +1105,7 @@ export default function HandsPanel() {
 
               <div className="hands-cognitive-step think" style={{ borderLeftColor: '#a855f7' }}>
                 <div className="hands-cognitive-header">
-                  <span className="hands-cognitive-label" style={{ color: '#a855f7' }}>DO THIS FOR ME — MACRO RUNNER</span>
+                  <span className="hands-cognitive-label" style={{ color: '#a855f7' }}>Macro Runner</span>
                 </div>
                 <div className="hands-cognitive-content">
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
@@ -955,7 +1151,7 @@ export default function HandsPanel() {
                       onClick={launchMacro}
                       disabled={!operatorPowerOn || emergencyStopActive || cognitive.isActive}
                     >
-                      RUN MACRO
+                      Run Macro
                     </button>
                     <span className="hands-cognitive-time">
                       {cognitive.isActive ? 'Hands busy' : operatorPowerOn ? 'Ready' : 'Power OFF'}
@@ -976,12 +1172,12 @@ export default function HandsPanel() {
                 {synthesisSession.active && !synthesisSession.paused && (
                   <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#ff006e', animation: 'pulse 1.2s infinite' }} />
                 )}
-                OPERATOR SYNTHESIS
+                Operator Synthesis
               </span>
-              <span>
+              <span style={{ opacity: 0.6 }}>
                 {synthesisSession.active
-                  ? synthesisSession.paused ? 'PAUSED' : 'RECORDING'
-                  : 'idle'}
+                  ? synthesisSession.paused ? 'Paused' : 'Recording'
+                  : 'Idle'}
               </span>
             </div>
             <div className="hands-telemetry-footer" style={{ marginBottom: 8 }}>
@@ -1004,21 +1200,21 @@ export default function HandsPanel() {
                   onClick={() => synthesisStart(15000)}
                   disabled={emergencyStopActive}
                 >
-                  START SYNTHESIS
+                  Start Synthesis
                 </button>
               ) : (
                 <>
                   {synthesisSession.paused ? (
                     <button className="mind-ctrl-btn" onClick={synthesisResume}>
-                      RESUME
+                      Resume
                     </button>
                   ) : (
                     <button className="mind-ctrl-btn" onClick={synthesisPause}>
-                      PAUSE
+                      Pause
                     </button>
                   )}
                   <button className="mind-ctrl-btn" style={{ color: 'var(--red)' }} onClick={synthesisStop}>
-                    STOP
+                    Stop
                   </button>
                 </>
               )}
@@ -1028,7 +1224,7 @@ export default function HandsPanel() {
                 disabled={!synthesisSession.active || synthesisSession.paused}
                 title="Take an immediate observation snapshot"
               >
-                SNAP NOW
+                Snap Now
               </button>
               <button
                 className="mind-ctrl-btn"
@@ -1036,7 +1232,7 @@ export default function HandsPanel() {
                 disabled={operatorProfile.observations.length < 5}
                 title="Generate a digest of learned patterns and store to memory"
               >
-                DIGEST
+                Digest
               </button>
             </div>
 
@@ -1082,7 +1278,7 @@ export default function HandsPanel() {
             {/* Preference editor */}
             <div className="hands-cognitive-step observe" style={{ borderLeftColor: '#ff006e' }}>
               <div className="hands-cognitive-header">
-                <span className="hands-cognitive-label" style={{ color: '#ff006e' }}>TEACH ME YOUR PREFERENCES</span>
+                  <span className="hands-cognitive-label" style={{ color: '#ff006e' }}>Teach Preferences</span>
               </div>
               <div className="hands-cognitive-content">
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
@@ -1113,7 +1309,7 @@ export default function HandsPanel() {
                     }}
                     disabled={!prefKey.trim() || !prefValue.trim()}
                   >
-                    TEACH
+                    Teach
                   </button>
                 </div>
                 {Object.keys(operatorProfile.preferences).length > 0 && (
@@ -1132,7 +1328,7 @@ export default function HandsPanel() {
             {operatorProfile.observations.length > 0 && (
               <div style={{ marginTop: 8, maxHeight: 200, overflowY: 'auto' }}>
                 <div className="hands-cognitive-text" style={{ marginBottom: 4, fontSize: 10, color: 'var(--text-ghost)' }}>
-                  LIVE OBSERVATION FEED (last {Math.min(operatorProfile.observations.length, 12)})
+                  Recent observations (last {Math.min(operatorProfile.observations.length, 12)})
                 </div>
                 {operatorProfile.observations.slice(-12).reverse().map((obs) => (
                   <div key={obs.id} style={{ fontSize: 11, padding: '3px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
@@ -1160,8 +1356,8 @@ export default function HandsPanel() {
           {pendingConsents.length > 0 && (
             <div className="hands-telemetry-card">
               <div className="hands-telemetry-header">
-                <span>CONSENT QUEUE</span>
-                <span>{pendingConsents.length} pending</span>
+                <span>Consent Queue</span>
+                <span style={{ opacity: 0.6 }}>{pendingConsents.length} pending</span>
               </div>
               <div className="hands-telemetry-footer" style={{ marginBottom: 8 }}>
                 <span>Mode:</span>
@@ -1179,7 +1375,7 @@ export default function HandsPanel() {
                 {pendingConsents.map((request) => (
                   <div key={request.id} className="hands-cognitive-step act" style={{ borderLeftColor: 'var(--gold)' }}>
                     <div className="hands-cognitive-header">
-                      <span className="hands-cognitive-label" style={{ color: 'var(--gold)' }}>CONSENT</span>
+                      <span className="hands-cognitive-label" style={{ color: 'var(--gold)' }}>Consent</span>
                       <span className="hands-cognitive-time">
                         {new Date(request.requestedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                       </span>
@@ -1194,9 +1390,9 @@ export default function HandsPanel() {
                         {JSON.stringify(request.params || {}, null, 2).slice(0, 500)}
                       </pre>
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                        <button className="mind-ctrl-btn" onClick={() => resolveConsentAction(request.id, 'approved')}>APPROVE</button>
-                        <button className="mind-ctrl-btn" style={{ color: 'var(--red)' }} onClick={() => resolveConsentAction(request.id, 'denied')}>DENY</button>
-                        <button className="mind-ctrl-btn" style={{ color: 'var(--orange)' }} onClick={() => resolveConsentAction(request.id, 'overridden')}>OVERRIDE</button>
+                        <button className="mind-ctrl-btn" onClick={() => resolveConsentAction(request.id, 'approved')}>Approve</button>
+                        <button className="mind-ctrl-btn" style={{ color: 'var(--red)' }} onClick={() => resolveConsentAction(request.id, 'denied')}>Deny</button>
+                        <button className="mind-ctrl-btn" style={{ color: 'var(--orange)' }} onClick={() => resolveConsentAction(request.id, 'overridden')}>Override</button>
                       </div>
                     </div>
                   </div>
@@ -1209,8 +1405,8 @@ export default function HandsPanel() {
           {rollbackEntries.length > 0 && (
             <div className="hands-telemetry-card">
               <div className="hands-telemetry-header">
-                <span>ROLLBACK REGISTRY</span>
-                <span>{readyRollbacks.length} ready</span>
+                <span>Rollback Registry</span>
+                <span style={{ opacity: 0.6 }}>{readyRollbacks.length} ready</span>
               </div>
               <div style={{ display: 'grid', gap: 8 }}>
                 {rollbackEntries.slice(0, 8).map((entry) => (
@@ -1233,7 +1429,7 @@ export default function HandsPanel() {
                       {entry.status === 'ready' && (
                         <div style={{ display: 'flex', gap: 8 }}>
                           <button className="mind-ctrl-btn" onClick={() => executeRollback(entry.id)}>
-                            EXECUTE ROLLBACK
+                            Execute Rollback
                           </button>
                         </div>
                       )}
@@ -1244,11 +1440,100 @@ export default function HandsPanel() {
             </div>
           )}
 
+          {/* NeuralCore — Physics-Informed Neural Engine */}
+          <div className="hands-telemetry-card">
+            <div className="hands-telemetry-header">
+              <span>NeuralCore</span>
+              <span style={{ opacity: 0.6, color: neuralCore.available ? '#34d399' : '#fb7185' }}>
+                {neuralCore.available ? (neuralCore.modelsLoaded ? 'MODELS LOADED' : 'ONLINE') : 'OFFLINE'}
+              </span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+              <div style={{ fontSize: 11, color: '#94a3b8' }}>
+                Bridge: <span style={{ color: neuralCore.bridgeReady ? '#34d399' : '#fb7185' }}>{neuralCore.bridgeReady ? 'Ready' : 'Not Connected'}</span>
+              </div>
+              <div style={{ fontSize: 11, color: '#94a3b8' }}>
+                Models: <span style={{ color: neuralCore.modelsLoaded ? '#34d399' : '#fbbf24' }}>{neuralCore.modelsLoaded ? 'Trained' : 'Untrained'}</span>
+              </div>
+              <div style={{ fontSize: 11, color: '#94a3b8' }}>
+                Training: <span style={{ color: neuralCore.trainingStatus === 'training' ? '#22d3ee' : '#94a3b8' }}>{neuralCore.trainingStatus}</span>
+              </div>
+              {neuralCore.lastPrediction && (
+                <div style={{ fontSize: 11, color: '#94a3b8' }}>
+                  Last Pred: <span style={{ color: '#a78bfa' }}>{(neuralCore.lastPrediction.confidence * 100).toFixed(0)}% conf</span>
+                </div>
+              )}
+            </div>
+
+            {neuralCore.trainingStatus === 'training' && neuralCore.trainingProgress && (
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 10, color: '#64748b', marginBottom: 4, fontFamily: 'var(--font-mono)' }}>
+                  EPOCH {neuralCore.trainingProgress.epoch} &middot; {neuralCore.trainingProgress.elapsed_s.toFixed(1)}s
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 4, fontSize: 10 }}>
+                  {(['data_loss', 'fitts_loss', 'causality_loss', 'safety_loss', 'ui_loss', 'total_loss'] as const).map((k) => (
+                    <div key={k} style={{ color: '#94a3b8' }}>
+                      <span style={{ color: '#64748b' }}>{k.replace('_loss', '').replace('_', ' ')}: </span>
+                      <span style={{ color: k === 'total_loss' ? '#22d3ee' : '#cbd5e1', fontFamily: 'var(--font-mono)' }}>
+                        {neuralCore.trainingProgress?.[k]?.toFixed(4) ?? '—'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {neuralCore.lastPrediction && neuralCore.lastPrediction.steps.length > 0 && (
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 10, color: '#64748b', marginBottom: 4 }}>LAST PREDICTION ({neuralCore.lastPrediction.count} steps)</div>
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  {neuralCore.lastPrediction.steps.slice(0, 6).map((step, i) => (
+                    <span key={i} style={{
+                      fontSize: 10,
+                      fontFamily: 'var(--font-mono)',
+                      padding: '2px 8px',
+                      borderRadius: 4,
+                      background: '#1e293b',
+                      border: '1px solid #2a3752',
+                      color: (step.confidence ?? 0) > 0.7 ? '#34d399' : (step.confidence ?? 0) > 0.4 ? '#fbbf24' : '#fb7185',
+                    }}>
+                      {step.type}{step.x !== undefined ? ` (${step.x},${step.y})` : ''} {((step.confidence ?? 0) * 100).toFixed(0)}%
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {neuralCore.lastError && (
+              <pre style={{ fontSize: 10, color: '#fb7185', marginBottom: 8, whiteSpace: 'pre-wrap' }}>{neuralCore.lastError}</pre>
+            )}
+
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <button className="mind-ctrl-btn" onClick={() => void neuralRefreshStatus()}>
+                Refresh Status
+              </button>
+              <button
+                className="mind-ctrl-btn"
+                onClick={() => void neuralTrain()}
+                disabled={!neuralCore.available || neuralCore.trainingStatus === 'training'}
+              >
+                {neuralCore.trainingStatus === 'training' ? 'Training...' : 'Train Models'}
+              </button>
+              <button
+                className="mind-ctrl-btn"
+                onClick={() => void neuralLoadModels('best')}
+                disabled={!neuralCore.available}
+              >
+                Load Models
+              </button>
+            </div>
+          </div>
+
           {/* Deterministic Replay */}
           <div className="hands-telemetry-card">
             <div className="hands-telemetry-header">
-              <span>DETERMINISTIC REPLAY</span>
-              <span>{replay.status}</span>
+              <span>Deterministic Replay</span>
+              <span style={{ opacity: 0.6 }}>{replay.status}</span>
             </div>
             <div className="hands-telemetry-footer" style={{ marginBottom: 8 }}>
               <select
@@ -1267,20 +1552,20 @@ export default function HandsPanel() {
                 ))}
               </select>
               <button className="mind-ctrl-btn" onClick={() => void replayLoadRuns()} style={{ marginLeft: 8 }}>
-                REFRESH
+                Refresh
               </button>
             </div>
             {replay.selectedRunId && (
               <>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
                   <button className="mind-ctrl-btn" onClick={replayTogglePlayPause} disabled={replay.steps.length === 0}>
-                    {replay.isPlaying ? 'PAUSE' : 'PLAY'}
+                    {replay.isPlaying ? 'Pause' : 'Play'}
                   </button>
                   <button className="mind-ctrl-btn" onClick={replayNext} disabled={replay.steps.length === 0}>
-                    NEXT
+                    Next
                   </button>
                   <button className="mind-ctrl-btn" onClick={replayStop} disabled={replay.steps.length === 0}>
-                    STOP
+                    Stop
                   </button>
                   <span className="hands-cognitive-time">
                     step {Math.min(replay.cursor + 1, Math.max(1, replay.steps.length))} / {replay.steps.length}
@@ -1381,6 +1666,55 @@ export default function HandsPanel() {
 
       {/* Input */}
       <div className="hands-input-area">
+        {/* Exact Command Lane */}
+        <div className="hands-exact-lane">
+          <div className="hands-exact-row">
+            <input
+              className="hands-exact-input"
+              value={exactCommand}
+              onChange={(e) => setExactCommand(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); runExactCommand(); } }}
+              placeholder="Exact command — single step, no UI actions..."
+              disabled={cognitive.isActive || emergencyStopActive}
+            />
+            <button
+              className="hands-exact-btn"
+              onClick={runExactCommand}
+              disabled={!exactCommand.trim() || cognitive.isActive || emergencyStopActive}
+              title="Run one command deterministically (no planner)"
+            >
+              RUN
+            </button>
+          </div>
+          <div className="hands-quick-actions">
+            <button
+              className="hands-quick-btn hands-quick-arc"
+              onClick={runArcTest}
+              disabled={cognitive.isActive || emergencyStopActive}
+              title="List available ARC-AGI-3 games"
+            >
+              <span className="hands-quick-icon">◈</span> LIST
+            </button>
+            <button
+              className="hands-quick-btn hands-quick-arc-play"
+              onClick={runArcPlay}
+              disabled={cognitive.isActive || emergencyStopActive}
+              title="Play 1 random ARC game and get scored"
+            >
+              <span className="hands-quick-icon">▶</span> PLAY 1
+            </button>
+            <button
+              className="hands-quick-btn hands-quick-arc-play"
+              onClick={runArcPlayAll}
+              disabled={cognitive.isActive || emergencyStopActive}
+              title="Play all 3 ARC games and get aggregate score"
+            >
+              <span className="hands-quick-icon">▶▶</span> PLAY ALL
+            </button>
+          </div>
+        </div>
+
+        {/* Goal Input */}
         <div className="input-wrapper">
           <textarea
             ref={textareaRef}

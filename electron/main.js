@@ -114,10 +114,15 @@ const rollbackRegistryFile = path.join(dataDir, 'rollback-registry.json');
 const rollbackBackupDir = path.join(dataDir, 'rollback-backups');
 const ledgerDir = path.join(dataDir, 'run-ledgers');
 const operatorProfileFile = path.join(dataDir, 'operator-profile.json');
+const operatorDir = path.join(dataDir, 'operator');
+const operatorGoalFile = path.join(operatorDir, 'goal.json');
+const operatorStateFile = path.join(operatorDir, 'state.json');
 const conversationsDir = path.join(dataDir, 'conversations');
 const conversationsIndexFile = path.join(conversationsDir, 'index.json');
 const conversationsStateFile = path.join(conversationsDir, 'state.json');
 const inputHelperPath = path.join(__dirname, 'input-helper.ps1');
+const neuralCoreScriptsDir = path.join(__dirname, '..', 'scripts');
+const neuralDataDir = path.join(dataDir, 'neuralcore');
 
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
@@ -130,6 +135,210 @@ if (!fs.existsSync(ledgerDir)) {
 }
 if (!fs.existsSync(conversationsDir)) {
   fs.mkdirSync(conversationsDir, { recursive: true });
+}
+if (!fs.existsSync(operatorDir)) {
+  fs.mkdirSync(operatorDir, { recursive: true });
+}
+if (!fs.existsSync(neuralDataDir)) {
+  fs.mkdirSync(neuralDataDir, { recursive: true });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  NEURALCORE — Physics-Informed Neural Engine Bridge
+//  Manages the Python NeuralCore subprocess (JSON-over-stdio IPC).
+//  PINN-style constraint losses encode "physics of UI interaction"
+//  so the network learns correct behavior from few demonstrations.
+//
+//  total_loss = L_data + λ₁·L_causality + λ₂·L_safety + λ₃·L_fitts + λ₄·L_ui
+// ═══════════════════════════════════════════════════════════════
+
+let neuralBridge = null;
+
+class NeuralCoreBridge {
+  constructor(scriptsDir, userDataPath) {
+    this.scriptsDir = scriptsDir;
+    this.userDataPath = userDataPath;
+    this.process = null;
+    this.requestId = 0;
+    this.pendingRequests = new Map();
+    this.modelsLoaded = false;
+    this.ready = false;
+    this.buffer = '';
+  }
+
+  start() {
+    if (this.process) return;
+    const pythonExe = resolvePythonPath();
+    this.process = spawn(pythonExe, [
+      '-m', 'neuralcore.bridge.serve',
+      '--user-data-path', this.userDataPath,
+    ], {
+      cwd: this.scriptsDir,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, PYTHONUNBUFFERED: '1' },
+    });
+
+    this.process.stdout.on('data', (chunk) => {
+      this.buffer += chunk.toString();
+      let idx;
+      while ((idx = this.buffer.indexOf('\n')) !== -1) {
+        const line = this.buffer.slice(0, idx).trim();
+        this.buffer = this.buffer.slice(idx + 1);
+        if (!line) continue;
+        try {
+          this._handleMessage(JSON.parse(line));
+        } catch (e) {
+          console.error('[NeuralCore] Parse error:', line.slice(0, 200));
+        }
+      }
+    });
+
+    this.process.stderr.on('data', (chunk) => {
+      const text = chunk.toString().trim();
+      if (text) console.log('[NeuralCore:stderr]', text.slice(0, 500));
+    });
+
+    this.process.on('close', (code) => {
+      console.log(`[NeuralCore] Process exited (code ${code})`);
+      this.process = null;
+      this.ready = false;
+      for (const [, { reject }] of this.pendingRequests) {
+        reject(new Error('NeuralCore process exited'));
+      }
+      this.pendingRequests.clear();
+    });
+
+    this.process.on('error', (err) => {
+      console.error('[NeuralCore] Spawn error:', err.message);
+      this.process = null;
+      this.ready = false;
+    });
+
+    console.log('[NeuralCore] Bridge subprocess spawned');
+  }
+
+  stop() {
+    if (this.process) {
+      this.process.kill();
+      this.process = null;
+    }
+    this.ready = false;
+    this.modelsLoaded = false;
+  }
+
+  get available() {
+    return this.process !== null && this.ready;
+  }
+
+  _handleMessage(msg) {
+    if (msg.event) {
+      if (msg.event === 'ready') {
+        this.ready = true;
+        console.log('[NeuralCore] Bridge ready (v' + (msg.data?.version || '?') + ')');
+      } else if (msg.event === 'training_progress') {
+        mainWindow?.webContents.send('neural:trainingProgress', msg.data);
+      }
+      return;
+    }
+    if (msg.id && this.pendingRequests.has(msg.id)) {
+      const { resolve, reject } = this.pendingRequests.get(msg.id);
+      this.pendingRequests.delete(msg.id);
+      if (msg.error) reject(new Error(msg.error));
+      else resolve(msg.result);
+    }
+  }
+
+  _sendRequest(method, params = {}) {
+    return new Promise((resolve, reject) => {
+      if (!this.process) return reject(new Error('NeuralCore not running'));
+      const id = `req_${++this.requestId}`;
+      this.pendingRequests.set(id, { resolve, reject });
+      try {
+        this.process.stdin.write(JSON.stringify({ id, method, params }) + '\n');
+      } catch (e) {
+        this.pendingRequests.delete(id);
+        return reject(new Error('NeuralCore stdin write failed: ' + e.message));
+      }
+      setTimeout(() => {
+        if (this.pendingRequests.has(id)) {
+          this.pendingRequests.delete(id);
+          reject(new Error(`NeuralCore timeout: ${method}`));
+        }
+      }, 180000);
+    });
+  }
+
+  async loadModels(checkpoint = 'best') {
+    const result = await this._sendRequest('load', { checkpoint });
+    this.modelsLoaded = result?.loaded || false;
+    return result;
+  }
+
+  async getStatus() { return this._sendRequest('status'); }
+  async predict(params) { return this._sendRequest('predict', params); }
+  async train(params) { return this._sendRequest('train', params); }
+  async getModelStats() { return this._sendRequest('model_stats'); }
+  async generateTrajectory(params) { return this._sendRequest('generate_trajectory', params); }
+  async plan(params) { return this._sendRequest('plan', params); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  NeuralCore ←→ HANDS Bridge
+//  Routes UI actions through physics-informed neural predictions
+//  when trained models are available. Falls back to raw LLM
+//  coordinates when NeuralCore is offline or untrained.
+// ═══════════════════════════════════════════════════════════════
+
+const NEURAL_ENHANCED_ACTIONS = new Set([
+  'mouse_click', 'mouse_move', 'mouse_drag',
+]);
+
+async function neuralEnhanceAction(action, params, recentSteps) {
+  if (!neuralBridge?.available || !neuralBridge.modelsLoaded) return null;
+  if (!NEURAL_ENHANCED_ACTIONS.has(action)) return null;
+
+  try {
+    const intentAction = action === 'mouse_click' ? 'click'
+      : action === 'mouse_move' ? 'move'
+      : action === 'mouse_drag' ? 'drag'
+      : action;
+
+    const recentActions = (recentSteps || [])
+      .filter(s => s.type === 'act' && s.actionType)
+      .slice(-5)
+      .map(s => ({ type: s.actionType, params: s.actionParams || {} }));
+
+    const prediction = await neuralBridge.predict({
+      intent_action: intentAction,
+      intent_target: params.target || params.element || '',
+      intent_confidence: 0.8,
+      app_name: params.app || '',
+      recent_actions: recentActions,
+      temperature: 0.3,
+    });
+
+    if (!prediction?.steps || prediction.steps.length === 0) return null;
+
+    const step = prediction.steps[0];
+    if (typeof step.confidence === 'number' && step.confidence < 0.4) return null;
+
+    const enhanced = { ...params };
+    if (typeof step.x === 'number' && typeof step.y === 'number') {
+      enhanced.x = step.x;
+      enhanced.y = step.y;
+      enhanced._neuralEnhanced = true;
+      enhanced._neuralConfidence = step.confidence || 0;
+      enhanced._neuralRisk = step.risk || 0;
+    }
+    if (step.timing_ms && action === 'mouse_click') {
+      enhanced._neuralTimingMs = step.timing_ms;
+    }
+
+    return enhanced;
+  } catch (e) {
+    console.log('[NeuralCore] Enhancement skipped:', e.message);
+    return null;
+  }
 }
 
 function safeCopyIfMissing(fromPath, toPath) {
@@ -209,6 +418,28 @@ function saveJSON(filePath, data) {
 }
 
 rollbackRegistry = loadJSON(rollbackRegistryFile, { entries: [], version: 1 });
+let operatorLoopState = loadJSON(operatorStateFile, {
+  active: false,
+  currentGoal: '',
+  iterations: 0,
+  lastAction: '',
+  lastResult: '',
+  lastError: '',
+  updatedAt: Date.now(),
+});
+
+function saveOperatorLoopState() {
+  saveJSON(operatorStateFile, operatorLoopState);
+}
+
+function updateOperatorLoopState(patch = {}) {
+  operatorLoopState = {
+    ...operatorLoopState,
+    ...patch,
+    updatedAt: Date.now(),
+  };
+  saveOperatorLoopState();
+}
 
 function saveRollbackRegistry() {
   saveJSON(rollbackRegistryFile, rollbackRegistry);
@@ -332,10 +563,26 @@ function listLedgerRuns() {
 
 const DEFAULT_SETTINGS = {
   provider: 'ollama',
+  voiceProvider: 'browser',
+  soundprimeBaseUrl: process.env.SOUNDPRIME_URL || 'http://127.0.0.1:8080',
+  orchestraMode: 'elevenlabs_instrumental',
+  orchestraVolume: 0.22,
+  orchestraRefreshSeconds: 150,
+  beatStyle: 'balanced',
+  genreStyle: 'auto',
+  songDurationSeconds: 30,
+  singingEnabled: true,
+  singingMinGapSeconds: 300,
   model: process.env.OLLAMA_MODEL || 'llama3.2',
   ollamaUrl: process.env.OLLAMA_URL || 'http://localhost:11434',
   anthropicKey: '',
   openaiKey: '',
+  arcApiKey: '',
+  elevenLabsApiKey: '',
+  elevenLabsVoiceId: process.env.ELEVENLABS_VOICE_ID || 'JBFqnCBsd6RMkjVDRZzb',
+  elevenLabsModelId: process.env.ELEVENLABS_MODEL_ID || 'eleven_multilingual_v2',
+  elevenLabsMusicModelId: process.env.ELEVENLABS_MUSIC_MODEL_ID || 'music_v1',
+  useElevenLabsTts: false,
   // Vision model — used for analyze_screen / screenshot_desktop.
   // Defaults to OLLAMA_VISION_MODEL env var, or auto-detects a VL model on Ollama Cloud.
   // Can also be set to 'openai'/'anthropic' provider with a vision-capable model.
@@ -422,6 +669,10 @@ if (process.env.OLLAMA_URL) {
   settings.ollamaUrl = process.env.OLLAMA_URL;
   console.log(`[Config] .env override → ollamaUrl = "${settings.ollamaUrl}"`);
 }
+if (process.env.SOUNDPRIME_URL) {
+  settings.soundprimeBaseUrl = process.env.SOUNDPRIME_URL;
+  console.log(`[Config] .env override → soundprimeBaseUrl = "${settings.soundprimeBaseUrl}"`);
+}
 if (process.env.OLLAMA_MODEL) {
   if (settings.provider === 'ollama') {
     settings.model = process.env.OLLAMA_MODEL;
@@ -437,6 +688,28 @@ if (process.env.ANTHROPIC_API_KEY) {
 if (process.env.OPENAI_API_KEY) {
   settings.openaiKey = process.env.OPENAI_API_KEY;
   console.log(`[Config] .env override → openaiKey loaded`);
+}
+const resolvedArcApiKey = process.env.ARC_API_KEY || process.env.ARC_AGI_API;
+if (resolvedArcApiKey) {
+  settings.arcApiKey = resolvedArcApiKey;
+  console.log('[Config] .env override → arcApiKey loaded');
+}
+if (typeof settings.arcApiKey === 'string' && settings.arcApiKey.trim()) {
+  process.env.ARC_API_KEY = settings.arcApiKey;
+  process.env.ARC_AGI_API = settings.arcApiKey;
+}
+if (process.env.ELEVENLABS_API_KEY) {
+  settings.elevenLabsApiKey = process.env.ELEVENLABS_API_KEY;
+  console.log('[Config] .env override → elevenLabsApiKey loaded');
+}
+if (process.env.ELEVENLABS_VOICE_ID) {
+  settings.elevenLabsVoiceId = process.env.ELEVENLABS_VOICE_ID;
+}
+if (process.env.ELEVENLABS_MODEL_ID) {
+  settings.elevenLabsModelId = process.env.ELEVENLABS_MODEL_ID;
+}
+if (process.env.ELEVENLABS_MUSIC_MODEL_ID) {
+  settings.elevenLabsMusicModelId = process.env.ELEVENLABS_MUSIC_MODEL_ID;
 }
 if (settings.provider === 'anthropic') {
   const resolvedModel = resolveAnthropicModel(settings.model);
@@ -542,6 +815,13 @@ ipcMain.on('window:close', () => mainWindow?.close());
 ipcMain.handle('settings:get', () => settings);
 ipcMain.handle('settings:set', (_, newSettings) => {
   settings = { ...settings, ...newSettings };
+  if (typeof settings.arcApiKey === 'string' && settings.arcApiKey.trim()) {
+    process.env.ARC_API_KEY = settings.arcApiKey;
+    process.env.ARC_AGI_API = settings.arcApiKey;
+  }
+  if (typeof settings.elevenLabsApiKey === 'string' && settings.elevenLabsApiKey.trim()) {
+    process.env.ELEVENLABS_API_KEY = settings.elevenLabsApiKey;
+  }
   saveJSON(settingsFile, settings);
   return settings;
 });
@@ -2441,7 +2721,7 @@ ipcMain.handle('system:info', () => {
 
 // Safety classification for actions
 const ACTION_SAFETY = {
-  safe: ['list_directory', 'read_file', 'system_info', 'open_url', 'clipboard_read', 'search_files', 'web_fetch', 'web_search', 'web_screenshot', 'screenshot_desktop', 'analyze_screen', 'get_mouse_position', 'get_screen_dimensions', 'list_custom_tools', 'get_foreground_window'],
+  safe: ['list_directory', 'read_file', 'system_info', 'open_url', 'clipboard_read', 'search_files', 'web_fetch', 'web_search', 'web_screenshot', 'elevenlabs_tts', 'elevenlabs_generate_music', 'elevenlabs_sing', 'screenshot_desktop', 'analyze_screen', 'get_mouse_position', 'get_screen_dimensions', 'list_custom_tools', 'get_foreground_window'],
   moderate: ['write_file', 'create_directory', 'open_application', 'clipboard_write', 'rename_file', 'mouse_move', 'keyboard_type', 'keyboard_press', 'keyboard_shortcut', 'mouse_scroll', 'mouse_drag', 'create_tool', 'minimize_self'],
   risky: ['execute_command', 'delete_file', 'kill_process', 'modify_system', 'mouse_click', 'computer_use'],
 };
@@ -2458,12 +2738,36 @@ function classifyAction(actionType) {
 }
 
 function isBlockedCommand(cmd) {
-  const lower = cmd.toLowerCase();
+  const safe = typeof cmd === 'string'
+    ? cmd
+    : (cmd && typeof cmd === 'object' && typeof cmd.command === 'string' ? cmd.command : '');
+  const lower = safe.toLowerCase();
   return BLOCKED_COMMANDS.some((blocked) => lower.includes(blocked));
 }
 
+const KNOWN_PYTHON_PATHS = [
+  'A:\\Python\\python.exe',                                                  // Desktop
+  'C:\\Users\\AGrac\\AppData\\Local\\Programs\\Python\\Python313\\python.exe', // Laptop
+];
+
+function resolvePythonPath() {
+  for (const p of KNOWN_PYTHON_PATHS) {
+    if (fs.existsSync(p)) return p;
+  }
+  return 'python'; // fall back to PATH
+}
+
 function buildAgentCommand(command) {
-  const safeCommand = typeof command === 'string' ? command : String(command || '');
+  let safeCommand = typeof command === 'string' ? command : String(command || '');
+
+  // Auto-resolve Python executable: swap any known/hardcoded python path for the one that exists here
+  const pythonExe = resolvePythonPath();
+  safeCommand = safeCommand
+    .replace(/(?:"[^"]*python(?:3(?:\.\d+)?)?(?:\.exe)?"|\S*python(?:3(?:\.\d+)?)?\.exe)\b/gi, `& "${pythonExe}"`)
+    .replace(/(^|\s)python3?(?=\s)/gi, `$1& "${pythonExe}"`);
+  // Clean up double call-operators if one was already present
+  safeCommand = safeCommand.replace(/&\s*&\s*"/g, '& "');
+
   if (process.platform === 'win32') {
     // Use encoded PowerShell to avoid cmd quoting issues and preserve syntax.
     const encoded = Buffer.from(safeCommand, 'utf16le').toString('base64');
@@ -2595,9 +2899,11 @@ ipcMain.handle('agent:execute', async (_, command, requireConfirm) => {
 
   return new Promise((resolve) => {
     const finalCommand = buildAgentCommand(command);
+    // Detect long-running commands (ARC benchmarks, etc.) and extend timeout
+    const isLongRunning = /arc_play|--steps\s+\d{2,}|--search-trials/i.test(command);
     exec(finalCommand, {
-      timeout: 30000,
-      maxBuffer: 1024 * 1024 * 5,
+      timeout: isLongRunning ? 1800000 : 120000,
+      maxBuffer: 1024 * 1024 * 10,
       cwd: os.homedir(),
       shell: true,
     }, (error, stdout, stderr) => {
@@ -2959,6 +3265,255 @@ ipcMain.handle('agent:webSearch', async (_, query, options = {}) => {
   }
 });
 
+// ─── ElevenLabs TTS: cloud voice synthesis ─────────────────────
+ipcMain.handle('agent:elevenlabsTts', async (_, text, options = {}) => {
+  try {
+    const apiKey = (settings.elevenLabsApiKey || process.env.ELEVENLABS_API_KEY || '').trim();
+    if (!apiKey) {
+      return { success: false, error: 'ELEVENLABS_API_KEY missing. Add it in Settings or .env.' };
+    }
+    const voiceId = String(options.voiceId || settings.elevenLabsVoiceId || 'JBFqnCBsd6RMkjVDRZzb');
+    const modelId = String(options.modelId || settings.elevenLabsModelId || 'eleven_multilingual_v2');
+    const promptText = String(text || '').trim();
+    if (!promptText) return { success: false, error: 'Text is required for ElevenLabs TTS.' };
+
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'audio/mpeg',
+        'xi-api-key': apiKey,
+      },
+      body: JSON.stringify({
+        text: promptText,
+        model_id: modelId,
+        voice_settings: options.voiceSettings || {
+          stability: 0.45,
+          similarity_boost: 0.75,
+        },
+      }),
+      signal: AbortSignal.timeout(20000),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      return {
+        success: false,
+        status: response.status,
+        details: errText.slice(0, 300),
+        error: `ElevenLabs TTS failed: HTTP ${response.status}${errText ? ` — ${errText.slice(0, 300)}` : ''}`,
+      };
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    const audioBase64 = buffer.toString('base64');
+    let savedPath = null;
+    if (options.saveToDisk) {
+      savedPath = path.join(dataDir, `eleven_tts_${Date.now()}.mp3`);
+      fs.writeFileSync(savedPath, buffer);
+    }
+
+    return {
+      success: true,
+      voiceId,
+      modelId,
+      mimeType: 'audio/mpeg',
+      audioBase64,
+      bytes: buffer.length,
+      savedPath,
+    };
+  } catch (e) {
+    return { success: false, error: e.message, status: 0, details: 'request_exception' };
+  }
+});
+
+// ─── ElevenLabs Music Generation: prompt to music ──────────────
+ipcMain.handle('agent:elevenlabsGenerateMusic', async (_, prompt, options = {}) => {
+  try {
+    const apiKey = (settings.elevenLabsApiKey || process.env.ELEVENLABS_API_KEY || '').trim();
+    if (!apiKey) {
+      return { success: false, error: 'ELEVENLABS_API_KEY missing. Add it in Settings or .env.' };
+    }
+    const textPrompt = String(prompt || '').trim();
+    if (!textPrompt) return { success: false, error: 'Prompt is required for music generation.' };
+    const modelId = String(options.modelId || settings.elevenLabsMusicModelId || 'music_v1');
+    const durationMs = Math.max(3000, Math.min(600000, Math.floor(Number(options.durationSeconds || 20) * 1000)));
+
+    const response = await fetch('https://api.elevenlabs.io/v1/music', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: '*/*',
+        'xi-api-key': apiKey,
+      },
+      body: JSON.stringify({
+        prompt: textPrompt,
+        model_id: modelId,
+        music_length_ms: durationMs,
+      }),
+      signal: AbortSignal.timeout(120000),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      return {
+        success: false,
+        status: response.status,
+        details: errText.slice(0, 300),
+        error: `ElevenLabs music failed: HTTP ${response.status}${errText ? ` — ${errText.slice(0, 300)}` : ''}`,
+      };
+    }
+
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      const json = await response.json();
+      return { success: true, modelId, contentType, payload: json };
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    const audioBase64 = buffer.toString('base64');
+    let savedPath = null;
+    if (options.saveToDisk !== false) {
+      savedPath = path.join(dataDir, `eleven_music_${Date.now()}.mp3`);
+      fs.writeFileSync(savedPath, buffer);
+    }
+    return {
+      success: true,
+      modelId,
+      mimeType: 'audio/mpeg',
+      audioBase64,
+      bytes: buffer.length,
+      savedPath,
+    };
+  } catch (e) {
+    return { success: false, error: e.message, status: 0, details: 'request_exception' };
+  }
+});
+
+// ─── ElevenLabs Sing: Composition Plan → Compose with AI Vocals ─
+// Modeled after SoundPrime's elevenlabs_music.py architecture:
+//   Step 1: POST /v1/music/plan  (FREE — AI writes lyrics + sections)
+//   Step 2: POST /v1/music       (CREDITS — renders audio with vocals)
+ipcMain.handle('agent:elevenlabsSing', async (_, options = {}) => {
+  try {
+    const apiKey = (settings.elevenLabsApiKey || process.env.ELEVENLABS_API_KEY || '').trim();
+    if (!apiKey) {
+      return { success: false, error: 'ELEVENLABS_API_KEY missing. Add it in Settings or .env.' };
+    }
+
+    const prompt = String(options.prompt || '').trim();
+    const lyrics = options.lyrics || null;
+    const durationMs = Math.max(3000, Math.min(600000, Number(options.durationMs || 30000)));
+    const instrumental = !!options.instrumental;
+
+    if (!prompt && !lyrics) {
+      return { success: false, error: 'Either prompt or lyrics required for singing.' };
+    }
+
+    // Step 1: Create composition plan (FREE)
+    let compositionPlan = options.compositionPlan || null;
+
+    if (!compositionPlan) {
+      console.log('[ElevenLabs Sing] Creating composition plan...');
+      const planBody = {
+        prompt: prompt || 'A heartfelt song',
+        music_length_ms: durationMs,
+        model_id: 'music_v1',
+      };
+
+      const planResponse = await fetch('https://api.elevenlabs.io/v1/music/plan', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'xi-api-key': apiKey,
+        },
+        body: JSON.stringify(planBody),
+        signal: AbortSignal.timeout(30000),
+      });
+
+      if (!planResponse.ok) {
+        const errText = await planResponse.text().catch(() => '');
+        console.error(`[ElevenLabs Sing] Plan failed ${planResponse.status}:`, errText.slice(0, 300));
+        return {
+          success: false,
+          status: planResponse.status,
+          details: errText.slice(0, 300),
+          error: `Composition plan failed: HTTP ${planResponse.status}${errText ? ` — ${errText.slice(0, 300)}` : ''}`,
+        };
+      }
+
+      compositionPlan = await planResponse.json();
+      console.log(`[ElevenLabs Sing] Plan created: ${(compositionPlan.sections || []).length} sections`);
+
+      // If user provided custom lyrics, inject them into the plan sections
+      if (lyrics && compositionPlan.sections) {
+        const lyricSections = String(lyrics).split(/\n\s*\n/).filter(Boolean);
+        for (let i = 0; i < compositionPlan.sections.length && i < lyricSections.length; i++) {
+          compositionPlan.sections[i].lines = lyricSections[i]
+            .split('\n')
+            .map(l => l.trim())
+            .filter(Boolean)
+            .map(l => l.length > 200 ? l.slice(0, 200) : l);
+        }
+      }
+    }
+
+    // Step 2: Compose (renders audio — costs credits)
+    console.log('[ElevenLabs Sing] Composing audio...');
+    const composeBody = { composition_plan: compositionPlan };
+    if (instrumental) composeBody.force_instrumental = true;
+
+    const composeResponse = await fetch('https://api.elevenlabs.io/v1/music/detailed', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: '*/*',
+        'xi-api-key': apiKey,
+      },
+      body: JSON.stringify(composeBody),
+      signal: AbortSignal.timeout(180000),
+    });
+
+    if (!composeResponse.ok) {
+      const errText = await composeResponse.text().catch(() => '');
+      return {
+        success: false,
+        status: composeResponse.status,
+        details: errText.slice(0, 300),
+        error: `Compose failed: HTTP ${composeResponse.status}${errText ? ` — ${errText.slice(0, 300)}` : ''}`,
+      };
+    }
+
+    const contentType = composeResponse.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      const json = await composeResponse.json();
+      return { success: true, contentType, payload: json };
+    }
+
+    const arrayBuffer = await composeResponse.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    const audioBase64 = buffer.toString('base64');
+
+    const savedPath = path.join(dataDir, `eleven_sing_${Date.now()}.mp3`);
+    fs.writeFileSync(savedPath, buffer);
+
+    console.log(`[ElevenLabs Sing] Done: ${buffer.length} bytes, saved to ${savedPath}`);
+
+    return {
+      success: true,
+      mimeType: 'audio/mpeg',
+      audioBase64,
+      bytes: buffer.length,
+      savedPath,
+      compositionPlan,
+    };
+  } catch (e) {
+    return { success: false, error: e.message, status: 0, details: 'request_exception' };
+  }
+});
+
 // ─── Web Screenshot: Capture a screenshot of a URL ─────────────
 ipcMain.handle('agent:webScreenshot', async (_, url) => {
   try {
@@ -3171,7 +3726,7 @@ async function executeCustomTool(toolId, params) {
     const scriptPath = path.join(dataDir, `tool_${toolId}${ext}`);
     fs.writeFileSync(scriptPath, tool.script, 'utf-8');
     const cmd = tool.language === 'python'
-      ? `python "${scriptPath}" ${(params?.args || []).map(a => `"${a}"`).join(' ')}`
+      ? `"${resolvePythonPath()}" "${scriptPath}" ${(params?.args || []).map(a => `"${a}"`).join(' ')}`
       : `powershell -NoProfile -ExecutionPolicy Bypass -File "${scriptPath}" ${(params?.args || []).map(a => `"${a}"`).join(' ')}`;
     return new Promise((resolve) => {
       exec(cmd, { timeout: 30000, cwd: os.homedir(), shell: true }, (error, stdout, stderr) => {
@@ -3242,6 +3797,27 @@ ipcMain.handle('agent:setRuntimeControls', async (_, partial) => {
 
 ipcMain.handle('agent:getRuntimeControls', async () => {
   return { success: true, controls: { ...runtimeControls } };
+});
+
+ipcMain.handle('agent:operatorLoop:get', async () => {
+  return {
+    success: true,
+    goalContract: loadJSON(operatorGoalFile, null),
+    state: { ...operatorLoopState },
+  };
+});
+
+ipcMain.handle('agent:operatorLoop:setGoal', async (_, contract) => {
+  try {
+    const next = contract && typeof contract === 'object' ? contract : {};
+    saveJSON(operatorGoalFile, {
+      ...next,
+      updatedAt: Date.now(),
+    });
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
 });
 
 ipcMain.handle('agent:listRollbacks', async () => {
@@ -3401,7 +3977,7 @@ ipcMain.on('agent:planAndExecute', async (event, userRequest) => {
         content: `You are the HANDS module of AGI PRIME — an autonomous agent with FULL AUTONOMY over the user's computer and the internet.
 
 Given a user request, you must output a JSON array of steps to accomplish it. Each step is an object with:
-- "action": one of [execute_command, read_file, write_file, list_directory, create_directory, delete_file, rename_file, open_url, open_file, open_application, search_files, clipboard_read, clipboard_write, system_info, list_processes, web_search, web_fetch, web_screenshot, screenshot_desktop, analyze_screen, mouse_move, mouse_click, mouse_scroll, keyboard_type, keyboard_press, keyboard_shortcut, minimize_self, create_tool, list_custom_tools, execute_tool]
+- "action": one of [execute_command, read_file, write_file, list_directory, create_directory, delete_file, rename_file, open_url, open_file, open_application, search_files, clipboard_read, clipboard_write, system_info, list_processes, web_search, web_fetch, web_screenshot, elevenlabs_tts, elevenlabs_generate_music, screenshot_desktop, analyze_screen, mouse_move, mouse_click, mouse_scroll, keyboard_type, keyboard_press, keyboard_shortcut, minimize_self, create_tool, list_custom_tools, execute_tool]
 - "params": object with action-specific parameters:
   - execute_command: { "command": "..." }
   - read_file: { "path": "..." }
@@ -3421,6 +3997,8 @@ Given a user request, you must output a JSON array of steps to accomplish it. Ea
   - web_search: { "query": "..." } — Search the web. Returns titles, URLs, snippets.
   - web_fetch: { "url": "..." } — Fetch and read web page content (text extracted from HTML).
   - web_screenshot: { "url": "..." } — Take a screenshot of a webpage.
+  - elevenlabs_tts: { "text": "...", "voiceId"?: "...", "modelId"?: "..." } — Generate speech audio.
+  - elevenlabs_generate_music: { "prompt": "...", "durationSeconds"?: 20 } — Generate music audio.
 - "description": human-readable explanation of what this step does
 - "safety": "safe", "moderate", or "risky"
 
@@ -3586,6 +4164,12 @@ Example: [{"action":"web_search","params":{"query":"latest tech news"},"descript
           case 'web_screenshot':
             result = await executeIPC('agent:webScreenshot', step.params.url);
             break;
+          case 'elevenlabs_tts':
+            result = await executeIPC('agent:elevenlabsTts', step.params.text, step.params);
+            break;
+          case 'elevenlabs_generate_music':
+            result = await executeIPC('agent:elevenlabsGenerateMusic', step.params.prompt, step.params);
+            break;
           // Screen Vision
           case 'screenshot_desktop':
             result = await analyzeScreen(step.params?.prompt);
@@ -3652,7 +4236,21 @@ async function executeIPC(channel, ...args) {
           return resolve({ success: false, error: 'BLOCKED by Guardian' });
         }
         const finalCmd = buildAgentCommand(cmd);
-        exec(finalCmd, { timeout: 120000, maxBuffer: 5 * 1024 * 1024, cwd: os.homedir(), shell: true }, (error, stdout, stderr) => {
+        const workspaceCwd = process.cwd();
+        let execCwd = os.homedir();
+        if (typeof cmd === 'object' && cmd && typeof cmd.cwd === 'string' && cmd.cwd.trim()) {
+          execCwd = cmd.cwd.trim();
+        } else if (
+          typeof cmd === 'string' &&
+          /(^|[\s"'`])(\.\.?[\\/]|scripts[\\/]|src[\\/]|electron[\\/])/i.test(cmd) &&
+          workspaceCwd &&
+          fs.existsSync(workspaceCwd)
+        ) {
+          // Relative project paths should execute from workspace, not home.
+          execCwd = workspaceCwd;
+        }
+        const isLong = /arc_play|--steps\s+\d{2,}|--search-trials/i.test(typeof cmd === 'string' ? cmd : '');
+        exec(finalCmd, { timeout: isLong ? 1800000 : 120000, maxBuffer: 10 * 1024 * 1024, cwd: execCwd, shell: true }, (error, stdout, stderr) => {
           if (error) resolve({ success: false, error: error.message, stderr: stderr?.toString() });
           else resolve({ success: true, stdout: stdout?.toString(), stderr: stderr?.toString() });
         });
@@ -3799,6 +4397,59 @@ async function executeIPC(channel, ...args) {
         return { success: true, query, results, totalResults: results.length };
       } catch (e) { return { success: false, error: e.message, query }; }
     },
+    'agent:elevenlabsTts': async (text, options = {}) => {
+      try {
+        const apiKey = (settings.elevenLabsApiKey || process.env.ELEVENLABS_API_KEY || '').trim();
+        if (!apiKey) return { success: false, error: 'ELEVENLABS_API_KEY missing.' };
+        const voiceId = String(options.voiceId || settings.elevenLabsVoiceId || 'JBFqnCBsd6RMkjVDRZzb');
+        const modelId = String(options.modelId || settings.elevenLabsModelId || 'eleven_multilingual_v2');
+        const promptText = String(text || '').trim();
+        if (!promptText) return { success: false, error: 'Text is required for ElevenLabs TTS.' };
+
+        const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'audio/mpeg', 'xi-api-key': apiKey },
+          body: JSON.stringify({
+            text: promptText,
+            model_id: modelId,
+            voice_settings: options.voiceSettings || { stability: 0.45, similarity_boost: 0.75 },
+          }),
+          signal: AbortSignal.timeout(20000),
+        });
+        if (!response.ok) {
+          const errText = await response.text().catch(() => '');
+          return { success: false, status: response.status, details: errText.slice(0, 300), error: `ElevenLabs TTS failed: HTTP ${response.status}${errText ? ` — ${errText.slice(0, 300)}` : ''}` };
+        }
+        const buffer = Buffer.from(await response.arrayBuffer());
+        return { success: true, voiceId, modelId, mimeType: 'audio/mpeg', audioBase64: buffer.toString('base64'), bytes: buffer.length };
+      } catch (e) { return { success: false, error: e.message, status: 0, details: 'request_exception' }; }
+    },
+    'agent:elevenlabsGenerateMusic': async (prompt, options = {}) => {
+      try {
+        const apiKey = (settings.elevenLabsApiKey || process.env.ELEVENLABS_API_KEY || '').trim();
+        if (!apiKey) return { success: false, error: 'ELEVENLABS_API_KEY missing.' };
+        const textPrompt = String(prompt || '').trim();
+        if (!textPrompt) return { success: false, error: 'Prompt is required for music generation.' };
+        const modelId = String(options.modelId || settings.elevenLabsMusicModelId || 'music_v1');
+        const durationMs = Math.max(3000, Math.min(600000, Math.floor(Number(options.durationSeconds || 20) * 1000)));
+        const response = await fetch('https://api.elevenlabs.io/v1/music', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: '*/*', 'xi-api-key': apiKey },
+          body: JSON.stringify({ prompt: textPrompt, model_id: modelId, music_length_ms: durationMs }),
+          signal: AbortSignal.timeout(120000),
+        });
+        if (!response.ok) {
+          const errText = await response.text().catch(() => '');
+          return { success: false, status: response.status, details: errText.slice(0, 300), error: `ElevenLabs music failed: HTTP ${response.status}${errText ? ` — ${errText.slice(0, 300)}` : ''}` };
+        }
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          return { success: true, modelId, contentType, payload: await response.json() };
+        }
+        const buffer = Buffer.from(await response.arrayBuffer());
+        return { success: true, modelId, mimeType: 'audio/mpeg', audioBase64: buffer.toString('base64'), bytes: buffer.length };
+      } catch (e) { return { success: false, error: e.message, status: 0, details: 'request_exception' }; }
+    },
     'agent:webScreenshot': async (url) => {
       try {
         const captureWin = new BrowserWindow({ width: 1280, height: 900, show: false, webPreferences: { contextIsolation: true, nodeIntegration: false } });
@@ -3865,6 +4516,56 @@ async function executeIPC(channel, ...args) {
     'agent:executeTool': async (toolId, params) => {
       return await executeCustomTool(toolId, params);
     },
+    // ─── NeuralCore ─────────────────────────────────────
+    'neural:status': async () => {
+      if (!neuralBridge?.available) return { success: true, available: false, modelsLoaded: false };
+      try {
+        const s = await neuralBridge.getStatus();
+        return { success: true, available: true, modelsLoaded: neuralBridge.modelsLoaded, ...s };
+      } catch (e) { return { success: false, error: e.message }; }
+    },
+    'neural:predict': async (params) => {
+      if (!neuralBridge?.available || !neuralBridge.modelsLoaded) return { success: false, error: 'NeuralCore not ready' };
+      try {
+        const result = await neuralBridge.predict(params);
+        return { success: true, ...result };
+      } catch (e) { return { success: false, error: e.message }; }
+    },
+    'neural:train': async (params) => {
+      if (!neuralBridge?.available) return { success: false, error: 'NeuralCore not running' };
+      try {
+        const result = await neuralBridge.train(params || {});
+        return { success: true, ...result };
+      } catch (e) { return { success: false, error: e.message }; }
+    },
+    'neural:modelStats': async () => {
+      if (!neuralBridge?.available) return { success: false, error: 'NeuralCore not running' };
+      try {
+        const result = await neuralBridge.getModelStats();
+        return { success: true, ...result };
+      } catch (e) { return { success: false, error: e.message }; }
+    },
+    'neural:generateTrajectory': async (params) => {
+      if (!neuralBridge?.available) return { success: false, error: 'NeuralCore not running' };
+      try {
+        const result = await neuralBridge.generateTrajectory(params);
+        return { success: true, ...result };
+      } catch (e) { return { success: false, error: e.message }; }
+    },
+    'neural:loadModels': async (checkpoint) => {
+      if (!neuralBridge?.available) return { success: false, error: 'NeuralCore not running' };
+      try {
+        const result = await neuralBridge.loadModels(checkpoint || 'best');
+        return { success: true, ...result };
+      } catch (e) { return { success: false, error: e.message }; }
+    },
+    'neural:plan': async (params) => {
+      if (!neuralBridge?.available || !neuralBridge.modelsLoaded) return { success: false, error: 'NeuralCore not ready' };
+      try {
+        const result = await neuralBridge.plan(params);
+        return { success: true, ...result };
+      } catch (e) { return { success: false, error: e.message }; }
+    },
   };
 
   const handler = handlers[channel];
@@ -3929,6 +4630,8 @@ WEB TOOLS:
 - web_search: Search the web — params: { "query": "..." }
 - web_fetch: Fetch web page text — params: { "url": "..." }
 - web_screenshot: Screenshot a webpage — params: { "url": "..." }
+- elevenlabs_tts: Generate speech audio — params: { "text": "...", "voiceId"?: "...", "modelId"?: "..." }
+- elevenlabs_generate_music: Generate music from prompt — params: { "prompt": "...", "durationSeconds"?: 20 }
 
 SCREEN VISION (you can SEE the desktop):
 - screenshot_desktop: Capture the entire desktop screen — params: {}. Returns a description of what is on screen.
@@ -3975,6 +4678,14 @@ TOOL CREATION (you can CREATE new tools):
 - list_custom_tools: List all custom tools — params: {}
 - execute_tool: Run a custom tool — params: { "toolId": "tool_name", "args": ["arg1", "arg2"] }
 
+NEURALCORE (Physics-Informed Neural Engine — learned action policies):
+- neural_status: Check if neural engine is available and models are loaded — params: {}
+- neural_predict: Get neural action prediction for a UI task — params: { "intent_action": "click", "intent_target": "button", "intent_confidence": 0.8, "app_name": "...", "window_size": [1920, 1080] }
+- neural_train: Train/retrain neural models from recorded demonstrations — params: { "epochs": 100, "batch_size": 8 }
+- neural_model_stats: Get model statistics (parameters, architecture) — params: {}
+- neural_generate_trajectory: Generate Fitts's Law mouse trajectory — params: { "start_x": 100, "start_y": 100, "end_x": 500, "end_y": 300, "target_width": 40 }
+Note: NeuralCore uses PINN-style constraint losses (Fitts's Law, UI causality, safety rules) to learn realistic human-like UI actions from few demonstrations.
+
 The user is on ${process.platform === 'win32' ? 'Windows' : process.platform}. Home: ${os.homedir().replace(/\\/g, '\\\\')}.
 
 Rules:
@@ -3984,7 +4695,44 @@ Rules:
 - NEVER run destructive commands
 - Use PowerShell syntax on Windows
 - For GUI tasks that require finding UI elements: screenshot first, then click/type, then verify. For simple coordinate-based tasks (mouse patterns, known positions), just execute directly — no screenshot needed
-- Only declare a goal complete (shouldStop + goalProgress 1.0) AFTER you have executed the required actions and seen their results`;
+- Only declare a goal complete (shouldStop + goalProgress 1.0) AFTER you have executed the required actions and seen their results
+- CRITICAL: Your "thought" field is for REASONING ONLY — describing an action in thought does NOT execute it. You MUST put actions in the "action", "sequence", "parallel", or "plan" fields.`;
+
+function extractActionFromThought(thoughtText) {
+  if (!thoughtText || typeof thoughtText !== 'string') return null;
+  const t = thoughtText;
+
+  const clickMatch = t.match(/click(?:ing)?\s+(?:(?:the|this|that|a)\s+)?(?:\w+\s+)*?(?:at\s+)?(?:position\s+)?\(?\s*(\d{2,4})\s*[,\s]\s*(\d{2,4})\s*\)?/i);
+  if (clickMatch) {
+    return { action: 'mouse_click', params: { x: parseInt(clickMatch[1]), y: parseInt(clickMatch[2]), button: 'left' } };
+  }
+
+  const urlMatch = t.match(/open(?:ing)?\s+(?:the\s+)?(?:url\s+)?["']?(https?:\/\/[^\s"']+)["']?/i);
+  if (urlMatch) {
+    return { action: 'open_url', params: { url: urlMatch[1] } };
+  }
+
+  const typeMatch = t.match(/typ(?:e|ing)\s+["']([^"']+)["']/i);
+  if (typeMatch) {
+    return { action: 'keyboard_type', params: { text: typeMatch[1] } };
+  }
+
+  const pressMatch = t.match(/press(?:ing)?\s+(?:the\s+)?["']?(\w+)["']?\s*(?:key)?/i);
+  if (pressMatch && /^(enter|tab|escape|space|backspace|delete|up|down|left|right|home|end|f\d{1,2})$/i.test(pressMatch[1])) {
+    return { action: 'keyboard_press', params: { key: pressMatch[1].toLowerCase() } };
+  }
+
+  if (/minimize\s+(?:the\s+)?(?:agi\s*prime|prime|self|this|window)/i.test(t)) {
+    return { action: 'minimize_self', params: {} };
+  }
+
+  const cmdMatch = t.match(/(?:run|execute)\s+(?:the\s+)?(?:command\s+)?["'`]([^"'`]+)["'`]/i);
+  if (cmdMatch) {
+    return { action: 'execute_command', params: { command: cmdMatch[1] } };
+  }
+
+  return null;
+}
 
 ipcMain.on('agent:startCognitive', async (event, goal) => {
   cognitiveKillFlag = false;
@@ -3995,6 +4743,60 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
     : (goal && typeof goal === 'object' ? String(goal.goal || '') : '');
   const contextAddendum = goal && typeof goal === 'object' ? String(goal.contextAddendum || '') : '';
   const origin = goal && typeof goal === 'object' ? String(goal.origin || '') : '';
+  const strictSingleCommand = /\bexecute exactly one command\b/i.test(goalText)
+    || /\brun this command only\b/i.test(goalText);
+  const strictNoUiActions = /\bno ui actions?\b/i.test(goalText)
+    || /\bno minimize\b/i.test(goalText)
+    || /\bno keyboard\/mouse actions?\b/i.test(goalText)
+    || /\bno keyboard actions?\b/i.test(goalText)
+    || /\bno mouse actions?\b/i.test(goalText);
+  const UI_ACTIONS = new Set([
+    'minimize_self',
+    'mouse_move',
+    'mouse_click',
+    'mouse_scroll',
+    'mouse_drag',
+    'keyboard_type',
+    'keyboard_press',
+    'keyboard_shortcut',
+    'open_url',
+    'open_file',
+    'open_application',
+  ]);
+  const extractDirectCommandFromGoal = (text) => {
+    if (!strictSingleCommand) return '';
+    const marker = /run this command only(?: and return stdout\/stderr exactly)?\s*:/i;
+    const m = text.match(marker);
+    const tail = m ? text.slice(m.index + m[0].length) : text;
+    const lines = tail
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+    const cmdLike = lines.filter((line) =>
+      /(^[A-Za-z]:[\\/]|^&\s*["']?[A-Za-z]:[\\/]|python(?:\.exe)?\b|powershell\b|^cmd\b|^\.\.?[\\/]|^scripts[\\/])/i.test(line)
+    );
+    return (cmdLike[cmdLike.length - 1] || '').trim();
+  };
+  const directCommandFromGoal = extractDirectCommandFromGoal(goalText);
+  try {
+    saveJSON(operatorGoalFile, {
+      goal: goalText,
+      contextAddendum: contextAddendum || '',
+      origin: origin || 'unknown',
+      strictSingleCommand,
+      strictNoUiActions,
+      directCommandFromGoal: directCommandFromGoal || '',
+      requestedAt: Date.now(),
+    });
+    updateOperatorLoopState({
+      active: true,
+      currentGoal: goalText,
+      iterations: 0,
+      lastAction: '',
+      lastResult: '',
+      lastError: '',
+    });
+  } catch (_) {}
   try {
     const created = createLedgerRun('cognitive', {
       goal: goalText.slice(0, 1000),
@@ -4063,6 +4865,19 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
         actionResult: safeStep.actionResult || null,
       });
     } catch (_) {}
+    try {
+      if (safeStep?.type === 'act') {
+        updateOperatorLoopState({
+          lastAction: safeStep.actionType || '',
+          lastResult: safeStep.actionResult?.success ? String(safeStep.actionResult?.output || '').slice(0, 500) : '',
+          lastError: safeStep.actionResult?.success ? '' : String(safeStep.actionResult?.error || '').slice(0, 500),
+        });
+      } else if (safeStep?.type === 'think') {
+        updateOperatorLoopState({
+          iterations: Number(operatorLoopState.iterations || 0) + 1,
+        });
+      }
+    } catch (_) {}
   };
 
   const completeCognitive = (success, summary, iterations) => {
@@ -4082,12 +4897,21 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
         iterations,
       });
     } catch (_) {}
+    try {
+      updateOperatorLoopState({
+        active: false,
+        iterations,
+        lastResult: success ? String(summary || '').slice(0, 500) : '',
+        lastError: success ? '' : String(summary || '').slice(0, 500),
+      });
+    } catch (_) {}
     mainWindow?.webContents.send('agent:cognitiveComplete', { success, summary, iterations });
   };
 
   const workingMemory = [];
   const steps = [];
   const actionFailureCounts = new Map();
+  let noActionStopCount = 0;
   const runTelemetry = {
     startedAt: Date.now(),
     actionCalls: 0,
@@ -4167,6 +4991,42 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
       workingMemory.push(...initialObservations.slice(0, 3));
     }
 
+    // Fast path: if the operator asked for exactly one command, execute it directly
+    // and skip planner loops entirely for deterministic behavior.
+    if (strictSingleCommand && directCommandFromGoal) {
+      sendStep({
+        type: 'think',
+        content: `Direct command mode: executing exactly one command.\n${directCommandFromGoal}`,
+        timestamp: Date.now(),
+        goalProgress: 0.1,
+      });
+      const directResult = await executeIPC('agent:execute', directCommandFromGoal);
+      const directOutput = directResult?.success
+        ? ((directResult.stdout || '') + (directResult.stderr ? `\n${directResult.stderr}` : '')).trim()
+        : (directResult?.error || 'Command failed');
+      sendStep({
+        type: 'act',
+        content: directResult?.success
+          ? `execute_command: {"command":"${directCommandFromGoal}"}\n${truncateStr(directOutput, 4000)}`
+          : `execute_command: {"command":"${directCommandFromGoal}"}\n${truncateStr(directOutput, 4000)}`,
+        timestamp: Date.now(),
+        actionType: 'execute_command',
+        executionTier: 'high-risk',
+        actionParams: { command: directCommandFromGoal },
+        actionResult: {
+          success: !!directResult?.success,
+          output: directResult?.success ? directOutput : undefined,
+          error: directResult?.success ? undefined : directOutput,
+        },
+        goalProgress: directResult?.success ? 1 : 0.2,
+      });
+      const summary = directResult?.success
+        ? (directOutput || 'Command executed successfully.')
+        : `Command failed: ${directOutput}`;
+      completeCognitive(!!directResult?.success, summary, 1);
+      return;
+    }
+
     const PARALLEL_SAFE_ACTIONS = new Set([
       'read_file',
       'list_directory',
@@ -4177,6 +5037,8 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
       'web_fetch',
       'web_search',
       'web_screenshot',
+      'elevenlabs_tts',
+      'elevenlabs_generate_music',
       'screenshot_desktop',
       'analyze_screen',
       'get_screen_dimensions',
@@ -4219,7 +5081,7 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
 
     const mapActionToPolicyGate = (action) => {
       if (action === 'execute_command') return 'exec';
-      if (action === 'web_fetch' || action === 'web_search' || action === 'web_screenshot' || action === 'open_url') return 'network';
+      if (action === 'web_fetch' || action === 'web_search' || action === 'web_screenshot' || action === 'elevenlabs_tts' || action === 'elevenlabs_generate_music' || action === 'open_url') return 'network';
       if (action === 'write_file' || action === 'delete_file' || action === 'rename_file' || action === 'create_directory') return 'fs-write';
       if (action === 'screenshot_desktop' || action === 'analyze_screen' || action === 'get_screen_dimensions' || action === 'get_foreground_window') return 'screen';
       if (action === 'mouse_move' || action === 'mouse_click' || action === 'mouse_scroll' || action === 'mouse_drag' || action === 'keyboard_type' || action === 'keyboard_press' || action === 'keyboard_shortcut') return 'input-sim';
@@ -4247,6 +5109,12 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
         contextParts.push('', 'WORKING MEMORY:');
         for (const wm of workingMemory.slice(-8)) contextParts.push(`  - ${wm}`);
       }
+      if (strictSingleCommand) {
+        contextParts.push('', 'STRICT OPERATOR DIRECTIVE: Execute exactly one shell command and stop.');
+      }
+      if (strictNoUiActions) {
+        contextParts.push('', 'STRICT OPERATOR DIRECTIVE: UI/input actions are forbidden (no minimize, mouse, keyboard, open_url/open_app/open_file).');
+      }
       if (steps.length > 0) {
         contextParts.push('', 'RECENT ACTIONS:');
         for (const s of steps.slice(-6)) {
@@ -4268,7 +5136,7 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
         { role: 'system', content: COGNITIVE_SYSTEM },
         {
           role: 'user',
-          content: `${contextParts.join('\n')}\n\nReflect on the last result, then decide what to do next. In your "thought" field, briefly assess what happened and whether you're closer to the goal before planning the next action.\n\nRespond with ONE of these JSON formats:\n\n1) SINGLE ACTION: { "thought": "reflection + reasoning", "action": "action_type", "params": { ... }, "goalProgress": 0.0, "shouldStop": false }\n2) SEQUENCE (up to 8 rapid actions): { "thought": "...", "sequence": [{ "action": "...", "params": { ... } }], "goalProgress": 0.0, "shouldStop": false, "verifyAfter": true }\n3) PARALLEL (read-only only): { "thought": "...", "parallel": [{ "action": "...", "params": { ... } }], "goalProgress": 0.0, "shouldStop": false }\n4) PLAN DAG: { "thought": "...", "plan": { "nodes": [{ "id": "n1", "action": "...", "params": { ... }, "dependsOn": [] }] }, "goalProgress": 0.0, "shouldStop": false }\n5) SUBGOAL: { "thought": "...", "subgoal": { "goal": "...", "maxIterations": 6 }, "goalProgress": 0.0, "shouldStop": false }\n\nUse "sequence" for fast GUI workflows. Use "parallel" for safe reads. Use "plan" for dependencies. Use "subgoal" for nested tasks.\nIf the goal is achieved, set shouldStop: true and goalProgress: 1.0.\nIf impossible, set shouldStop: true and explain in thought.\nOutput ONLY the JSON.`,
+          content: `${contextParts.join('\n')}\n\nReflect on the last result, then decide what to do next. In your "thought" field, briefly assess what happened and whether you're closer to the goal before planning the next action.\n\nRespond with ONE of these JSON formats:\n\n1) SINGLE ACTION: { "thought": "reflection + reasoning", "action": "action_type", "params": { ... }, "goalProgress": 0.0, "shouldStop": false }\n2) SEQUENCE (up to 8 rapid actions): { "thought": "...", "sequence": [{ "action": "...", "params": { ... } }], "goalProgress": 0.0, "shouldStop": false, "verifyAfter": true }\n3) PARALLEL (read-only only): { "thought": "...", "parallel": [{ "action": "...", "params": { ... } }], "goalProgress": 0.0, "shouldStop": false }\n4) PLAN DAG: { "thought": "...", "plan": { "nodes": [{ "id": "n1", "action": "...", "params": { ... }, "dependsOn": [] }] }, "goalProgress": 0.0, "shouldStop": false }\n5) SUBGOAL: { "thought": "...", "subgoal": { "goal": "...", "maxIterations": 6 }, "goalProgress": 0.0, "shouldStop": false }\n\nUse "sequence" for fast GUI workflows. Use "parallel" for safe reads. Use "plan" for dependencies. Use "subgoal" for nested tasks.\nIf the goal is achieved, set shouldStop: true and goalProgress: 1.0.\nIf impossible, set shouldStop: true and explain in thought.\n\nCRITICAL: Describing an action in "thought" does NOT execute it. You MUST include the action in the "action", "sequence", "parallel", or "plan" field. Never set shouldStop: true without first executing at least one action.\n\nOutput ONLY the JSON — no markdown, no explanation.`,
         },
       ];
 
@@ -4302,58 +5170,88 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
       steps.push(thinkStep);
       sendStep(thinkStep);
 
-      // Check if goal is achieved
-      if (decision.shouldStop) {
+      // ── shouldStop handling ──────────────────────────────────
+      const hasDecisionActions = decision.action
+        || (Array.isArray(decision.sequence) && decision.sequence.length > 0)
+        || (Array.isArray(decision.parallel) && decision.parallel.length > 0)
+        || (decision.plan && Array.isArray(decision.plan.nodes) && decision.plan.nodes.length > 0)
+        || decision.subgoal;
+
+      if (decision.shouldStop && !hasDecisionActions) {
         const sideEffectActions = steps.filter(
           (s) => s.type === 'act' && s.actionResult?.success && !READ_ONLY_ACTIONS.has(s.actionType),
         );
+
         if (sideEffectActions.length === 0 && iteration < MAX_ITERATIONS - 1) {
-          sendStep({
-            type: 'replan',
-            content: 'Stop rejected — no actions executed yet. You must include actions in your JSON response, not just describe them in thought.',
-            timestamp: Date.now(),
-            goalProgress: 0,
+          noActionStopCount += 1;
+
+          // Attempt to rescue an action from the thought text
+          const rescued = extractActionFromThought(decision.thought || '');
+          if (rescued) {
+            decision.action = rescued.action;
+            decision.params = rescued.params;
+            decision.shouldStop = false;
+            sendStep({
+              type: 'replan',
+              content: `Auto-extracted "${rescued.action}" from reasoning — executing now.`,
+              timestamp: Date.now(),
+              goalProgress: decision.goalProgress || 0,
+            });
+            workingMemory.push(`SYSTEM: Extracted action "${rescued.action}" from your thought and executing it.`);
+            // Fall through to ACT phase below
+          } else if (noActionStopCount >= 3) {
+            sendStep({
+              type: 'replan',
+              content: `Giving up after ${noActionStopCount} attempts with no executable actions.`,
+              timestamp: Date.now(),
+              goalProgress: 0,
+            });
+            completeCognitive(false, `Agent could not produce executable actions after ${noActionStopCount} attempts. Last thought: ${(decision.thought || '').slice(0, 200)}`, iteration);
+            return;
+          } else {
+            const escalation = noActionStopCount >= 2
+              ? `SYSTEM: FINAL WARNING (attempt ${noActionStopCount}). You keep describing actions in "thought" but NOT including them in the response JSON. Your thought says what to do but you never do it. You MUST respond with an "action" or "sequence" field. Example for clicking at (200, 1040): { "thought": "Clicking Chrome taskbar button", "action": "mouse_click", "params": { "x": 200, "y": 1040, "button": "left" }, "goalProgress": 0.5, "shouldStop": false }. Do NOT set shouldStop to true until the action has been executed and confirmed.`
+              : 'SYSTEM: You tried to stop but executed zero actions. Put your actions in the JSON "action" or "sequence" field — do NOT just describe them in "thought". Example: { "thought": "Executing now", "action": "mouse_click", "params": { "x": 200, "y": 1040, "button": "left" }, "goalProgress": 0.5, "shouldStop": false }';
+            sendStep({
+              type: 'replan',
+              content: `Stop rejected (attempt ${noActionStopCount}) — no actions executed. Actions must be in JSON fields, not just described in thought.`,
+              timestamp: Date.now(),
+              goalProgress: 0,
+            });
+            workingMemory.push(escalation);
+            continue;
+          }
+        } else {
+          // We have prior side-effect actions → complete normally
+          const executedActions = sideEffectActions.map((s) => s.actionType);
+          const success = (decision.goalProgress || 0) >= 0.8 && executedActions.length > 0;
+          const summary = decision.thought || (success ? 'Goal achieved.' : 'Goal could not be completed.');
+          const actionLog = ` Actions executed: ${executedActions.join(', ')}.`;
+
+          await storeVectorMemory({
+            content: `Task "${goalText.slice(0, 100)}" — ${success ? 'SUCCESS' : 'INCOMPLETE'}.${actionLog} ${summary.slice(0, 180)}`,
+            type: 'procedural',
+            source: 'cognitive-loop',
+            importance: success ? 0.6 : 0.8,
+            tags: ['task', success ? 'success' : 'incomplete'],
           });
-          workingMemory.push(
-            'SYSTEM: You tried to stop but executed zero actions. Put your actions in the JSON "sequence" field. Example: { "thought": "Executing now", "sequence": [{ "action": "mouse_move", "params": { "x": 300, "y": 400 } }], "goalProgress": 0.9, "shouldStop": false }'
-          );
-          continue;
+
+          emitTelemetryStep('run summary', {
+            elapsedMs: Date.now() - runTelemetry.startedAt,
+            actionCalls: runTelemetry.actionCalls,
+            avgActionMs: runTelemetry.actionCalls > 0 ? Math.round(runTelemetry.totalActionMs / runTelemetry.actionCalls) : 0,
+            parallelBranches: runTelemetry.parallelBranches,
+            dagPlans: runTelemetry.dagPlans,
+            dagNodesExecuted: runTelemetry.dagNodesExecuted,
+            subloopsSpawned: runTelemetry.subloopsSpawned,
+            maxSubloopDepth: runTelemetry.maxSubloopDepth,
+            outcome: success ? 'success' : 'stopped',
+          }, decision.goalProgress || 0);
+
+          sendStep({ type: 'reflect', content: summary, timestamp: Date.now(), goalProgress: decision.goalProgress || 0 });
+          completeCognitive(success, summary, iteration);
+          return;
         }
-        const executedActions = steps
-          .filter((s) => s.type === 'act' && s.actionResult?.success && !READ_ONLY_ACTIONS.has(s.actionType))
-          .map((s) => s.actionType);
-        const success = (decision.goalProgress || 0) >= 0.8 && executedActions.length > 0;
-        const summary = decision.thought || (success ? 'Goal achieved.' : 'Goal could not be completed.');
-        const actionLog = executedActions.length > 0
-          ? ` Actions executed: ${executedActions.join(', ')}.`
-          : ' No side-effect actions were performed.';
-
-        await storeVectorMemory({
-          content: `Task "${goalText.slice(0, 100)}" — ${success ? 'SUCCESS' : 'INCOMPLETE'}.${actionLog} ${summary.slice(0, 180)}`,
-          type: 'procedural',
-          source: 'cognitive-loop',
-          importance: success ? 0.6 : 0.8,
-          tags: ['task', success ? 'success' : 'incomplete'],
-        });
-
-        emitTelemetryStep('run summary', {
-          elapsedMs: Date.now() - runTelemetry.startedAt,
-          actionCalls: runTelemetry.actionCalls,
-          avgActionMs:
-            runTelemetry.actionCalls > 0
-              ? Math.round(runTelemetry.totalActionMs / runTelemetry.actionCalls)
-              : 0,
-          parallelBranches: runTelemetry.parallelBranches,
-          dagPlans: runTelemetry.dagPlans,
-          dagNodesExecuted: runTelemetry.dagNodesExecuted,
-          subloopsSpawned: runTelemetry.subloopsSpawned,
-          maxSubloopDepth: runTelemetry.maxSubloopDepth,
-          outcome: success ? 'success' : 'stopped',
-        }, decision.goalProgress || 0);
-
-        sendStep({ type: 'reflect', content: summary, timestamp: Date.now(), goalProgress: decision.goalProgress || 0 });
-        completeCognitive(success, summary, iteration);
-        return;
       }
 
       // ────────────────────────────────────────────────────────────
@@ -4395,6 +5293,10 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
             return await executeIPC('agent:webSearch', params.query);
           case 'web_screenshot':
             return await executeIPC('agent:webScreenshot', params.url);
+          case 'elevenlabs_tts':
+            return await executeIPC('agent:elevenlabsTts', params.text, params);
+          case 'elevenlabs_generate_music':
+            return await executeIPC('agent:elevenlabsGenerateMusic', params.prompt, params);
           // ─── Screen Vision Actions ───────────────────
           case 'screenshot_desktop': {
             const r = await analyzeScreen('Describe everything visible on the screen. Identify all windows, text, UI elements, and their approximate pixel coordinates.');
@@ -4408,15 +5310,25 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
             return await executeIPC('agent:getScreenDimensions');
           case 'get_foreground_window':
             return await executeIPC('agent:getForegroundWindow');
-          // ─── Input Simulation Actions ────────────────
-          case 'mouse_move':
-            return await executeIPC('agent:mouseMove', params.x, params.y, params.smooth !== false);
-          case 'mouse_click':
-            return await executeIPC('agent:mouseClick', params.x, params.y, params.button, params.doubleClick);
+          // ─── Input Simulation Actions (NeuralCore-enhanced) ────
+          case 'mouse_move': {
+            const nm = await neuralEnhanceAction('mouse_move', params, steps);
+            const mp = nm || params;
+            return await executeIPC('agent:mouseMove', mp.x, mp.y, mp.smooth !== false);
+          }
+          case 'mouse_click': {
+            const nc = await neuralEnhanceAction('mouse_click', params, steps);
+            const cp = nc || params;
+            if (cp._neuralTimingMs) await new Promise(r => setTimeout(r, Math.min(cp._neuralTimingMs, 500)));
+            return await executeIPC('agent:mouseClick', cp.x, cp.y, cp.button, cp.doubleClick);
+          }
           case 'mouse_scroll':
             return await executeIPC('agent:mouseScroll', params.x, params.y, params.amount);
-          case 'mouse_drag':
-            return await executeIPC('agent:mouseDrag', params.fromX, params.fromY, params.toX, params.toY);
+          case 'mouse_drag': {
+            const nd = await neuralEnhanceAction('mouse_drag', params, steps);
+            const dp = nd || params;
+            return await executeIPC('agent:mouseDrag', dp.fromX, dp.fromY, dp.toX, dp.toY);
+          }
           case 'keyboard_type':
             return await executeIPC('agent:keyboardType', params.text);
           case 'keyboard_press':
@@ -4434,6 +5346,19 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
             return await executeIPC('agent:listTools');
           case 'execute_tool':
             return await executeIPC('agent:executeTool', params.toolId, params);
+          // ─── NeuralCore Actions ────────────────────────
+          case 'neural_status':
+            return await executeIPC('neural:status');
+          case 'neural_predict':
+            return await executeIPC('neural:predict', params);
+          case 'neural_train':
+            return await executeIPC('neural:train', params);
+          case 'neural_model_stats':
+            return await executeIPC('neural:modelStats');
+          case 'neural_generate_trajectory':
+            return await executeIPC('neural:generateTrajectory', params);
+          case 'neural_plan':
+            return await executeIPC('neural:plan', params);
           default:
             return { success: false, error: `Unknown action: ${action}` };
         }
@@ -4480,16 +5405,30 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
           else if (sensitive) conscienceVerdict = 'ask-first';
           else if (tier === 'high-risk') conscienceVerdict = policySnapshot.requireConsentForRiskyActions ? 'ask-first' : 'caution';
           else if (tier === 'reversible') conscienceVerdict = 'caution';
+
+          // NeuralCore risk escalation — a quantitative signal from the physics-informed model
+          const neuralRisk = stepParams?._neuralRisk;
+          const neuralConf = stepParams?._neuralConfidence ?? 0.5;
+          if (typeof neuralRisk === 'number' && neuralRisk > 0) {
+            const weighted = neuralRisk * neuralConf;
+            if (weighted > 0.7 && conscienceVerdict === 'proceed') {
+              conscienceVerdict = 'ask-first';
+            } else if (weighted > 0.5 && conscienceVerdict === 'proceed') {
+              conscienceVerdict = 'caution';
+            }
+          }
         }
 
         const blockedByPolicy = !policyAllowed;
         const blockedByConscience = conscienceVerdict === 'refuse';
         const consentRequired = conscienceVerdict === 'ask-first';
-        const blocked = ENFORCE_ACTION_GATES && (blockedByPolicy || blockedByConscience);
+        const blockedByNoUiDirective = strictNoUiActions && UI_ACTIONS.has(action);
+        const blocked = ENFORCE_ACTION_GATES && (blockedByPolicy || blockedByConscience || blockedByNoUiDirective);
 
         let blockReason = '';
         if (blockedByPolicy) blockReason = 'POLICY_BLOCK: action not allowed by operator policy';
         else if (blockedByConscience) blockReason = 'CONSCIENCE_REFUSE: action declined by conscience gate';
+        else if (blockedByNoUiDirective) blockReason = 'OPERATOR_DIRECTIVE_BLOCK: UI/input actions are disabled for this goal';
         else if (consentRequired) blockReason = 'CONSENT_REQUIRED: action requires user confirmation';
 
         return {
@@ -5083,6 +6022,8 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
       );
 
       // Phase: REFLECT — inline evaluation (no extra LLM call; folded into next think step)
+      if (sequenceResults.length > 0) noActionStopCount = 0;
+
       const reflectAction = isSequence
         ? `Sequence of ${sequenceResults.length} actions: ${sequenceResults.map(r => r.action).join(' → ')}`
         : (sequenceResults[0]?.action || decision.action || 'unknown');
@@ -5103,6 +6044,39 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
       steps.push(reflectStep);
       sendStep(reflectStep);
       workingMemory.push(`Result: ${reflectSummary.slice(0, 100)}`);
+
+      // Deferred shouldStop: model said shouldStop but also had actions — now they've run
+      if (decision.shouldStop && hasDecisionActions) {
+        const doneActions = steps
+          .filter((s) => s.type === 'act' && s.actionResult?.success && !READ_ONLY_ACTIONS.has(s.actionType))
+          .map((s) => s.actionType);
+        const success = reflectSuccess && (decision.goalProgress || 0) >= 0.5 && doneActions.length > 0;
+        const summary = decision.thought || (success ? 'Goal achieved.' : 'Goal could not be completed.');
+        const actionLog = doneActions.length > 0 ? ` Actions executed: ${doneActions.join(', ')}.` : '';
+
+        await storeVectorMemory({
+          content: `Task "${goalText.slice(0, 100)}" — ${success ? 'SUCCESS' : 'INCOMPLETE'}.${actionLog} ${summary.slice(0, 180)}`,
+          type: 'procedural',
+          source: 'cognitive-loop',
+          importance: success ? 0.6 : 0.8,
+          tags: ['task', success ? 'success' : 'incomplete'],
+        });
+
+        emitTelemetryStep('run summary', {
+          elapsedMs: Date.now() - runTelemetry.startedAt,
+          actionCalls: runTelemetry.actionCalls,
+          avgActionMs: runTelemetry.actionCalls > 0 ? Math.round(runTelemetry.totalActionMs / runTelemetry.actionCalls) : 0,
+          parallelBranches: runTelemetry.parallelBranches,
+          dagPlans: runTelemetry.dagPlans,
+          dagNodesExecuted: runTelemetry.dagNodesExecuted,
+          subloopsSpawned: runTelemetry.subloopsSpawned,
+          maxSubloopDepth: runTelemetry.maxSubloopDepth,
+          outcome: success ? 'success' : 'stopped',
+        }, decision.goalProgress || 0);
+
+        completeCognitive(success, summary, iteration);
+        return;
+      }
 
       if (reflectSuccess && (decision.goalProgress || 0) >= 0.7) {
         const doneActions = steps
@@ -5281,6 +6255,29 @@ Suggest 1-2 autonomous improvement goals:`,
   }
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  NEURALCORE IPC HANDLERS
+// ═══════════════════════════════════════════════════════════════
+
+ipcMain.handle('neural:status', async () => {
+  return await executeIPC('neural:status');
+});
+ipcMain.handle('neural:predict', async (_, params) => {
+  return await executeIPC('neural:predict', params);
+});
+ipcMain.handle('neural:train', async (_, params) => {
+  return await executeIPC('neural:train', params);
+});
+ipcMain.handle('neural:modelStats', async () => {
+  return await executeIPC('neural:modelStats');
+});
+ipcMain.handle('neural:generateTrajectory', async (_, params) => {
+  return await executeIPC('neural:generateTrajectory', params);
+});
+ipcMain.handle('neural:loadModels', async (_, checkpoint) => {
+  return await executeIPC('neural:loadModels', checkpoint);
+});
+
 // Start all systems when app is ready
 app.whenReady().then(() => {
   startNightmind();
@@ -5289,5 +6286,29 @@ app.whenReady().then(() => {
   setTimeout(generateAutonomousGoals, 300000);
   // Then every 30 minutes
   setInterval(generateAutonomousGoals, 1800000);
-  console.log('[AGI PRIME] All systems initialized — Vision, Hands, Memory, Goals, Tools active');
+
+  // Start NeuralCore bridge
+  try {
+    neuralBridge = new NeuralCoreBridge(neuralCoreScriptsDir, dataDir);
+    neuralBridge.start();
+    // Try loading models after bridge is ready (may not have any yet)
+    setTimeout(async () => {
+      if (neuralBridge?.available) {
+        try {
+          const result = await neuralBridge.loadModels('best');
+          if (result?.loaded) {
+            console.log('[NeuralCore] Trained models loaded');
+          } else {
+            console.log('[NeuralCore] No trained models yet — record patterns, then train');
+          }
+        } catch (e) {
+          console.log('[NeuralCore] Model load skipped:', e.message);
+        }
+      }
+    }, 3000);
+  } catch (e) {
+    console.error('[NeuralCore] Failed to start bridge:', e.message);
+  }
+
+  console.log('[AGI PRIME] All systems initialized — Vision, Hands, Memory, Goals, Tools, NeuralCore active');
 });

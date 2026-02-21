@@ -31,7 +31,10 @@ function upsertActor(
   label: string,
 ): SocialActorModel {
   const existing = state.actors.find((a) => a.id === actorId);
-  if (existing) return existing;
+  if (existing) {
+    if (label && label !== existing.label) existing.label = label;
+    return existing;
+  }
   const actor: SocialActorModel = {
     id: actorId,
     label,

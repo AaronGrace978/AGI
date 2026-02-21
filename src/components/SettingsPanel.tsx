@@ -260,9 +260,17 @@ export default function SettingsPanel() {
   const [localUrl, setLocalUrl] = useState(settings.ollamaUrl);
   const [localAnthropicKey, setLocalAnthropicKey] = useState(settings.anthropicKey);
   const [localOpenaiKey, setLocalOpenaiKey] = useState(settings.openaiKey);
+  const [localArcApiKey, setLocalArcApiKey] = useState(settings.arcApiKey);
+  const [localVoiceProvider, setLocalVoiceProvider] = useState(settings.voiceProvider || 'browser');
+  const [localSoundPrimeUrl, setLocalSoundPrimeUrl] = useState(settings.soundprimeBaseUrl || 'http://127.0.0.1:8080');
+  const [localUseElevenLabsTts, setLocalUseElevenLabsTts] = useState(!!settings.useElevenLabsTts);
+  const [localElevenLabsApiKey, setLocalElevenLabsApiKey] = useState(settings.elevenLabsApiKey || '');
+  const [localElevenLabsVoiceId, setLocalElevenLabsVoiceId] = useState(settings.elevenLabsVoiceId || 'FOfJ2PMgU6HOGbNYnzto');
+  const [localElevenLabsModelId, setLocalElevenLabsModelId] = useState(settings.elevenLabsModelId || 'eleven_multilingual_v2');
   const [localTemp, setLocalTemp] = useState(settings.temperature);
   const [localMaxTokens, setLocalMaxTokens] = useState(settings.maxTokens);
   const [localSystemPrompt, setLocalSystemPrompt] = useState(settings.systemPrompt);
+  const [localOperatorName, setLocalOperatorName] = useState(settings.operatorName || '');
   const maxTokensCap = settings.provider === 'anthropic' ? 32000 : 200000;
 
   // Sync when settings load
@@ -271,9 +279,17 @@ export default function SettingsPanel() {
     setLocalUrl(settings.ollamaUrl);
     setLocalAnthropicKey(settings.anthropicKey);
     setLocalOpenaiKey(settings.openaiKey);
+    setLocalArcApiKey(settings.arcApiKey);
+    setLocalVoiceProvider(settings.voiceProvider || 'browser');
+    setLocalSoundPrimeUrl(settings.soundprimeBaseUrl || 'http://127.0.0.1:8080');
+    setLocalUseElevenLabsTts(!!settings.useElevenLabsTts);
+    setLocalElevenLabsApiKey(settings.elevenLabsApiKey || '');
+    setLocalElevenLabsVoiceId(settings.elevenLabsVoiceId || 'FOfJ2PMgU6HOGbNYnzto');
+    setLocalElevenLabsModelId(settings.elevenLabsModelId || 'eleven_multilingual_v2');
     setLocalTemp(settings.temperature);
     setLocalMaxTokens(settings.maxTokens);
     setLocalSystemPrompt(settings.systemPrompt);
+    setLocalOperatorName(settings.operatorName || '');
   }, [settings]);
 
   const save = (overrides: Record<string, unknown> = {}) => {
@@ -282,9 +298,17 @@ export default function SettingsPanel() {
       ollamaUrl: localUrl,
       anthropicKey: localAnthropicKey,
       openaiKey: localOpenaiKey,
+      arcApiKey: localArcApiKey,
+      voiceProvider: localVoiceProvider,
+      soundprimeBaseUrl: localSoundPrimeUrl,
+      useElevenLabsTts: localUseElevenLabsTts,
+      elevenLabsApiKey: localElevenLabsApiKey,
+      elevenLabsVoiceId: localElevenLabsVoiceId,
+      elevenLabsModelId: localElevenLabsModelId,
       temperature: localTemp,
       maxTokens: localMaxTokens,
       systemPrompt: localSystemPrompt,
+      operatorName: localOperatorName.trim() || undefined,
       ...overrides,
     });
   };
@@ -317,8 +341,27 @@ export default function SettingsPanel() {
         </button>
       </div>
 
-      {/* Provider Selection */}
+      {/* Your Name — Living Presence uses this in songs and greetings */}
       <div className="settings-section" style={{ marginTop: 16 }}>
+        <div className="settings-section-title">YOUR NAME</div>
+        <div className="settings-row">
+          <div className="settings-label">
+            Name
+            <small>Living Presence uses this in songs and greetings — e.g. &quot;Aaron&quot;</small>
+          </div>
+          <input
+            type="text"
+            className="settings-input"
+            value={localOperatorName}
+            onChange={(e) => setLocalOperatorName(e.target.value)}
+            onBlur={() => save({ operatorName: localOperatorName.trim() || undefined })}
+            placeholder="Aaron"
+          />
+        </div>
+      </div>
+
+      {/* Provider Selection */}
+      <div className="settings-section">
         <div className="settings-section-title">AI PROVIDER</div>
         <div className="settings-row">
           <div className="settings-label">
@@ -399,6 +442,114 @@ export default function SettingsPanel() {
             />
           </div>
         )}
+
+        <div className="settings-row">
+          <div className="settings-label">
+            ARC API Key
+            <small>Used for ARC-AGI-3 (env: ARC_API_KEY, fallback: ARC_AGI_API)</small>
+          </div>
+          <input
+            className="settings-input"
+            type="password"
+            value={localArcApiKey}
+            onChange={(e) => setLocalArcApiKey(e.target.value)}
+            onBlur={() => save()}
+            placeholder="arc_..."
+          />
+        </div>
+      </div>
+
+      {/* Voice Provider */}
+      <div className="settings-section">
+        <div className="settings-section-title">VOICE ENGINE</div>
+        <div className="settings-row">
+          <div className="settings-label">
+            Voice Provider
+            <small>Browser TTS fallback or SoundPrime local voice API</small>
+          </div>
+          <select
+            className="settings-select"
+            value={localVoiceProvider}
+            onChange={(e) => {
+              const value = e.target.value as 'browser' | 'soundprime';
+              setLocalVoiceProvider(value);
+              save({ voiceProvider: value });
+            }}
+          >
+            <option value="browser">Browser Speech (default)</option>
+            <option value="soundprime">SoundPrime Local API</option>
+          </select>
+        </div>
+        <div className="settings-row">
+          <div className="settings-label">
+            SoundPrime URL
+            <small>Local endpoint used when Voice Provider is SoundPrime</small>
+          </div>
+          <input
+            className="settings-input"
+            value={localSoundPrimeUrl}
+            onChange={(e) => setLocalSoundPrimeUrl(e.target.value)}
+            onBlur={() => save()}
+            placeholder="http://127.0.0.1:8080"
+          />
+        </div>
+        <div className="settings-row">
+          <div className="settings-label">
+            ElevenLabs Fallback
+            <small>Use ElevenLabs TTS when SoundPrime endpoint fails</small>
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={localUseElevenLabsTts}
+              onChange={(e) => {
+                setLocalUseElevenLabsTts(e.target.checked);
+                save({ useElevenLabsTts: e.target.checked });
+              }}
+            />
+            Enabled
+          </label>
+        </div>
+        <div className="settings-row">
+          <div className="settings-label">
+            ElevenLabs API Key
+            <small>Required if ElevenLabs fallback is enabled</small>
+          </div>
+          <input
+            className="settings-input"
+            type="password"
+            value={localElevenLabsApiKey}
+            onChange={(e) => setLocalElevenLabsApiKey(e.target.value)}
+            onBlur={() => save()}
+            placeholder="xi-api-key..."
+          />
+        </div>
+        <div className="settings-row">
+          <div className="settings-label">
+            ElevenLabs Voice ID
+            <small>Voice identity used for fallback speech</small>
+          </div>
+          <input
+            className="settings-input"
+            value={localElevenLabsVoiceId}
+            onChange={(e) => setLocalElevenLabsVoiceId(e.target.value)}
+            onBlur={() => save()}
+            placeholder="FOfJ2PMgU6HOGbNYnzto"
+          />
+        </div>
+        <div className="settings-row">
+          <div className="settings-label">
+            ElevenLabs Model ID
+            <small>Speech model used for fallback synthesis</small>
+          </div>
+          <input
+            className="settings-input"
+            value={localElevenLabsModelId}
+            onChange={(e) => setLocalElevenLabsModelId(e.target.value)}
+            onBlur={() => save()}
+            placeholder="eleven_multilingual_v2"
+          />
+        </div>
       </div>
 
       {/* Generation Parameters */}

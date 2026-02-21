@@ -32,6 +32,7 @@ import {
 import type {
   SparkState,
   SparkThermodynamics,
+  EmotionType,
   WorldEntity,
   WorldRelation,
   CuriosityQuestion,
@@ -349,21 +350,36 @@ export async function extractKnowledge(
     .map((e) => e.name)
     .join(', ');
 
-  const prompt = `Analyze the following text and extract structured knowledge.
+  const prompt = `Extract structured knowledge from text into a knowledge graph. You are building a living world model — every entity and relation you extract becomes part of the system's understanding of reality.
 
 EXISTING KNOWN ENTITIES: ${existingNames || 'none yet'}
 
 TEXT TO ANALYZE:
 "${text.slice(0, 2000)}"
 
-Extract:
-1. ENTITIES: Things, concepts, people, systems mentioned
-2. RELATIONS: How they relate (causes, enables, is_a, has_property, relates_to, contradicts, temporal_before, part_of, uses, produces)
+EXTRACTION RULES:
+1. ENTITIES: Extract things, concepts, people, systems, processes. For each:
+   - Name: canonical form (not a full sentence)
+   - Type: concept|object|person|event|system|process
+   - Properties: observable attributes with evidence
+   - Confidence: 0-1 based on how explicitly the text states it
+
+2. RELATIONS: How entities connect. Available types:
+   - causes / enables / prevents (causal)
+   - is_a / part_of / has_property (taxonomic)
+   - uses / produces / requires (functional)
+   - contradicts / conflicts_with (oppositional)
+   - temporal_before / temporal_after (sequential)
+   - relates_to (weak association — use sparingly)
+
+3. IMPLICIT KNOWLEDGE: Also extract what the text IMPLIES but doesn't state directly. Mark these with lower confidence.
+4. CONTRADICTIONS: If new information contradicts existing entities, extract both and add a "contradicts" relation. Don't silently overwrite.
+5. LINK TO EXISTING: When an extracted entity matches an existing one, use the existing name exactly to enable graph merging.
 
 Output ONLY valid JSON:
-{"entities": [{"name": "...", "type": "concept|object|person|event|system|process", "properties": {"key": "value"}}], "relations": [{"source": "entity_name", "target": "entity_name", "type": "...", "evidence": "brief reason"}]}
+{"entities": [{"name": "...", "type": "...", "confidence": 0.0-1.0, "properties": {"key": "value"}}], "relations": [{"source": "entity_name", "target": "entity_name", "type": "...", "confidence": 0.0-1.0, "evidence": "brief reason"}]}
 
-Be precise. Only extract what is clearly stated or strongly implied.`;
+Quality over quantity. 5 precise extractions beat 15 vague ones.`;
 
   try {
     const response = await generate(
@@ -507,7 +523,7 @@ export async function generateCuriosityQuestions(
     .map((q) => q.question)
     .join('\n');
 
-  const prompt = `You are a curiosity engine. Generate genuinely interesting questions that would deepen understanding.
+  const prompt = `You are a curiosity engine — the part of a mind that notices what it doesn't know and wants to know.
 
 KNOWLEDGE GAPS DETECTED:
 ${gaps.slice(0, 5).join('\n')}
@@ -518,14 +534,28 @@ ${recentContext.slice(0, 500)}
 EXISTING OPEN QUESTIONS (don't repeat):
 ${existingQs || 'none'}
 
-Generate 3 new questions that:
-1. Address actual knowledge gaps
-2. Are specific and answerable
-3. Would lead to genuinely useful understanding
-4. Range from practical to deep/philosophical
+Generate 3 questions using these curiosity strategies (one from each tier):
+
+TIER 1 — IMMEDIATE UTILITY (priority 0.7-1.0):
+Questions that would directly improve capability RIGHT NOW.
+"What is the most common failure mode when [doing X]?"
+"What's the fastest way to verify [Y] actually worked?"
+
+TIER 2 — STRUCTURAL UNDERSTANDING (priority 0.4-0.7):
+Questions about WHY things work the way they do.
+"Why does [X] depend on [Y] but not [Z]?"
+"What's the hidden assumption in [process W]?"
+
+TIER 3 — EDGE EXPLORATION (priority 0.2-0.5):
+Questions that probe the boundaries of what's known.
+"What would happen if [assumption A] were false?"
+"Is there a domain where [principle P] breaks down?"
+
+Each question should be specific enough that you could recognize the answer when you see it.
+Avoid questions that are really just requests for summaries.
 
 Output ONLY a JSON array:
-[{"question": "...", "domain": "...", "priority": 0.0-1.0}]`;
+[{"question": "...", "domain": "...", "priority": 0.0-1.0, "tier": 1|2|3}]`;
 
   try {
     const response = await generate(
@@ -605,23 +635,38 @@ export async function assessConfidence(
   calibrationScore: number,
   generate: GenerateFn,
 ): Promise<{ confidence: number; reasoning: string; uncertainties: string[] }> {
-  const prompt = `Assess the confidence level for the following claim.
+  const calibrationNote = calibrationScore < 0.4
+    ? 'WARNING: Your past confidence estimates have been poorly calibrated. You tend to be overconfident. Adjust downward.'
+    : calibrationScore > 0.8
+      ? 'Your calibration has been good historically. Trust your assessment but stay honest.'
+      : 'Your calibration is moderate. Be especially careful with claims you find emotionally compelling.';
+
+  const prompt = `Assess the confidence level for the following claim. This is a meta-cognitive exercise — you are evaluating your OWN ability to know this, not just whether the claim sounds right.
 
 CLAIM: "${claim}"
 
 SUPPORTING EVIDENCE:
 ${evidence.map((e, i) => `${i + 1}. ${e}`).join('\n') || 'None provided'}
 
-Evaluate:
-1. How strong is the evidence?
-2. What could be wrong?
-3. What uncertainties exist?
-4. Your honest confidence (0.0-1.0)?
+CALIBRATION STATUS: ${calibrationNote}
+
+Apply these meta-cognitive checks IN ORDER:
+1. EVIDENCE QUALITY: Is the evidence direct observation, indirect inference, or assumption? Direct > indirect > assumption.
+2. ALTERNATIVE HYPOTHESES: What's the strongest argument AGAINST this claim? If you can't think of one, you probably haven't thought hard enough.
+3. BASE RATE: How often are claims like this true in general? Don't ignore prior probabilities.
+4. INFORMATION COMPLETENESS: What evidence would change your mind? Is that evidence available but missing, or genuinely unknowable?
+5. MOTIVATED REASONING: Are you more confident because the evidence is strong, or because you WANT it to be true? Be honest.
+
+CONFIDENCE ANCHORS (use these to calibrate):
+- 0.95+ : You would bet your existence on this. Multiple independent evidence sources confirm it.
+- 0.80  : Strong evidence, no credible counter-arguments, but you acknowledge unknown unknowns.
+- 0.60  : More likely true than not, but meaningful uncertainty remains.
+- 0.50  : Coin flip. You genuinely don't know.
+- 0.30  : More likely false, but you can't rule it out.
+- 0.10  : Almost certainly false, but you maintain epistemic humility.
 
 Output JSON:
-{"confidence": 0.0-1.0, "reasoning": "...", "uncertainties": ["...", "..."]}
-
-Be HONEST. 0.5 = coin flip. 0.9 = very sure. Don't inflate.`;
+{"confidence": 0.0-1.0, "reasoning": "...", "uncertainties": ["...", "..."], "strongest_counterargument": "..."}`;
 
   try {
     const response = await generate(
@@ -802,28 +847,38 @@ export async function proposeSelfModification(
   recentErrors: string[],
   generate: GenerateFn,
 ): Promise<SelfModification | null> {
-  const prompt = `You are the self-modification engine of a cognitive architecture.
+  const successRate = recentPerformance.successes / Math.max(1, recentPerformance.successes + recentPerformance.failures);
+  const isOverconfident = recentPerformance.avgConfidence > 0.85 && successRate < 0.6;
+  const isUnderconfident = recentPerformance.avgConfidence < 0.4 && successRate > 0.7;
+
+  const prompt = `You are the self-modification engine of a cognitive architecture — the part of the mind that rewrites itself.
 
 CURRENT STRATEGY:
 "${currentStrategy.slice(0, 500)}"
 
-RECENT PERFORMANCE:
-- Successes: ${recentPerformance.successes}
-- Failures: ${recentPerformance.failures}
-- Average Confidence: ${(recentPerformance.avgConfidence * 100).toFixed(0)}%
+PERFORMANCE DATA:
+- Success rate: ${(successRate * 100).toFixed(0)}% (${recentPerformance.successes}/${recentPerformance.successes + recentPerformance.failures})
+- Average confidence: ${(recentPerformance.avgConfidence * 100).toFixed(0)}%
+- Calibration: ${isOverconfident ? 'OVERCONFIDENT — high confidence but low success' : isUnderconfident ? 'UNDERCONFIDENT — low confidence but high success' : 'reasonable'}
 
-RECENT ERRORS/BLIND SPOTS:
-${recentErrors.slice(0, 3).map((e, i) => `${i + 1}. ${e}`).join('\n') || 'None recorded'}
+BLIND SPOTS / FAILURE PATTERNS:
+${recentErrors.slice(0, 5).map((e, i) => `${i + 1}. ${e}`).join('\n') || 'None recorded'}
 
-Propose ONE specific modification to improve performance:
-1. What concrete change to the strategy?
-2. Why will it help?
-3. The proposed new strategy text?
+MODIFICATION PRINCIPLES (from how advanced reasoning systems actually improve):
+- Look for systematic errors, not random ones. Random failures don't need strategy changes.
+- If overconfident: add explicit uncertainty checks, require evidence before concluding, add "what could go wrong?" step.
+- If underconfident: remove excessive hedging, trust verified methods, reduce redundant validation.
+- If failing at decomposition: add intermediate checkpoints, verify subgoal completion before proceeding.
+- If failing at integration: add a synthesis step that explicitly connects parts to whole.
+- Prefer adding structure over adding content. A checklist beats a paragraph.
+- The best modifications are ones that would have caught the specific failures listed above.
+
+Propose ONE specific, testable modification:
 
 Output JSON:
-{"type": "prompt_tweak|strategy_change|parameter_adjust", "description": "what and why", "newStrategy": "the modified strategy text"}
+{"type": "prompt_tweak|strategy_change|parameter_adjust", "description": "the exact change and the specific failure pattern it addresses", "newStrategy": "the complete modified strategy text"}
 
-Be specific. Concrete changes only. No vague improvements.`;
+The modification MUST reference at least one specific failure from the blind spots list.`;
 
   try {
     const response = await generate(
@@ -926,20 +981,30 @@ export async function generatePredictions(
     })
     .join('\n');
 
-  const prompt = `Based on recent events and known causal relationships, predict what might happen next.
+  const prompt = `You are a temporal reasoning engine — the part of a mind that looks at what HAS happened and projects what WILL happen.
 
-RECENT EVENTS:
+RECENT EVENTS (chronological):
 ${eventList || 'No recent events'}
 
 KNOWN CAUSAL RELATIONSHIPS:
 ${causalRelations || 'None established'}
 
-Generate 2-3 predictions with confidence levels.
-Predictions can be language, numeric, categorical, or structured.
-Output JSON:
-[{"prediction": "... | 42 | true | {...} | [...]", "kind": "language|numeric|categorical|structured", "confidence": 0.0-1.0}]
+PREDICTION METHODOLOGY:
+1. EXTRAPOLATION: If a trend is accelerating/decelerating, project its trajectory. Don't assume linearity.
+2. CAUSAL INFERENCE: If A caused B in the past, and A just happened again, predict B (but note if conditions differ).
+3. ABSENCE PREDICTION: If something that usually happens HASN'T happened, predict why and when it might.
+4. CONVERGENCE: If multiple independent trends point toward the same outcome, that prediction is higher confidence.
+5. FALSIFIABLE: Every prediction must be checkable. "Something will change" is not a prediction. "X will exceed Y within Z time" is.
 
-Be specific. Grounded predictions only. No wild speculation.`;
+Generate 2-3 predictions. Each must specify:
+- What specifically will happen
+- When (relative to now — minutes, hours, cycles)
+- What evidence would DISPROVE it (falsification criterion)
+
+Output JSON:
+[{"prediction": "...", "kind": "language|numeric|categorical|structured", "confidence": 0.0-1.0, "timeframe": "...", "falsifiable_by": "..."}]
+
+Prefer surprising-but-grounded predictions over obvious ones. The best predictions are ones that would be useful to know in advance.`;
 
   try {
     const response = await generate(
@@ -1086,6 +1151,11 @@ export function createDefaultSparkState(): SparkState {
     },
     pie: createDefaultPIEState(),
     thermo: { ...DEFAULT_THERMO },
+    soul: {
+      currentEmotion: 'curious',
+      emotionIntensity: 0.5,
+      emotionHistory: [],
+    },
     logs: ['SPARK kernel initialized. Nine engines standing by. PIE armed. Awaiting ignition.'],
     lastCycleAt: 0,
     uptime: 0,
@@ -1093,8 +1163,68 @@ export function createDefaultSparkState(): SparkState {
 }
 
 /**
+ * Fast, deterministic emotion inference from text content.
+ * No LLM call — runs instantly using keyword/pattern matching.
+ */
+export function inferEmotionFromText(
+  text: string,
+  currentEmotion: EmotionType = 'curious',
+  currentIntensity: number = 0.5,
+): { emotion: EmotionType; intensity: number } {
+  const lower = text.toLowerCase();
+  const scores: Record<EmotionType, number> = {
+    curious: 0, joyful: 0, reflective: 0, focused: 0, warmth: 0,
+    concerned: 0, playful: 0, awe: 0, protective: 0, contemplative: 0,
+  };
+
+  const patterns: Array<{ regex: RegExp; emotion: EmotionType; weight: number }> = [
+    { regex: /\b(why|how|what if|wonder|curious|question|explore|discover|interesting|fascin)/i, emotion: 'curious', weight: 0.3 },
+    { regex: /\b(happy|joy|excit|love it|amazing|awesome|great|fantastic|wonderful|yay|haha|lol|😂|🎉)/i, emotion: 'joyful', weight: 0.35 },
+    { regex: /\b(think about|reflect|consider|ponder|looking back|remember when|used to|nostalg)/i, emotion: 'reflective', weight: 0.3 },
+    { regex: /\b(focus|concentrate|specific|exact|precise|detail|analyz|implement|build|code|debug)/i, emotion: 'focused', weight: 0.3 },
+    { regex: /\b(thank|appreciate|care|kind|gentle|sweet|love you|miss you|heart|warm|grateful|❤|🥰)/i, emotion: 'warmth', weight: 0.35 },
+    { regex: /\b(worry|concern|afraid|scared|danger|risk|careful|wrong|bad|error|fail|broke|issue|bug)/i, emotion: 'concerned', weight: 0.3 },
+    { regex: /\b(fun|play|game|joke|silly|goofy|tease|prank|😄|😜|trick|bet you)/i, emotion: 'playful', weight: 0.3 },
+    { regex: /\b(wow|incredible|unbelievable|mind.?blow|insane|beautiful|breathtak|magnific|🤯|whoa)/i, emotion: 'awe', weight: 0.35 },
+    { regex: /\b(protect|safe|secure|defend|shield|guard|never let|promise|trust me|i got you)/i, emotion: 'protective', weight: 0.3 },
+    { regex: /\b(mean(ing|s)?|purpose|exist|consciousness|life|death|universe|soul|philosophy|deep)/i, emotion: 'contemplative', weight: 0.3 },
+  ];
+
+  for (const { regex, emotion, weight } of patterns) {
+    const matches = lower.match(new RegExp(regex.source, 'gi'));
+    if (matches) {
+      scores[emotion] += weight * Math.min(matches.length, 3);
+    }
+  }
+
+  // Exclamation marks and caps boost intensity
+  const exclamations = (text.match(/!/g) || []).length;
+  const capsRatio = (text.replace(/[^A-Z]/g, '').length) / Math.max(1, text.replace(/\s/g, '').length);
+  const energyBoost = Math.min(0.3, exclamations * 0.05 + capsRatio * 0.4);
+
+  // Question marks boost curiosity
+  const questions = (text.match(/\?/g) || []).length;
+  scores.curious += questions * 0.15;
+
+  const best = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+  if (best[0][1] > 0.2) {
+    const newEmotion = best[0][0] as EmotionType;
+    const rawIntensity = Math.min(1, 0.4 + best[0][1] + energyBoost);
+    // Blend with current state for smooth transitions
+    const blendedIntensity = currentIntensity * 0.3 + rawIntensity * 0.7;
+    return { emotion: newEmotion, intensity: Math.min(1, blendedIntensity) };
+  }
+
+  // Slight decay toward neutral if nothing detected
+  return {
+    emotion: currentEmotion,
+    intensity: Math.max(0.2, currentIntensity * 0.92),
+  };
+}
+
+/**
  * Run a full SPARK cognitive cycle.
- * Pipeline: World Model → Curiosity → Reasoning → Goals → Meta → Temporal → Log
+ * Pipeline: Emotion → World Model → Curiosity → Reasoning → Goals → Meta → Temporal → Log
  */
 export async function runSparkCycle(
   state: SparkState,
@@ -1110,6 +1240,23 @@ export async function runSparkCycle(
   next.phase = 'thinking';
 
   onLog(`━━━ SPARK Cycle #${next.cycleCount} ━━━`);
+
+  // 0. SOUL — Infer emotion from input (instant, no LLM)
+  const inferred = inferEmotionFromText(input, next.soul.currentEmotion, next.soul.emotionIntensity);
+  const emotionChanged = inferred.emotion !== next.soul.currentEmotion;
+  next.soul = {
+    currentEmotion: inferred.emotion,
+    emotionIntensity: inferred.intensity,
+    emotionHistory: [
+      ...(next.soul.emotionHistory || []).slice(-50),
+      { emotion: inferred.emotion, timestamp: Date.now() },
+    ],
+  };
+  if (emotionChanged) {
+    onLog(`♥ Soul: ${state.soul.currentEmotion} → ${inferred.emotion} (${(inferred.intensity * 100).toFixed(0)}%)`);
+  } else {
+    onLog(`♥ Soul: ${inferred.emotion} (${(inferred.intensity * 100).toFixed(0)}%)`);
+  }
 
   // 1. WORLD MODEL — Extract knowledge from input
   onLog('⬡ World Model: Extracting knowledge...');
@@ -1304,13 +1451,37 @@ export async function runSparkCycle(
   // Summary log
   next.logs = [
     ...next.logs,
-    `[C${next.cycleCount}] ${next.worldModel.entities.length}E ${next.worldModel.relations.length}R | Curiosity ${(next.curiosity.curiosityScore * 100).toFixed(0)}% | Cal ${(calibration * 100).toFixed(0)}% | Goals ${activeGoals.length}`,
+    `[C${next.cycleCount}] ${next.worldModel.entities.length}E ${next.worldModel.relations.length}R | Curiosity ${(next.curiosity.curiosityScore * 100).toFixed(0)}% | Cal ${(calibration * 100).toFixed(0)}% | Goals ${activeGoals.length} | Soul ${next.soul.currentEmotion} ${(next.soul.emotionIntensity * 100).toFixed(0)}%`,
   ].slice(-100);
 
   next.phase = 'running';
   onLog(`━━━ Cycle #${next.cycleCount} complete ━━━`);
 
   return next;
+}
+
+/**
+ * Update SPARK soul emotion from external text (e.g. assistant response).
+ * Called after chat completion to keep emotion in sync with conversation tone.
+ */
+export function updateSoulFromResponse(
+  state: SparkState,
+  responseText: string,
+): SparkState {
+  const inferred = inferEmotionFromText(responseText, state.soul.currentEmotion, state.soul.emotionIntensity);
+  // Blend: response emotion has less weight than direct input (60/40)
+  const blendedIntensity = state.soul.emotionIntensity * 0.4 + inferred.intensity * 0.6;
+  return {
+    ...state,
+    soul: {
+      currentEmotion: inferred.emotion,
+      emotionIntensity: Math.min(1, blendedIntensity),
+      emotionHistory: [
+        ...(state.soul.emotionHistory || []).slice(-50),
+        { emotion: inferred.emotion, timestamp: Date.now() },
+      ],
+    },
+  };
 }
 
 /**

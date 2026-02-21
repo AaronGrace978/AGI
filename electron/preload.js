@@ -162,6 +162,9 @@ contextBridge.exposeInMainWorld('api', {
     webFetch: (url, options) => ipcRenderer.invoke('agent:webFetch', url, options),
     webSearch: (query, options) => ipcRenderer.invoke('agent:webSearch', query, options),
     webScreenshot: (url) => ipcRenderer.invoke('agent:webScreenshot', url),
+    elevenlabsTts: (text, options) => ipcRenderer.invoke('agent:elevenlabsTts', text, options),
+    elevenlabsGenerateMusic: (prompt, options) => ipcRenderer.invoke('agent:elevenlabsGenerateMusic', prompt, options),
+    elevenlabsSing: (options) => ipcRenderer.invoke('agent:elevenlabsSing', options),
 
     // Screen Vision (The Eyes)
     screenshotDesktop: (options) => ipcRenderer.invoke('agent:screenshotDesktop', options),
@@ -196,6 +199,8 @@ contextBridge.exposeInMainWorld('api', {
     replayLoadRun: (runId) => ipcRenderer.invoke('agent:replayLoadRun', runId),
     setRuntimeControls: (partial) => ipcRenderer.invoke('agent:setRuntimeControls', partial),
     getRuntimeControls: () => ipcRenderer.invoke('agent:getRuntimeControls'),
+    operatorLoopGet: () => ipcRenderer.invoke('agent:operatorLoop:get'),
+    operatorLoopSetGoal: (contract) => ipcRenderer.invoke('agent:operatorLoop:setGoal', contract),
 
     // AI-powered task planning & execution
     planAndExecute: (request) => ipcRenderer.send('agent:planAndExecute', request),
@@ -259,6 +264,22 @@ contextBridge.exposeInMainWorld('api', {
   spark: {
     getState: () => ipcRenderer.invoke('spark:getState'),
     saveState: (state) => ipcRenderer.invoke('spark:saveState', state),
+  },
+
+  // ─── NeuralCore (Physics-Informed Neural Engine) ──────
+  neural: {
+    getStatus: () => ipcRenderer.invoke('neural:status'),
+    predict: (params) => ipcRenderer.invoke('neural:predict', params),
+    train: (params) => ipcRenderer.invoke('neural:train', params),
+    getModelStats: () => ipcRenderer.invoke('neural:modelStats'),
+    generateTrajectory: (params) => ipcRenderer.invoke('neural:generateTrajectory', params),
+    loadModels: (checkpoint) => ipcRenderer.invoke('neural:loadModels', checkpoint),
+    plan: (params) => ipcRenderer.invoke('neural:plan', params),
+    onTrainingProgress: (cb) => {
+      const h = (_e, d) => cb(d);
+      ipcRenderer.on('neural:trainingProgress', h);
+      return () => ipcRenderer.removeListener('neural:trainingProgress', h);
+    },
   },
 
   // ─── Goals (Persistent) ──────────────────────────────────
