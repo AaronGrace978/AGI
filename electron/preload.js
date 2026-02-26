@@ -116,9 +116,10 @@ contextBridge.exposeInMainWorld('api', {
     searchVector: (query, topK, typeFilter) => ipcRenderer.invoke('memory:searchVector', query, topK, typeFilter),
     vectorStats: () => ipcRenderer.invoke('memory:vectorStats'),
     listVectors: (options) => ipcRenderer.invoke('memory:listVectors', options),
-    export: () => ipcRenderer.invoke('memory:export'),
+    export: (options) => ipcRenderer.invoke('memory:export', options),
     import: (importPath) => ipcRenderer.invoke('memory:import', importPath),
     listExports: () => ipcRenderer.invoke('memory:listExports'),
+    ingestDocument: (filePath) => ipcRenderer.invoke('memory:ingestDocument', filePath),
   },
 
   // ─── LLM (Non-Streaming) ─────────────────────────────
@@ -197,6 +198,9 @@ contextBridge.exposeInMainWorld('api', {
     ledgerReadRun: (runId) => ipcRenderer.invoke('agent:ledgerReadRun', runId),
     replayListRuns: () => ipcRenderer.invoke('agent:replayListRuns'),
     replayLoadRun: (runId) => ipcRenderer.invoke('agent:replayLoadRun', runId),
+    handsDoctor: () => ipcRenderer.invoke('agent:handsDoctor'),
+    handsReplayCheck: (runId) => ipcRenderer.invoke('agent:handsReplayCheck', runId),
+    handsExportPrimeOS: (opts) => ipcRenderer.invoke('agent:handsExportPrimeOS', opts),
     setRuntimeControls: (partial) => ipcRenderer.invoke('agent:setRuntimeControls', partial),
     getRuntimeControls: () => ipcRenderer.invoke('agent:getRuntimeControls'),
     operatorLoopGet: () => ipcRenderer.invoke('agent:operatorLoop:get'),
@@ -264,6 +268,24 @@ contextBridge.exposeInMainWorld('api', {
   spark: {
     getState: () => ipcRenderer.invoke('spark:getState'),
     saveState: (state) => ipcRenderer.invoke('spark:saveState', state),
+  },
+
+  // ─── Orchestrator (PrimeOS service spine) ─────────────
+  orchestrator: {
+    status: () => ipcRenderer.invoke('orchestrator:status'),
+    missionSnapshot: (options) => ipcRenderer.invoke('orchestrator:missionSnapshot', options),
+    setProfile: (profile) => ipcRenderer.invoke('orchestrator:setProfile', profile),
+    setRunbookRole: (role) => ipcRenderer.invoke('orchestrator:setRunbookRole', role),
+    command: (command) => ipcRenderer.invoke('orchestrator:command', command),
+    listEvents: (options) => ipcRenderer.invoke('orchestrator:listEvents', options),
+    exportEvents: (options) => ipcRenderer.invoke('orchestrator:exportEvents', options),
+    prepareRunbookAction: (actionId) => ipcRenderer.invoke('orchestrator:prepareRunbookAction', actionId),
+    runbookAction: (actionId, options) => ipcRenderer.invoke('orchestrator:runbookAction', actionId, options),
+    onEvent: (cb) => {
+      const h = (_e, d) => cb(d);
+      ipcRenderer.on('orchestrator:event', h);
+      return () => ipcRenderer.removeListener('orchestrator:event', h);
+    },
   },
 
   // ─── NeuralCore (Physics-Informed Neural Engine) ──────

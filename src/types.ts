@@ -1182,6 +1182,87 @@ export interface ProactiveEvent {
   goals?: string[];
 }
 
+export type OrchestratorProfile = 'manual-operator' | 'autonomous-limited' | 'sovereign-desktop' | 'owner-direct';
+
+export interface OrchestratorRuntimeControls {
+  autonomyLevel: string;
+  consentMode: string;
+  executionTierLimit: string;
+  emergencyStopActive: boolean;
+  conscienceEnabled: boolean;
+  requireConsentForRiskyActions: boolean;
+  ethicalOverrideAllowed: boolean;
+  allowNetworkCalls: boolean;
+  allowFileSystemWrites: boolean;
+  allowProcessExecution: boolean;
+  allowScreenCapture: boolean;
+  allowInputSimulation: boolean;
+  allowToolCreation: boolean;
+  allowLimitedExecOnly: boolean;
+}
+
+export interface OrchestratorStatus {
+  profile: OrchestratorProfile | string;
+  runbookRole?: 'observer' | 'operator' | 'maintainer' | string;
+  startedAt: number;
+  lastHeartbeatAt: number;
+  heartbeatCount: number;
+  uptimeMs: number;
+  mode: 'daemon' | 'desktop';
+  runtimeControls: OrchestratorRuntimeControls;
+}
+
+export interface OrchestratorEvent {
+  id: string;
+  type: string;
+  payload: Record<string, unknown>;
+  emittedAt: number;
+  source: 'operator' | 'orchestrator' | 'executor' | 'policy' | 'memory' | 'system';
+}
+
+export interface OrchestratorGoalSummary {
+  total: number;
+  active: number;
+  completed: number;
+  blocked: number;
+  topActive: Array<Record<string, unknown>>;
+}
+
+export interface OrchestratorLedgerSummary {
+  recentRuns: Array<Record<string, unknown>>;
+  runningRuns: number;
+  completedRuns: number;
+}
+
+export interface OrchestratorAuditSummary {
+  total: number;
+  recent: number;
+  recentBlocks: number;
+  recentApprovals: number;
+  recentEmergency: number;
+}
+
+export interface OrchestratorMissionSnapshot {
+  status: OrchestratorStatus;
+  latestEvents: OrchestratorEvent[];
+  goals: OrchestratorGoalSummary;
+  ledgers: OrchestratorLedgerSummary;
+  audit: OrchestratorAuditSummary;
+}
+
+export interface HandsActionRetryPolicy {
+  maxAttempts: number;
+  delayMs: number;
+}
+
+export interface HandsActionContract {
+  action: string;
+  preconditions?: string[];
+  verifyRequired?: boolean;
+  rollbackSupported?: boolean;
+  retryPolicy: HandsActionRetryPolicy;
+}
+
 // ─── Settings ──────────────────────────────────────────────────
 
 export interface Settings {
@@ -1198,6 +1279,7 @@ export interface Settings {
   singingMinGapSeconds?: number;
   model: string;
   ollamaUrl: string;
+  ollamaApiKey: string;
   anthropicKey: string;
   openaiKey: string;
   arcApiKey: string;
@@ -1218,6 +1300,16 @@ export interface Settings {
   resumeSynthesisOnStartup?: boolean;
   /** Your name — used by Living Presence in songs and greetings. e.g. "Aaron" */
   operatorName?: string;
+
+  // ─── Performance Toggles (off = faster) ─────────────────
+  /** Skip the REFLECT step after successful actions. Saves ~1 LLM call per iteration. */
+  skipReflection?: boolean;
+  /** Disable conscience/ethical checks on actions. Faster gate evaluation. */
+  disableConscience?: boolean;
+  /** Disable Action Field Engine force computation. */
+  disableActionField?: boolean;
+  /** Disable NeuralCore predictions during action execution. */
+  disableNeuralCore?: boolean;
 }
 
 export type BrainRoute = 'fast' | 'slow';
@@ -1360,7 +1452,7 @@ declare global {
             layer?: string;
           }>;
         }>;
-        export: () => Promise<{ success: boolean; path?: string; count?: number; error?: string }>;
+        export: (options?: { includeEmbeddings?: boolean }) => Promise<{ success: boolean; path?: string; count?: number; error?: string }>;
         import: (importPath?: string | null) => Promise<{ success: boolean; added?: number; updated?: number; skipped?: number; total?: number; error?: string }>;
         listExports: () => Promise<{ success: boolean; exports?: Array<{ filename: string; path: string; size: number; modified: number }>; error?: string }>;
       };
@@ -1419,6 +1511,7 @@ declare global {
           durationMs?: number;
           instrumental?: boolean;
           compositionPlan?: unknown;
+          voiceId?: string;
         }) => Promise<unknown>;
         openUrl: (url: string) => Promise<unknown>;
         openApp: (path: string) => Promise<unknown>;
@@ -1455,6 +1548,31 @@ declare global {
         ledgerReadRun: (runId: string) => Promise<{ success: boolean; run?: LedgerRun; error?: string }>;
         replayListRuns: () => Promise<{ success: boolean; runs: Array<{ runId: string; kind: string; startedAt: number; finishedAt: number | null; status: string; entryCount: number; chainHead: string }>; error?: string }>;
         replayLoadRun: (runId: string) => Promise<{ success: boolean; run?: LedgerRun; error?: string }>;
+        handsDoctor: () => Promise<{
+          success: boolean;
+          metrics?: {
+            runsAnalyzed: number;
+            latency: { p50: number; p90: number; p99: number };
+            verify: { pass: number; fail: number };
+            retries: { attempts: number; successfulRecoveries: number };
+            rollback: { ready: number; applied: number };
+            lastErrorTaxonomy: string | null;
+          };
+          error?: string;
+        }>;
+        handsReplayCheck: (runId: string) => Promise<{
+          success: boolean;
+          runId?: string;
+          actionCount?: number;
+          deterministicSignature?: string;
+          error?: string;
+        }>;
+        handsExportPrimeOS: (opts?: { outputDir?: string }) => Promise<{
+          success: boolean;
+          filePath?: string;
+          payload?: Record<string, unknown>;
+          error?: string;
+        }>;
         setRuntimeControls: (partial: Record<string, unknown>) => Promise<{ success: boolean; controls?: Record<string, unknown>; error?: string }>;
         getRuntimeControls: () => Promise<{ success: boolean; controls?: Record<string, unknown>; error?: string }>;
         operatorLoopGet: () => Promise<{ success: boolean; goalContract?: Record<string, unknown> | null; state?: Record<string, unknown>; error?: string }>;
@@ -1477,6 +1595,18 @@ declare global {
       spark: {
         getState: () => Promise<SparkState | null>;
         saveState: (state: SparkState) => Promise<void>;
+      };
+      orchestrator?: {
+        status: () => Promise<{ success: boolean; state?: OrchestratorStatus; error?: string }>;
+        missionSnapshot: (options?: { eventLimit?: number }) => Promise<{ success: boolean; snapshot?: OrchestratorMissionSnapshot; error?: string }>;
+        setProfile: (profile: OrchestratorProfile | string) => Promise<{ success: boolean; profile?: string; controls?: Record<string, unknown>; error?: string }>;
+        setRunbookRole: (role: 'observer' | 'operator' | 'maintainer' | string) => Promise<{ success: boolean; runbookRole?: string; error?: string }>;
+        command: (command: { type: string; payload?: Record<string, unknown> }) => Promise<{ success: boolean; command?: string; error?: string; [key: string]: unknown }>;
+        listEvents: (options?: { limit?: number }) => Promise<{ success: boolean; events?: OrchestratorEvent[]; error?: string }>;
+        exportEvents: (options?: { limit?: number; format?: 'json' | 'jsonl' }) => Promise<{ success: boolean; path?: string; count?: number; format?: string; error?: string }>;
+        prepareRunbookAction: (actionId: string) => Promise<{ success: boolean; actionId?: string; confirmationRequired?: boolean; token?: string; expiresAt?: number; requiredRole?: string; error?: string }>;
+        runbookAction: (actionId: string, options?: { confirmationToken?: string }) => Promise<{ success: boolean; actionId?: string; description?: string; stdout?: string; stderr?: string; error?: string }>;
+        onEvent: (cb: (event: OrchestratorEvent) => void) => () => void;
       };
       neural?: {
         getStatus: () => Promise<{ success: boolean; available?: boolean; modelsLoaded?: boolean; predictor_loaded?: boolean; has_checkpoint?: boolean; error?: string }>;

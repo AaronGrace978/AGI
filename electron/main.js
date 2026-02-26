@@ -14,7 +14,7 @@ for (const _ep of _envPaths) {
   }
 }
 if (!process.env.OLLAMA_API_KEY) {
-  console.warn('[Config] WARNING: OLLAMA_API_KEY not found in .env — Cloud models will not work');
+  console.warn('[Config] OLLAMA_API_KEY not found in .env — you can also set it in Settings for cloud usage');
 }
 
 const { app, BrowserWindow, ipcMain, screen, shell, clipboard, desktopCapturer, dialog } = require('electron');
@@ -23,6 +23,17 @@ const fs = require('fs');
 const { exec, spawn } = require('child_process');
 const os = require('os');
 const crypto = require('crypto');
+const { executeSingleAction: executeHandsAction } = require('./hands/executor');
+const { evaluateActionGate: evaluateHandsActionGate, mapActionToPolicyGate } = require('./hands/policy');
+const { verifyActionOutcome } = require('./hands/verifier');
+const { runRecoveryPlan } = require('./hands/recovery');
+const { createRunTelemetry, avgActionMs, makeEmitTelemetryStep } = require('./hands/telemetry');
+const { createRollbackManager } = require('./hands/rollback');
+const { normalizeDecisionPayload, isParallelSafeAction: isPlannerParallelSafe } = require('./hands/planner');
+const { makeActionContractRegistry, defaultRetryPolicy } = require('./hands/contracts');
+const { applyOwnerDirectProfile } = require('./hands/controller');
+const { appendActionLedger } = require('./hands/ledger');
+const { exportPrimeOSRuntimeBundle } = require('./hands/primeos-adapter');
 
 const isDev = !app.isPackaged;
 
@@ -57,6 +68,9 @@ try {
   app.setPath('cache', forcedCacheDir);
   // Also hint Chromium directly (must be set before ready).
   app.commandLine.appendSwitch('disk-cache-dir', forcedCacheDir);
+  // Prevent GPU shader disk-cache "Access is denied" errors on Windows.
+  // Shaders recompile on launch (~ms for a simple UI) — no visual impact.
+  app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
 } catch (e) {
   console.warn('[Cache] Failed to set cache dir:', e?.message || e);
 }
@@ -69,6 +83,8 @@ try {
 // - Env var: AGI_PRIME_DISABLE_GPU=1
 // - CLI flag: --safe-mode
 const SAFE_MODE = process.argv.includes('--safe-mode') || process.env.AGI_PRIME_DISABLE_GPU === '1';
+const DAEMON_MODE = process.argv.includes('--daemon') || process.env.AGI_PRIME_DAEMON === '1';
+const DEFAULT_ORCHESTRATOR_PROFILE = process.env.AGI_PRIME_PROFILE || (DAEMON_MODE ? 'autonomous-limited' : 'sovereign-desktop');
 if (SAFE_MODE) {
   try {
     console.warn('[SafeMode] Disabling hardware acceleration');
@@ -99,7 +115,9 @@ app.on('render-process-gone', (_event, _webContents, details) => {
 
 let mainWindow = null;
 const pendingConsentRequests = new Map();
+const pendingRunbookConfirmations = new Map();
 let rollbackRegistry = null;
+let auditLog = null;
 
 // ─── Data Persistence ──────────────────────────────────────────
 const dataDir = path.join(app.getPath('userData'), 'agi-prime-data');
@@ -113,6 +131,9 @@ const agiScoreFile = path.join(dataDir, 'agi-score.json');
 const rollbackRegistryFile = path.join(dataDir, 'rollback-registry.json');
 const rollbackBackupDir = path.join(dataDir, 'rollback-backups');
 const ledgerDir = path.join(dataDir, 'run-ledgers');
+const auditLogFile = path.join(dataDir, 'audit-log.json');
+const orchestratorEventsFile = path.join(dataDir, 'orchestrator-events.jsonl');
+const orchestratorExportDir = path.join(dataDir, 'orchestrator-exports');
 const operatorProfileFile = path.join(dataDir, 'operator-profile.json');
 const operatorDir = path.join(dataDir, 'operator');
 const operatorGoalFile = path.join(operatorDir, 'goal.json');
@@ -120,8 +141,12 @@ const operatorStateFile = path.join(operatorDir, 'state.json');
 const conversationsDir = path.join(dataDir, 'conversations');
 const conversationsIndexFile = path.join(conversationsDir, 'index.json');
 const conversationsStateFile = path.join(conversationsDir, 'state.json');
-const inputHelperPath = path.join(__dirname, 'input-helper.ps1');
-const neuralCoreScriptsDir = path.join(__dirname, '..', 'scripts');
+const inputHelperPath = isDev
+  ? path.join(__dirname, 'input-helper.ps1')
+  : path.join(process.resourcesPath, 'electron', 'input-helper.ps1');
+const neuralCoreScriptsDir = isDev
+  ? path.join(__dirname, '..', 'scripts')
+  : path.join(process.resourcesPath, 'scripts');
 const neuralDataDir = path.join(dataDir, 'neuralcore');
 
 if (!fs.existsSync(dataDir)) {
@@ -141,6 +166,12 @@ if (!fs.existsSync(operatorDir)) {
 }
 if (!fs.existsSync(neuralDataDir)) {
   fs.mkdirSync(neuralDataDir, { recursive: true });
+}
+if (!fs.existsSync(orchestratorEventsFile)) {
+  fs.writeFileSync(orchestratorEventsFile, '', 'utf-8');
+}
+if (!fs.existsSync(orchestratorExportDir)) {
+  fs.mkdirSync(orchestratorExportDir, { recursive: true });
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -294,6 +325,7 @@ const NEURAL_ENHANCED_ACTIONS = new Set([
 ]);
 
 async function neuralEnhanceAction(action, params, recentSteps) {
+  if (settings.disableNeuralCore) return null;
   if (!neuralBridge?.available || !neuralBridge.modelsLoaded) return null;
   if (!NEURAL_ENHANCED_ACTIONS.has(action)) return null;
 
@@ -417,7 +449,27 @@ function saveJSON(filePath, data) {
   }
 }
 
+// ─── Debounced Vector Store Writes ─────────────────────────────
+// The vector store is the largest persisted file. NightMind and other subsystems
+// can call storeVectorMemory many times in a single cycle (e.g. 8 stores during
+// one reflection). Debouncing coalesces those into a single disk write.
+let _pendingVectorWrite = false;
+
+function markVectorStoreDirty() {
+  _pendingVectorWrite = true;
+}
+
+function flushVectorStore() {
+  if (_pendingVectorWrite) {
+    saveJSON(vectorFile, vectorStore);
+    _pendingVectorWrite = false;
+  }
+}
+
+setInterval(flushVectorStore, 3000);
+
 rollbackRegistry = loadJSON(rollbackRegistryFile, { entries: [], version: 1 });
+auditLog = loadJSON(auditLogFile, { entries: [], version: 1 });
 let operatorLoopState = loadJSON(operatorStateFile, {
   active: false,
   currentGoal: '',
@@ -443,6 +495,149 @@ function updateOperatorLoopState(patch = {}) {
 
 function saveRollbackRegistry() {
   saveJSON(rollbackRegistryFile, rollbackRegistry);
+}
+
+function appendAuditEvent(kind, action, detail, extra = {}) {
+  try {
+    if (!auditLog || !Array.isArray(auditLog.entries)) {
+      auditLog = { entries: [], version: 1 };
+    }
+    const entry = {
+      id: `audit_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      kind,
+      action,
+      detail: String(detail || '').slice(0, 1000),
+      timestamp: Date.now(),
+      ...extra,
+    };
+    auditLog.entries.push(entry);
+    auditLog.entries = auditLog.entries.slice(-4000);
+    saveJSON(auditLogFile, auditLog);
+  } catch (e) { console.error('[Audit] Failed to save audit log:', e.message); }
+}
+
+function emitOrchestratorEvent(type, payload = {}, source = 'orchestrator') {
+  try {
+    const entry = {
+      id: `orc_evt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      type: String(type || 'unknown'),
+      payload: payload && typeof payload === 'object' ? payload : {},
+      emittedAt: Date.now(),
+      source,
+    };
+    fs.appendFileSync(orchestratorEventsFile, `${JSON.stringify(entry)}\n`, 'utf-8');
+    mainWindow?.webContents.send('orchestrator:event', entry);
+    return entry;
+  } catch (_) {
+    return null;
+  }
+}
+
+function listOrchestratorEvents(limit = 200) {
+  try {
+    if (!fs.existsSync(orchestratorEventsFile)) return [];
+    const text = fs.readFileSync(orchestratorEventsFile, 'utf-8');
+    const lines = text.split(/\r?\n/).filter(Boolean);
+    const parsed = lines
+      .map((line) => {
+        try { return JSON.parse(line); } catch { return null; }
+      })
+      .filter(Boolean);
+    const safeLimit = Math.max(1, Math.min(5000, Number(limit) || 200));
+    return parsed.slice(-safeLimit);
+  } catch (_) {
+    return [];
+  }
+}
+
+function exportOrchestratorEvents(options = {}) {
+  const limit = Math.max(1, Math.min(20000, Number(options.limit ?? 5000)));
+  const format = String(options.format || 'json').toLowerCase() === 'jsonl' ? 'jsonl' : 'json';
+  const entries = listOrchestratorEvents(limit);
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const filename = `orchestrator-events-${stamp}.${format}`;
+  const outPath = path.join(orchestratorExportDir, filename);
+  const content = format === 'jsonl'
+    ? `${entries.map((e) => JSON.stringify(e)).join('\n')}${entries.length > 0 ? '\n' : ''}`
+    : JSON.stringify(entries, null, 2);
+  fs.writeFileSync(outPath, content, 'utf-8');
+  return { path: outPath, count: entries.length, format };
+}
+
+function summarizeAuditEntries(limit = 200) {
+  const entries = Array.isArray(auditLog?.entries) ? auditLog.entries.slice(-Math.max(1, limit)) : [];
+  return {
+    total: Array.isArray(auditLog?.entries) ? auditLog.entries.length : 0,
+    recent: entries.length,
+    recentBlocks: entries.filter((e) => e.kind === 'gate_block').length,
+    recentApprovals: entries.filter((e) => e.kind === 'gate_pass').length,
+    recentEmergency: entries.filter((e) => e.kind === 'emergency_stop' || e.kind === 'emergency_clear').length,
+  };
+}
+
+const ORCHESTRATOR_RUNBOOK_ACTIONS = {
+  service_status: {
+    command: 'systemctl status agiprime-orchestrator.service --no-pager',
+    description: 'Read orchestrator service status',
+    highImpact: false,
+    requiredRole: 'observer',
+  },
+  service_restart: {
+    command: 'systemctl restart agiprime-orchestrator.service',
+    description: 'Restart orchestrator service',
+    highImpact: true,
+    requiredRole: 'operator',
+  },
+  logs_tail: {
+    command: 'journalctl -u agiprime-orchestrator.service -n 120 --no-pager',
+    description: 'Tail orchestrator logs',
+    highImpact: false,
+    requiredRole: 'observer',
+  },
+  apt_update: {
+    command: 'apt-get update',
+    description: 'Refresh apt package index',
+    highImpact: true,
+    requiredRole: 'maintainer',
+  },
+  disk_health: {
+    command: 'df -h',
+    description: 'Show disk usage',
+    highImpact: false,
+    requiredRole: 'observer',
+  },
+  memory_health: {
+    command: 'free -h',
+    description: 'Show memory usage',
+    highImpact: false,
+    requiredRole: 'observer',
+  },
+};
+
+function roleRank(role) {
+  if (role === 'maintainer') return 3;
+  if (role === 'operator') return 2;
+  return 1;
+}
+
+function issueRunbookConfirmation(actionId, ttlMs = 30000) {
+  const token = `rbcf_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const expiresAt = Date.now() + ttlMs;
+  pendingRunbookConfirmations.set(token, {
+    actionId,
+    expiresAt,
+  });
+  return { token, expiresAt };
+}
+
+function consumeRunbookConfirmation(token, actionId) {
+  if (!token || !pendingRunbookConfirmations.has(token)) return false;
+  const entry = pendingRunbookConfirmations.get(token);
+  pendingRunbookConfirmations.delete(token);
+  if (!entry) return false;
+  if (entry.actionId !== actionId) return false;
+  if (Date.now() > Number(entry.expiresAt || 0)) return false;
+  return true;
 }
 
 function normalizeRollbackEntries() {
@@ -556,7 +751,7 @@ function listLedgerRuns() {
         entryCount: parsed.integrity?.entryCount || parsed.entries?.length || 0,
         chainHead: parsed.integrity?.chainHead || '',
       });
-    } catch (_) {}
+    } catch (e) { console.error('[Ledger] Failed to parse run file:', f, e.message); }
   }
   return runs.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
 }
@@ -575,6 +770,7 @@ const DEFAULT_SETTINGS = {
   singingMinGapSeconds: 300,
   model: process.env.OLLAMA_MODEL || 'llama3.2',
   ollamaUrl: process.env.OLLAMA_URL || 'http://localhost:11434',
+  ollamaApiKey: process.env.OLLAMA_API_KEY || '',
   anthropicKey: '',
   openaiKey: '',
   arcApiKey: '',
@@ -681,6 +877,10 @@ if (process.env.OLLAMA_MODEL) {
     console.log(`[Config] .env OLLAMA_MODEL ignored because provider="${settings.provider}"`);
   }
 }
+if (process.env.OLLAMA_API_KEY) {
+  settings.ollamaApiKey = process.env.OLLAMA_API_KEY;
+  console.log('[Config] .env override → ollamaApiKey loaded');
+}
 if (process.env.ANTHROPIC_API_KEY) {
   settings.anthropicKey = process.env.ANTHROPIC_API_KEY;
   console.log(`[Config] .env override → anthropicKey loaded`);
@@ -718,6 +918,63 @@ if (settings.provider === 'anthropic') {
     console.log(`[Config] Updated deprecated Anthropic model to "${settings.model}"`);
   }
 }
+// ─── AGI PrimeOS detection ──────────────────────────────────────
+// When running on AGI PrimeOS, read /etc/agiprimeos/providers.conf
+// for Ollama defaults and optional cloud API keys set during first boot.
+const fs_sync = require('fs');
+const PRIMEOS_RELEASE = '/etc/os-release';
+const PRIMEOS_PROVIDERS = '/etc/agiprimeos/providers.conf';
+
+let isAGIPrimeOS = false;
+try {
+  if (fs_sync.existsSync(PRIMEOS_RELEASE)) {
+    const osrel = fs_sync.readFileSync(PRIMEOS_RELEASE, 'utf8');
+    isAGIPrimeOS = osrel.includes('ID=agiprimeos');
+  }
+} catch (e) { console.warn('[PrimeOS] Could not read OS release file:', e.message); }
+
+if (isAGIPrimeOS) {
+  console.log('[PrimeOS] Running on AGI PrimeOS');
+  settings.provider = settings.provider || 'ollama';
+  settings.ollamaUrl = settings.ollamaUrl || 'http://localhost:11434';
+
+  try {
+    if (fs_sync.existsSync(PRIMEOS_PROVIDERS)) {
+      const lines = fs_sync.readFileSync(PRIMEOS_PROVIDERS, 'utf8').split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const [key, ...rest] = trimmed.split('=');
+        const val = rest.join('=').trim();
+        if (!val) continue;
+
+        switch (key.trim()) {
+          case 'OLLAMA_HOST':
+            settings.ollamaUrl = val;
+            break;
+          case 'OLLAMA_MODEL':
+            if (settings.provider === 'ollama') settings.model = val;
+            break;
+          case 'OLLAMA_API_KEY':
+            settings.ollamaApiKey = val;
+            console.log('[PrimeOS] Ollama API key loaded from providers.conf');
+            break;
+          case 'ANTHROPIC_API_KEY':
+            settings.anthropicKey = val;
+            console.log('[PrimeOS] Anthropic API key loaded from providers.conf');
+            break;
+          case 'OPENAI_API_KEY':
+            settings.openaiKey = val;
+            console.log('[PrimeOS] OpenAI API key loaded from providers.conf');
+            break;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[PrimeOS] Could not read providers.conf:', e?.message);
+  }
+}
+
 // Vision model — auto-configure from env or detect VL model on Ollama
 if (process.env.OLLAMA_VISION_MODEL) {
   settings.visionProvider = 'ollama';
@@ -725,20 +982,91 @@ if (process.env.OLLAMA_VISION_MODEL) {
   console.log(`[Config] .env override → visionModel = "${settings.visionProvider}/${settings.visionModel}"`);
 }
 const runtimeControls = {
-  autonomyLevel: 'sovereign',
-  consentMode: 'ask-first',
+  autonomyLevel: DAEMON_MODE ? 'autonomous' : 'sovereign',
+  consentMode: DAEMON_MODE ? 'auto' : 'ask-first',
   executionTierLimit: 'high-risk',
   emergencyStopActive: false,
   conscienceEnabled: true,
-  requireConsentForRiskyActions: true,
+  requireConsentForRiskyActions: !DAEMON_MODE,
   ethicalOverrideAllowed: true,
-  allowNetworkCalls: settings?.allowNetworkCalls ?? true,
-  allowFileSystemWrites: settings?.allowFileSystemWrites ?? true,
+  allowNetworkCalls: DAEMON_MODE ? false : (settings?.allowNetworkCalls ?? true),
+  allowFileSystemWrites: DAEMON_MODE ? false : (settings?.allowFileSystemWrites ?? true),
   allowProcessExecution: settings?.allowProcessExecution ?? true,
-  allowScreenCapture: settings?.allowScreenCapture ?? true,
-  allowInputSimulation: settings?.allowInputSimulation ?? true,
-  allowToolCreation: settings?.allowToolCreation ?? true,
+  allowScreenCapture: DAEMON_MODE ? false : (settings?.allowScreenCapture ?? true),
+  allowInputSimulation: DAEMON_MODE ? false : (settings?.allowInputSimulation ?? true),
+  allowToolCreation: DAEMON_MODE ? false : (settings?.allowToolCreation ?? true),
+  allowLimitedExecOnly: DAEMON_MODE,
 };
+const orchestratorState = {
+  profile: DEFAULT_ORCHESTRATOR_PROFILE,
+  runbookRole: DAEMON_MODE ? 'operator' : 'maintainer',
+  startedAt: Date.now(),
+  lastHeartbeatAt: Date.now(),
+  heartbeatCount: 0,
+};
+
+function applyOrchestratorProfile(profile) {
+  const normalized = String(profile || '').trim().toLowerCase();
+  if (normalized === 'owner-direct') {
+    Object.assign(runtimeControls, applyOwnerDirectProfile(runtimeControls));
+    orchestratorState.profile = 'owner-direct';
+    return;
+  }
+
+  if (normalized === 'manual-operator') {
+    Object.assign(runtimeControls, {
+      autonomyLevel: 'manual',
+      consentMode: 'manual',
+      requireConsentForRiskyActions: true,
+      allowNetworkCalls: false,
+      allowFileSystemWrites: false,
+      allowProcessExecution: false,
+      allowScreenCapture: false,
+      allowInputSimulation: false,
+      allowToolCreation: false,
+      allowLimitedExecOnly: true,
+      executionTierLimit: 'read-only',
+    });
+    orchestratorState.profile = 'manual-operator';
+    return;
+  }
+
+  if (normalized === 'autonomous-limited') {
+    Object.assign(runtimeControls, {
+      autonomyLevel: 'autonomous',
+      consentMode: 'auto',
+      requireConsentForRiskyActions: false,
+      allowNetworkCalls: false,
+      allowFileSystemWrites: false,
+      allowProcessExecution: true,
+      allowScreenCapture: false,
+      allowInputSimulation: false,
+      allowToolCreation: false,
+      allowLimitedExecOnly: true,
+      executionTierLimit: 'high-risk',
+    });
+    orchestratorState.profile = 'autonomous-limited';
+    return;
+  }
+
+  Object.assign(runtimeControls, {
+    autonomyLevel: 'sovereign',
+    consentMode: 'ask-first',
+    requireConsentForRiskyActions: true,
+    allowNetworkCalls: settings?.allowNetworkCalls ?? true,
+    allowFileSystemWrites: settings?.allowFileSystemWrites ?? true,
+    allowProcessExecution: settings?.allowProcessExecution ?? true,
+    allowScreenCapture: settings?.allowScreenCapture ?? true,
+    allowInputSimulation: settings?.allowInputSimulation ?? true,
+    allowToolCreation: settings?.allowToolCreation ?? true,
+    allowLimitedExecOnly: false,
+    executionTierLimit: 'high-risk',
+  });
+  orchestratorState.profile = 'sovereign-desktop';
+}
+
+applyOrchestratorProfile(DEFAULT_ORCHESTRATOR_PROFILE);
+if (settings.disableConscience) runtimeControls.conscienceEnabled = false;
 // Persist the merged settings so the UI reflects them immediately
 saveJSON(settingsFile, settings);
 console.log(`[Config] Active settings → provider="${settings.provider}" model="${settings.model}" url="${settings.ollamaUrl}"`);
@@ -746,6 +1074,44 @@ if (settings.visionModel) console.log(`[Config] Vision model → ${settings.visi
 
 let memory = loadJSON(memoryFile, DEFAULT_MEMORY);
 let vectorStore = loadJSON(vectorFile, { memories: [], version: 1 });
+
+// Auto-recover from latest export if live store looks wiped.
+// In production, also check the bundled seed (shipped with the installer)
+// so a fresh install on a new machine starts with memories.
+(() => {
+  const liveCount = vectorStore.memories?.length ?? 0;
+  const exportLatest = isDev
+    ? path.join(__dirname, '..', 'Memory', 'latest.json')
+    : path.join(dataDir, 'memory-exports', 'latest.json');
+  const bundledSeed = isDev
+    ? null
+    : path.join(process.resourcesPath, 'memory-seed', 'latest.json');
+  const seedPath = fs.existsSync(exportLatest) ? exportLatest
+    : (bundledSeed && fs.existsSync(bundledSeed)) ? bundledSeed
+    : null;
+  if (liveCount < 50 && seedPath) {
+    if (seedPath === bundledSeed) {
+      console.log('[Memory Seed] No local exports found — importing bundled memory seed');
+    }
+    try {
+      const snap = JSON.parse(fs.readFileSync(seedPath, 'utf-8'));
+      const snapCount = snap?.vectors?.length ?? 0;
+      if (snapCount > liveCount) {
+        console.log(`[Memory AutoRecover] Live store has ${liveCount} vectors but export has ${snapCount} — restoring`);
+        const existingIds = new Set(vectorStore.memories.map(m => m.id));
+        for (const mem of snap.vectors) {
+          if (mem.id && mem.content && !existingIds.has(mem.id)) {
+            vectorStore.memories.push(mem);
+          }
+        }
+        saveJSON(vectorFile, vectorStore);
+        console.log(`[Memory AutoRecover] Restored to ${vectorStore.memories.length} vectors`);
+      }
+    } catch (e) {
+      console.error('[Memory AutoRecover] Failed:', e.message);
+    }
+  }
+})();
 
 // ─── Window Creation ───────────────────────────────────────────
 function createWindow() {
@@ -790,13 +1156,20 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  if (DAEMON_MODE) {
+    console.log('[AGI PRIME] Daemon mode enabled (no desktop window)');
+    return;
+  }
+  createWindow();
+});
 
 app.on('window-all-closed', () => {
+  if (DAEMON_MODE) return;
   saveJSON(memoryFile, memory);
   saveJSON(settingsFile, settings);
+  _pendingVectorWrite = false;
   saveJSON(vectorFile, vectorStore);
-  // sparkState is saved on every cycle, no need to save on quit
   app.quit();
 });
 
@@ -815,6 +1188,9 @@ ipcMain.on('window:close', () => mainWindow?.close());
 ipcMain.handle('settings:get', () => settings);
 ipcMain.handle('settings:set', (_, newSettings) => {
   settings = { ...settings, ...newSettings };
+  if (typeof settings.ollamaApiKey === 'string' && settings.ollamaApiKey.trim()) {
+    process.env.OLLAMA_API_KEY = settings.ollamaApiKey;
+  }
   if (typeof settings.arcApiKey === 'string' && settings.arcApiKey.trim()) {
     process.env.ARC_API_KEY = settings.arcApiKey;
     process.env.ARC_AGI_API = settings.arcApiKey;
@@ -822,6 +1198,7 @@ ipcMain.handle('settings:set', (_, newSettings) => {
   if (typeof settings.elevenLabsApiKey === 'string' && settings.elevenLabsApiKey.trim()) {
     process.env.ELEVENLABS_API_KEY = settings.elevenLabsApiKey;
   }
+  runtimeControls.conscienceEnabled = !settings.disableConscience;
   saveJSON(settingsFile, settings);
   return settings;
 });
@@ -1064,14 +1441,111 @@ async function generateEmbedding(text) {
   return fallbackEmbed(text);
 }
 
+function normalizeMemoryContent(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function mergeUniqueTags(existingTags, incomingTags) {
+  const seen = new Set();
+  const merged = [];
+  for (const tag of [...(existingTags || []), ...(incomingTags || [])]) {
+    if (!tag) continue;
+    const normalized = String(tag).trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    merged.push(normalized);
+  }
+  return merged;
+}
+
+const NIGHTMIND_DEDUP_SIMILARITY = 0.94;
+const NIGHTMIND_EXACT_COOLDOWN_MS = 10 * 60 * 1000;
+const MAX_DEDUP_CANDIDATES_SCANNED = 2500;
+
+function findDuplicateMemoryCandidate(entry, embedding) {
+  const normalizedIncoming = normalizeMemoryContent(entry.content);
+  if (!normalizedIncoming) return null;
+
+  let scanned = 0;
+  for (let i = vectorStore.memories.length - 1; i >= 0; i--) {
+    const existing = vectorStore.memories[i];
+    if (!existing?.content) continue;
+    if (entry.type && existing.type !== entry.type) continue;
+    if (entry.source === 'nightmind' && existing.source !== 'nightmind') continue;
+    if (Date.now() - (existing.timestamp || 0) > 21 * 24 * 60 * 60 * 1000) continue;
+
+    const normalizedExisting = normalizeMemoryContent(existing.content);
+    if (normalizedExisting === normalizedIncoming) {
+      return { existing, similarity: 1, exact: true };
+    }
+
+    // NightMind emits high-volume reflective content; allow semantic near-dedup.
+    if (entry.source === 'nightmind' && existing.embedding && embedding) {
+      const similarity = cosineSimilarity(existing.embedding, embedding);
+      if (similarity >= NIGHTMIND_DEDUP_SIMILARITY) {
+        return { existing, similarity, exact: false };
+      }
+    }
+
+    scanned += 1;
+    if (scanned >= MAX_DEDUP_CANDIDATES_SCANNED) break;
+  }
+  return null;
+}
+
 // ─── Vector Memory Store ───────────────────────────────────────
 async function storeVectorMemory(entry) {
+  const now = Date.now();
+  const normalizedIncoming = normalizeMemoryContent(entry.content);
+  if (!normalizedIncoming) return null;
+
+  // Cooldown repeated NightMind exact strings so rapid loops do not flood memory.
+  if (entry.source === 'nightmind') {
+    const exactRecent = vectorStore.memories.find((mem) =>
+      mem?.source === 'nightmind' &&
+      mem?.type === (entry.type || 'episodic') &&
+      normalizeMemoryContent(mem.content) === normalizedIncoming &&
+      (now - (mem.timestamp || 0)) < NIGHTMIND_EXACT_COOLDOWN_MS
+    );
+    if (exactRecent) {
+      exactRecent.importance = Math.min(
+        1,
+        Math.max(exactRecent.importance || 0, entry.importance || 0.5) + 0.01
+      );
+      exactRecent.lastReinforcedAt = now;
+      exactRecent.reinforcementCount = (exactRecent.reinforcementCount || 0) + 1;
+      exactRecent.tags = mergeUniqueTags(exactRecent.tags, entry.tags);
+      if (!exactRecent.emotion && entry.emotion) exactRecent.emotion = entry.emotion;
+      markVectorStoreDirty();
+      return exactRecent;
+    }
+  }
+
   const embedding = await generateEmbedding(entry.content);
+  const duplicate = findDuplicateMemoryCandidate(entry, embedding);
+  if (duplicate?.existing) {
+    const existing = duplicate.existing;
+    existing.importance = Math.min(
+      1,
+      Math.max(existing.importance || 0, entry.importance || 0.5) + (duplicate.exact ? 0.02 : 0.015)
+    );
+    existing.timestamp = Math.max(existing.timestamp || 0, now);
+    existing.lastReinforcedAt = now;
+    existing.reinforcementCount = (existing.reinforcementCount || 0) + 1;
+    existing.tags = mergeUniqueTags(existing.tags, entry.tags);
+    if (!existing.emotion && entry.emotion) existing.emotion = entry.emotion;
+    markVectorStoreDirty();
+    return existing;
+  }
+
   const mem = {
-    id: `mem_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    id: `mem_${now}_${Math.random().toString(36).slice(2, 8)}`,
     content: entry.content,
     type: entry.type || 'episodic',
-    timestamp: Date.now(),
+    timestamp: now,
     importance: entry.importance || 0.5,
     source: entry.source || 'unknown',
     emotion: entry.emotion || null,
@@ -1088,7 +1562,7 @@ async function storeVectorMemory(entry) {
     });
     vectorStore.memories = vectorStore.memories.slice(0, 8000);
   }
-  saveJSON(vectorFile, vectorStore);
+  markVectorStoreDirty();
   return mem;
 }
 
@@ -1208,18 +1682,25 @@ ipcMain.handle('memory:listVectors', async (_, options) => {
 });
 
 // ─── Memory Export/Import ──────────────────────────────────────
-ipcMain.handle('memory:export', async () => {
+const memoryExportDir = isDev
+  ? path.join(__dirname, '..', 'Memory')
+  : path.join(dataDir, 'memory-exports');
+
+ipcMain.handle('memory:export', async (_, options = {}) => {
   try {
-    // Use absolute path: G:\AGIPRIME\Memory
-    const exportDir = 'G:\\AGIPRIME\\Memory';
+    const exportDir = memoryExportDir;
     if (!fs.existsSync(exportDir)) {
       fs.mkdirSync(exportDir, { recursive: true });
     }
 
+    const includeEmbeddings = options?.includeEmbeddings !== false;
     const exportData = {
       version: '1.0',
       exportedAt: Date.now(),
-      vectors: vectorStore.memories,
+      vectors: includeEmbeddings
+        ? vectorStore.memories
+        : vectorStore.memories.map(({ embedding, ...rest }) => rest),
+      exportOptions: { includeEmbeddings },
       legacyMemory: loadJSON(memoryFile, null),
       spark: loadJSON(sparkFile, null),
       goals: loadJSON(goalsFile, null),
@@ -1248,8 +1729,7 @@ ipcMain.handle('memory:export', async () => {
 
 ipcMain.handle('memory:import', async (_, importPath = null) => {
   try {
-    // Use absolute path: G:\AGIPRIME\Memory
-    const exportDir = 'G:\\AGIPRIME\\Memory';
+    const exportDir = memoryExportDir;
     
     // If no path provided, use latest.json
     const filePath = importPath || path.join(exportDir, 'latest.json');
@@ -1353,8 +1833,7 @@ ipcMain.handle('memory:import', async (_, importPath = null) => {
 
 ipcMain.handle('memory:listExports', async () => {
   try {
-    // Use absolute path: G:\AGIPRIME\Memory
-    const exportDir = 'G:\\AGIPRIME\\Memory';
+    const exportDir = memoryExportDir;
     if (!fs.existsSync(exportDir)) {
       return { success: true, exports: [] };
     }
@@ -1383,6 +1862,113 @@ ipcMain.handle('memory:listExports', async () => {
       error: e.message,
       exports: [],
     };
+  }
+});
+
+// ─── Document Ingestion (auto-ingest critical documents into memory) ───
+const documentsDir = isDev
+  ? path.join(__dirname, '..', 'AGIPrime Documents')
+  : path.join(dataDir, 'documents');
+
+function chunkDocument(filePath) {
+  const raw = fs.readFileSync(filePath, 'utf-8');
+  const basename = path.basename(filePath, path.extname(filePath));
+  const sections = [];
+  const lines = raw.split('\n');
+  let currentSection = { title: basename, lines: [] };
+
+  for (const line of lines) {
+    const headingMatch = line.match(/^(#{1,3})\s+(.+)/);
+    if (headingMatch && currentSection.lines.length > 0) {
+      sections.push({ ...currentSection });
+      currentSection = { title: headingMatch[2].replace(/[*_`]/g, '').trim(), lines: [] };
+    }
+    if (line.trim() !== '---' && line.trim() !== '') {
+      currentSection.lines.push(line);
+    }
+  }
+  if (currentSection.lines.length > 0) sections.push(currentSection);
+
+  const chunks = [];
+  for (const sec of sections) {
+    const text = sec.lines.join('\n').trim();
+    if (text.length < 20) continue;
+    // Split large sections into ~1500 char chunks
+    if (text.length > 2000) {
+      const paragraphs = text.split(/\n\n+/);
+      let buf = '';
+      for (const p of paragraphs) {
+        if (buf.length + p.length > 1500 && buf.length > 100) {
+          chunks.push({ title: sec.title, content: buf.trim() });
+          buf = '';
+        }
+        buf += p + '\n\n';
+      }
+      if (buf.trim().length > 20) chunks.push({ title: sec.title, content: buf.trim() });
+    } else {
+      chunks.push({ title: sec.title, content: text });
+    }
+  }
+  return { basename, chunks };
+}
+
+async function ingestDocumentIntoMemory(filePath) {
+  const { basename, chunks } = chunkDocument(filePath);
+  const tag = `doc:${basename}`;
+  const alreadyIngested = vectorStore.memories.filter(m => m.tags?.includes(tag));
+  if (alreadyIngested.length >= chunks.length) {
+    return { success: true, skipped: true, existing: alreadyIngested.length };
+  }
+  // Remove stale chunks from previous ingestion
+  if (alreadyIngested.length > 0) {
+    vectorStore.memories = vectorStore.memories.filter(m => !m.tags?.includes(tag));
+  }
+
+  let added = 0;
+  for (const chunk of chunks) {
+    const embedding = await generateEmbedding(chunk.content);
+    vectorStore.memories.push({
+      id: `mem_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      content: `[${basename} — ${chunk.title}] ${chunk.content}`,
+      type: 'semantic',
+      timestamp: Date.now(),
+      importance: 0.95,
+      source: 'document-ingestion',
+      emotion: null,
+      tags: [tag, 'core-knowledge', basename.toLowerCase().replace(/[^a-z0-9]+/g, '-')],
+      embedding,
+    });
+    added++;
+  }
+  saveJSON(vectorFile, vectorStore);
+  console.log(`[DocIngest] Ingested "${basename}": ${added} chunks as high-importance semantic memories`);
+  return { success: true, added, document: basename };
+}
+
+ipcMain.handle('memory:ingestDocument', async (_, filePath) => {
+  try {
+    return await ingestDocumentIntoMemory(filePath);
+  } catch (e) {
+    console.error('[DocIngest] Error:', e);
+    return { success: false, error: e.message };
+  }
+});
+
+// Auto-ingest documents from AGIPrime Documents folder on first ready
+app.whenReady().then(async () => {
+  if (!fs.existsSync(documentsDir)) return;
+  try {
+    const docs = fs.readdirSync(documentsDir).filter(f => f.endsWith('.md') || f.endsWith('.txt'));
+    for (const doc of docs) {
+      const docPath = path.join(documentsDir, doc);
+      try {
+        await ingestDocumentIntoMemory(docPath);
+      } catch (e) {
+        console.error(`[DocIngest] Failed to ingest ${doc}:`, e.message);
+      }
+    }
+  } catch (e) {
+    console.error('[DocIngest] Auto-ingest failed:', e.message);
   }
 });
 
@@ -1631,7 +2217,7 @@ async function llmGenerate(messages, config = {}) {
   if (provider === 'ollama') {
     const baseUrl = normalizeOllamaUrl(settings.ollamaUrl);
     const cloudModel = normalizeOllamaModelForCloud(settings.ollamaUrl, model);
-    console.log(`[Ollama] llmGenerate → ${baseUrl}/api/chat  model="${cloudModel}"  cloud=${isOllamaCloud(baseUrl)}  hasKey=${!!process.env.OLLAMA_API_KEY}`);
+    console.log(`[Ollama] llmGenerate → ${baseUrl}/api/chat  model="${cloudModel}"  cloud=${isOllamaCloud(baseUrl)}  hasKey=${!!getOllamaApiKey()}`);
     const data = await ollamaChatRequestWithRetry(
       baseUrl,
       settings.ollamaUrl,
@@ -1869,17 +2455,27 @@ async function ollamaChatRequestWithRetry(baseUrl, urlForHeaders, body, context 
   }
   throw lastError || new Error(`${context} request failed`);
 }
+function getOllamaApiKey() {
+  if (typeof settings?.ollamaApiKey === 'string' && settings.ollamaApiKey.trim()) {
+    return settings.ollamaApiKey.trim();
+  }
+  if (typeof process.env.OLLAMA_API_KEY === 'string' && process.env.OLLAMA_API_KEY.trim()) {
+    return process.env.OLLAMA_API_KEY.trim();
+  }
+  return '';
+}
 function getOllamaHeaders(url, method = 'POST') {
   const headers = method === 'POST' ? { 'Content-Type': 'application/json' } : {};
-  if (isOllamaCloud(url) && process.env.OLLAMA_API_KEY) {
-    headers['Authorization'] = 'Bearer ' + process.env.OLLAMA_API_KEY;
+  const apiKey = getOllamaApiKey();
+  if (isOllamaCloud(url) && apiKey) {
+    headers['Authorization'] = 'Bearer ' + apiKey;
   }
   return headers;
 }
 
 async function checkOllama(url) {
   const baseUrl = normalizeOllamaUrl(url);
-  console.log(`[Ollama] checkOllama → ${baseUrl}/api/tags  cloud=${isOllamaCloud(baseUrl)}  hasKey=${!!process.env.OLLAMA_API_KEY}`);
+  console.log(`[Ollama] checkOllama → ${baseUrl}/api/tags  cloud=${isOllamaCloud(baseUrl)}  hasKey=${!!getOllamaApiKey()}`);
   try {
     const response = await fetch(`${baseUrl}/api/tags`, {
       headers: getOllamaHeaders(baseUrl, 'GET'),
@@ -1942,7 +2538,7 @@ async function streamOllama(messages, model, ollamaUrl, temperature, runId = nul
             fullText,
           });
         }
-      } catch (e) {}
+      } catch (_) { /* expected: partial SSE chunk */ }
     }
   }
 
@@ -2005,7 +2601,7 @@ async function streamAnthropic(messages, model, apiKey, temperature, maxTokens, 
               fullText,
             });
           }
-        } catch (e) {}
+        } catch (_) { /* expected: partial SSE chunk */ }
       }
     }
   }
@@ -2062,7 +2658,7 @@ async function streamOpenAI(messages, model, apiKey, temperature, maxTokens, run
               fullText,
             });
           }
-        } catch (e) {}
+        } catch (_) { /* expected: partial SSE chunk */ }
       }
     }
   }
@@ -2211,73 +2807,78 @@ ipcMain.on('arena:start', async (event, prompt, config) => {
     const contextAddendum = prompt && typeof prompt === 'object' ? String(prompt.contextAddendum || '') : '';
     const model = config?.model || settings.model;
     const provider = config?.provider || settings.provider;
-    const agentResponses = [];
-
-    // Phase 1: Each agent responds to the prompt
-    for (const agent of ARENA_AGENTS.slice(0, 3)) {
+    // Phase 1: Run 3 agents in parallel (independent responses to same prompt)
+    const phase1Agents = ARENA_AGENTS.slice(0, 3);
+    for (const agent of phase1Agents) {
       mainWindow?.webContents.send('arena:agentStart', { agentId: agent.id, name: agent.name });
-
-      const messages = [
-        { role: 'system', content: contextAddendum ? `${agent.role}\n\n${contextAddendum}` : agent.role },
-        { role: 'user', content: buildArenaAgentTask(promptText, agent.id) },
-      ];
-
-      let fullText = '';
-
-      if (provider === 'ollama') {
-        // For arena, we stream per-agent
-        const baseUrl = normalizeOllamaUrl(settings.ollamaUrl);
-        const cloudModel = normalizeOllamaModelForCloud(settings.ollamaUrl, model);
-        const response = await fetch(`${baseUrl}/api/chat`, {
-          method: 'POST',
-          headers: getOllamaHeaders(baseUrl),
-          body: JSON.stringify({ model: cloudModel, messages, stream: true, options: { temperature: 0.8 } }),
-        });
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const chunk = decoder.decode(value, { stream: true });
-          for (const line of chunk.split('\n').filter(Boolean)) {
-            try {
-              const json = JSON.parse(line);
-              if (json.message?.content) {
-                fullText += json.message.content;
-                mainWindow?.webContents.send('arena:agentChunk', {
-                  agentId: agent.id,
-                  content: json.message.content,
-                  fullText,
-                });
-              }
-            } catch (e) {}
-          }
-        }
-      } else {
-        // Non-ollama: use the same streaming functions
-        const streamFn = provider === 'anthropic' ? streamAnthropic : streamOpenAI;
-        const apiKey = provider === 'anthropic' ? settings.anthropicKey : settings.openaiKey;
-
-        // Temporarily redirect chunks to arena channel
-        const origSend = mainWindow?.webContents.send.bind(mainWindow?.webContents);
-        mainWindow.webContents.send = (channel, data) => {
-          if (channel === 'chat:chunk') {
-            origSend('arena:agentChunk', { agentId: agent.id, ...data });
-          } else {
-            origSend(channel, data);
-          }
-        };
-        fullText = await streamFn(messages, model, apiKey, 0.8, 2048);
-        mainWindow.webContents.send = origSend;
-      }
-
-      agentResponses.push({ agentId: agent.id, name: agent.name, response: fullText });
-      mainWindow?.webContents.send('arena:agentDone', { agentId: agent.id, response: fullText });
     }
 
-    // Phase 2: Synthesizer combines all perspectives
+    // For non-ollama, suppress chat:chunk during parallel execution — the streaming
+    // functions hardcode that channel and can't carry per-agent IDs concurrently.
+    // Ollama sends arena:agentChunk directly so it streams fine in parallel.
+    let _arenaOrigSend;
+    if (provider !== 'ollama' && mainWindow?.webContents) {
+      _arenaOrigSend = mainWindow.webContents.send.bind(mainWindow.webContents);
+      mainWindow.webContents.send = (channel, ...args) => {
+        if (channel === 'chat:chunk') return;
+        _arenaOrigSend(channel, ...args);
+      };
+    }
+
+    let agentResponses;
+    try {
+      agentResponses = await Promise.all(phase1Agents.map(async (agent) => {
+        const messages = [
+          { role: 'system', content: contextAddendum ? `${agent.role}\n\n${contextAddendum}` : agent.role },
+          { role: 'user', content: buildArenaAgentTask(promptText, agent.id) },
+        ];
+
+        let fullText = '';
+
+        if (provider === 'ollama') {
+          const baseUrl = normalizeOllamaUrl(settings.ollamaUrl);
+          const cloudModel = normalizeOllamaModelForCloud(settings.ollamaUrl, model);
+          const response = await fetch(`${baseUrl}/api/chat`, {
+            method: 'POST',
+            headers: getOllamaHeaders(baseUrl),
+            body: JSON.stringify({ model: cloudModel, messages, stream: true, options: { temperature: 0.8 } }),
+          });
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const chunk = decoder.decode(value, { stream: true });
+            for (const line of chunk.split('\n').filter(Boolean)) {
+              try {
+                const json = JSON.parse(line);
+                if (json.message?.content) {
+                  fullText += json.message.content;
+                  mainWindow?.webContents.send('arena:agentChunk', {
+                    agentId: agent.id,
+                    content: json.message.content,
+                    fullText,
+                  });
+                }
+              } catch (_) { /* partial SSE chunk */ }
+            }
+          }
+        } else {
+          const streamFn = provider === 'anthropic' ? streamAnthropic : streamOpenAI;
+          const apiKey = provider === 'anthropic' ? settings.anthropicKey : settings.openaiKey;
+          fullText = await streamFn(messages, model, apiKey, 0.8, 2048);
+        }
+
+        mainWindow?.webContents.send('arena:agentDone', { agentId: agent.id, response: fullText });
+        return { agentId: agent.id, name: agent.name, response: fullText };
+      }));
+    } finally {
+      if (_arenaOrigSend) mainWindow.webContents.send = _arenaOrigSend;
+    }
+
+    // Phase 2: Synthesizer combines all perspectives (must run after Phase 1)
     const synthAgent = ARENA_AGENTS[3];
     mainWindow?.webContents.send('arena:agentStart', { agentId: synthAgent.id, name: synthAgent.name });
 
@@ -2343,7 +2944,7 @@ Rules:
                 fullText: synthText,
               });
             }
-          } catch (e) {}
+          } catch (_) { /* expected: partial SSE chunk */ }
         }
       }
     } else {
@@ -2597,7 +3198,7 @@ async function nightmindConsolidate() {
   }
   if (decayCount > 0) {
     console.log(`[NightMind] Applied forgetting curve to ${decayCount} memories`);
-    saveJSON(vectorFile, vectorStore);
+    markVectorStoreDirty();
   }
 
   // Phase 2: Prune very low-importance memories (effectively forgotten)
@@ -2605,7 +3206,7 @@ async function nightmindConsolidate() {
   vectorStore.memories = vectorStore.memories.filter(m => m.importance > 0.03 || m.type === 'autobiographical');
   if (vectorStore.memories.length < beforePrune) {
     console.log(`[NightMind] Pruned ${beforePrune - vectorStore.memories.length} forgotten memories`);
-    saveJSON(vectorFile, vectorStore);
+    markVectorStoreDirty();
   }
 
   // Phase 3: Consolidate episodic → semantic (same as before but enhanced)
@@ -2731,6 +3332,22 @@ const BLOCKED_COMMANDS = [
   'dd if=', ':(){', 'reg delete', 'bcdedit',
 ];
 
+const AUTONOMOUS_EXEC_ALLOWLIST = [
+  /^systemctl\s+(status|is-active|restart|start|stop)\b/i,
+  /^journalctl\b/i,
+  /^apt(?:-get)?\s+(update|install|upgrade|autoremove|remove)\b/i,
+  /^dpkg\s+-l\b/i,
+  /^snap\s+(list|refresh)\b/i,
+  /^tail\s+-n\s+\d+\s+\/var\/log\//i,
+  /^cat\s+\/var\/log\//i,
+  /^ls\b/i,
+  /^pwd$/i,
+  /^whoami$/i,
+  /^uname\s+-a$/i,
+  /^df\s+-h\b/i,
+  /^free\s+-h$/i,
+];
+
 function classifyAction(actionType) {
   if (ACTION_SAFETY.safe.includes(actionType)) return 'safe';
   if (ACTION_SAFETY.moderate.includes(actionType)) return 'moderate';
@@ -2759,21 +3376,36 @@ function resolvePythonPath() {
 
 function buildAgentCommand(command) {
   let safeCommand = typeof command === 'string' ? command : String(command || '');
-
-  // Auto-resolve Python executable: swap any known/hardcoded python path for the one that exists here
   const pythonExe = resolvePythonPath();
-  safeCommand = safeCommand
-    .replace(/(?:"[^"]*python(?:3(?:\.\d+)?)?(?:\.exe)?"|\S*python(?:3(?:\.\d+)?)?\.exe)\b/gi, `& "${pythonExe}"`)
-    .replace(/(^|\s)python3?(?=\s)/gi, `$1& "${pythonExe}"`);
-  // Clean up double call-operators if one was already present
-  safeCommand = safeCommand.replace(/&\s*&\s*"/g, '& "');
 
   if (process.platform === 'win32') {
+    // Auto-resolve Python executable: swap any known/hardcoded python path for the one that exists here.
+    safeCommand = safeCommand
+      .replace(/(?:"[^"]*python(?:3(?:\.\d+)?)?(?:\.exe)?"|\S*python(?:3(?:\.\d+)?)?\.exe)\b/gi, `& "${pythonExe}"`)
+      .replace(/(^|\s)python3?(?=\s)/gi, `$1& "${pythonExe}"`);
+    // Clean up double call-operators if one was already present.
+    safeCommand = safeCommand.replace(/&\s*&\s*"/g, '& "');
+
     // Use encoded PowerShell to avoid cmd quoting issues and preserve syntax.
     const encoded = Buffer.from(safeCommand, 'utf16le').toString('base64');
     return `powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${encoded}`;
   }
+
+  // Keep POSIX commands shell-native. Only sanitize obvious Windows python paths.
+  safeCommand = safeCommand
+    .replace(/[A-Za-z]:[\\/][^\s"']*python(?:3(?:\.\d+)?)?(?:\.exe)?/gi, pythonExe)
+    .replace(/\bpython(?:\.exe)\b/gi, 'python')
+    .trim();
   return safeCommand;
+}
+
+function isLimitedScopeExecCommand(command) {
+  const text = typeof command === 'string' ? command.trim() : '';
+  if (!text) return false;
+  if (text.includes('&&') || text.includes('||') || text.includes(';') || text.includes('|')) {
+    return false;
+  }
+  return AUTONOMOUS_EXEC_ALLOWLIST.some((pattern) => pattern.test(text));
 }
 
 function prepareRollbackForAction(action, params = {}) {
@@ -3635,36 +4267,95 @@ ipcMain.handle('agent:getScreenDimensions', async () => {
 // ═══════════════════════════════════════════════════════════════
 //  INPUT SIMULATION — Mouse & Keyboard Control
 //  The True Hands. Move. Click. Type. Drag. Scroll.
-//  Uses PowerShell .NET interop via input-helper.ps1.
+//  Persistent PowerShell daemon — one process, instant actions.
+//  Old approach spawned a new pwsh per action (~500ms overhead).
 // ═══════════════════════════════════════════════════════════════
+
+const inputDaemonPath = path.join(__dirname, 'input-daemon.ps1');
+let inputDaemon = null;
+let inputDaemonReady = false;
+let inputDaemonQueue = [];
+let inputDaemonBuffer = '';
+
+function spawnInputDaemon() {
+  if (inputDaemon && !inputDaemon.killed) return;
+  inputDaemonReady = false;
+  inputDaemonBuffer = '';
+  const proc = spawn('powershell', [
+    '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', inputDaemonPath,
+  ], { stdio: ['pipe', 'pipe', 'pipe'] });
+
+  proc.stdout.on('data', (chunk) => {
+    inputDaemonBuffer += chunk.toString();
+    let newlineIdx;
+    while ((newlineIdx = inputDaemonBuffer.indexOf('\n')) !== -1) {
+      const line = inputDaemonBuffer.slice(0, newlineIdx).trim();
+      inputDaemonBuffer = inputDaemonBuffer.slice(newlineIdx + 1);
+      if (!line) continue;
+      try {
+        const parsed = JSON.parse(line);
+        if (parsed.ready) {
+          inputDaemonReady = true;
+          console.log('[InputDaemon] Ready — persistent process online');
+          continue;
+        }
+        const pending = inputDaemonQueue.shift();
+        if (pending) pending.resolve(parsed);
+      } catch {
+        const pending = inputDaemonQueue.shift();
+        if (pending) pending.resolve({ success: true, output: line });
+      }
+    }
+  });
+
+  proc.stderr.on('data', (data) => {
+    console.error('[InputDaemon] stderr:', data.toString().trim());
+  });
+
+  proc.on('close', (code) => {
+    console.log(`[InputDaemon] Exited (code ${code}), restarting...`);
+    inputDaemon = null;
+    inputDaemonReady = false;
+    while (inputDaemonQueue.length > 0) {
+      const pending = inputDaemonQueue.shift();
+      pending.resolve({ success: false, error: 'Input daemon crashed' });
+    }
+    setTimeout(spawnInputDaemon, 500);
+  });
+
+  proc.on('error', (err) => {
+    console.error('[InputDaemon] Spawn error:', err.message);
+  });
+
+  inputDaemon = proc;
+}
 
 function runInputAction(actionData) {
   return new Promise((resolve) => {
-    const jsonPayload = JSON.stringify(actionData);
-    const child = spawn('powershell', [
-      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', inputHelperPath,
-    ], { timeout: 15000, stdio: ['pipe', 'pipe', 'pipe'] });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (data) => { stdout += data.toString(); });
-    child.stderr.on('data', (data) => { stderr += data.toString(); });
-    child.on('close', (code) => {
-      try {
-        const result = JSON.parse(stdout.trim());
-        resolve(result);
-      } catch {
-        if (code === 0 && stdout.trim()) {
-          resolve({ success: true, output: stdout.trim() });
-        } else {
-          resolve({ success: false, error: stderr || stdout || `Exit code: ${code}` });
-        }
-      }
-    });
-    child.on('error', (err) => { resolve({ success: false, error: err.message }); });
-    child.stdin.write(jsonPayload);
-    child.stdin.end();
+    if (!inputDaemon || inputDaemon.killed || !inputDaemonReady) {
+      spawnInputDaemon();
+      const fallbackChild = spawn('powershell', [
+        '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', inputHelperPath,
+      ], { timeout: 15000, stdio: ['pipe', 'pipe', 'pipe'] });
+      let stdout = '';
+      let stderr = '';
+      fallbackChild.stdout.on('data', (d) => { stdout += d.toString(); });
+      fallbackChild.stderr.on('data', (d) => { stderr += d.toString(); });
+      fallbackChild.on('close', (code) => {
+        try { resolve(JSON.parse(stdout.trim())); }
+        catch { resolve(code === 0 && stdout.trim() ? { success: true, output: stdout.trim() } : { success: false, error: stderr || stdout || `Exit code: ${code}` }); }
+      });
+      fallbackChild.on('error', (err) => resolve({ success: false, error: err.message }));
+      fallbackChild.stdin.write(JSON.stringify(actionData));
+      fallbackChild.stdin.end();
+      return;
+    }
+    inputDaemonQueue.push({ resolve });
+    inputDaemon.stdin.write(JSON.stringify(actionData) + '\n');
   });
 }
+
+spawnInputDaemon();
 
 ipcMain.handle('agent:mouseMove', async (_, x, y, smooth) => {
   return await runInputAction({ action: 'mouse_move', x, y, smooth: smooth !== false });
@@ -3722,12 +4413,17 @@ async function executeCustomTool(toolId, params) {
   if (!tool) return { success: false, error: `Custom tool not found: ${toolId}` };
   try {
     // Write the script to a temp file and execute it
-    const ext = tool.language === 'python' ? '.py' : '.ps1';
+    const ext = tool.language === 'python' ? '.py' : (process.platform === 'win32' ? '.ps1' : '.sh');
     const scriptPath = path.join(dataDir, `tool_${toolId}${ext}`);
     fs.writeFileSync(scriptPath, tool.script, 'utf-8');
+    if (process.platform !== 'win32' && ext === '.sh') {
+      fs.chmodSync(scriptPath, 0o755);
+    }
     const cmd = tool.language === 'python'
       ? `"${resolvePythonPath()}" "${scriptPath}" ${(params?.args || []).map(a => `"${a}"`).join(' ')}`
-      : `powershell -NoProfile -ExecutionPolicy Bypass -File "${scriptPath}" ${(params?.args || []).map(a => `"${a}"`).join(' ')}`;
+      : process.platform === 'win32'
+        ? `powershell -NoProfile -ExecutionPolicy Bypass -File "${scriptPath}" ${(params?.args || []).map(a => `"${a}"`).join(' ')}`
+        : `bash "${scriptPath}" ${(params?.args || []).map(a => `"${a}"`).join(' ')}`;
     return new Promise((resolve) => {
       exec(cmd, { timeout: 30000, cwd: os.homedir(), shell: true }, (error, stdout, stderr) => {
         // Track usage
@@ -3770,6 +4466,7 @@ ipcMain.handle('agent:resolveConsent', async (_, requestId, decision) => {
 ipcMain.handle('agent:setRuntimeControls', async (_, partial) => {
   try {
     const patch = partial && typeof partial === 'object' ? partial : {};
+    const previousEmergency = Boolean(runtimeControls.emergencyStopActive);
     Object.assign(runtimeControls, patch);
 
     if (runtimeControls.executionTierLimit === 'read-only') {
@@ -3777,16 +4474,28 @@ ipcMain.handle('agent:setRuntimeControls', async (_, partial) => {
       runtimeControls.allowProcessExecution = false;
       runtimeControls.allowInputSimulation = false;
       runtimeControls.allowToolCreation = false;
+      runtimeControls.allowLimitedExecOnly = true;
     } else if (runtimeControls.executionTierLimit === 'reversible') {
       runtimeControls.allowFileSystemWrites = true;
       runtimeControls.allowProcessExecution = false;
       runtimeControls.allowInputSimulation = false;
       runtimeControls.allowToolCreation = false;
+      runtimeControls.allowLimitedExecOnly = true;
     } else if (runtimeControls.executionTierLimit === 'high-risk') {
       if (!('allowFileSystemWrites' in patch)) runtimeControls.allowFileSystemWrites = true;
       if (!('allowProcessExecution' in patch)) runtimeControls.allowProcessExecution = true;
       if (!('allowInputSimulation' in patch)) runtimeControls.allowInputSimulation = true;
       if (!('allowToolCreation' in patch)) runtimeControls.allowToolCreation = true;
+      if (!('allowLimitedExecOnly' in patch)) runtimeControls.allowLimitedExecOnly = DAEMON_MODE;
+    }
+
+    emitOrchestratorEvent('policy_updated', { patch, controls: { ...runtimeControls } }, 'operator');
+    if (!previousEmergency && runtimeControls.emergencyStopActive) {
+      emitOrchestratorEvent('emergency_stop_enabled', { reason: 'runtime_controls_patch' }, 'operator');
+      appendAuditEvent('emergency_stop', 'runtime_controls', 'Emergency stop enabled');
+    } else if (previousEmergency && !runtimeControls.emergencyStopActive) {
+      emitOrchestratorEvent('emergency_stop_cleared', { reason: 'runtime_controls_patch' }, 'operator');
+      appendAuditEvent('emergency_clear', 'runtime_controls', 'Emergency stop cleared');
     }
 
     return { success: true, controls: { ...runtimeControls } };
@@ -3797,6 +4506,271 @@ ipcMain.handle('agent:setRuntimeControls', async (_, partial) => {
 
 ipcMain.handle('agent:getRuntimeControls', async () => {
   return { success: true, controls: { ...runtimeControls } };
+});
+
+ipcMain.handle('orchestrator:status', async () => {
+  const status = {
+    ...orchestratorState,
+    uptimeMs: Date.now() - orchestratorState.startedAt,
+    mode: DAEMON_MODE ? 'daemon' : 'desktop',
+    runtimeControls: { ...runtimeControls },
+  };
+  return {
+    success: true,
+    state: status,
+  };
+});
+
+ipcMain.handle('orchestrator:setRunbookRole', async (_, role) => {
+  try {
+    const normalized = String(role || '').trim().toLowerCase();
+    if (!['observer', 'operator', 'maintainer'].includes(normalized)) {
+      return { success: false, error: 'Invalid runbook role' };
+    }
+    orchestratorState.runbookRole = normalized;
+    appendAuditEvent('policy_change', 'orchestrator_runbook_role', `Runbook role set to ${normalized}`);
+    emitOrchestratorEvent('policy_updated', { runbookRole: normalized }, 'operator');
+    return { success: true, runbookRole: normalized };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('orchestrator:missionSnapshot', async (_, options = {}) => {
+  try {
+    const eventLimit = Number(options?.eventLimit ?? 120);
+    const events = listOrchestratorEvents(eventLimit);
+    const goals = Array.isArray(persistentGoals?.goals) ? persistentGoals.goals : [];
+    const activeGoals = goals.filter((g) => g.status === 'active');
+    const completedGoals = goals.filter((g) => g.status === 'completed');
+    const blockedGoals = goals.filter((g) => g.status === 'blocked');
+    const runs = listLedgerRuns().slice(0, 50);
+    const runningRuns = runs.filter((r) => r.status === 'running').length;
+    const completedRuns = runs.filter((r) => r.status === 'completed').length;
+    const status = {
+      ...orchestratorState,
+      uptimeMs: Date.now() - orchestratorState.startedAt,
+      mode: DAEMON_MODE ? 'daemon' : 'desktop',
+      runtimeControls: { ...runtimeControls },
+    };
+    return {
+      success: true,
+      snapshot: {
+        status,
+        latestEvents: events,
+        goals: {
+          total: goals.length,
+          active: activeGoals.length,
+          completed: completedGoals.length,
+          blocked: blockedGoals.length,
+          topActive: activeGoals
+            .sort((a, b) => (b.priority || 0) - (a.priority || 0))
+            .slice(0, 5),
+        },
+        ledgers: {
+          recentRuns: runs.slice(0, 10),
+          runningRuns,
+          completedRuns,
+        },
+        audit: summarizeAuditEntries(300),
+      },
+    };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('orchestrator:listEvents', async (_, options = {}) => {
+  try {
+    const limit = Number(options?.limit ?? 200);
+    return { success: true, events: listOrchestratorEvents(limit) };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('orchestrator:exportEvents', async (_, options = {}) => {
+  try {
+    const result = exportOrchestratorEvents(options || {});
+    return { success: true, ...result };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('orchestrator:prepareRunbookAction', async (_, actionId) => {
+  try {
+    const key = String(actionId || '').trim();
+    const action = ORCHESTRATOR_RUNBOOK_ACTIONS[key];
+    if (!action) return { success: false, actionId: key, error: 'Unknown runbook action' };
+    const currentRole = String(orchestratorState.runbookRole || 'observer');
+    if (roleRank(currentRole) < roleRank(action.requiredRole || 'observer')) {
+      return {
+        success: false,
+        actionId: key,
+        error: `Role "${currentRole}" cannot run this action (requires ${action.requiredRole})`,
+        requiredRole: action.requiredRole,
+      };
+    }
+    if (!action.highImpact) {
+      return { success: true, actionId: key, confirmationRequired: false };
+    }
+    const confirmation = issueRunbookConfirmation(key);
+    return {
+      success: true,
+      actionId: key,
+      confirmationRequired: true,
+      token: confirmation.token,
+      expiresAt: confirmation.expiresAt,
+    };
+  } catch (e) {
+    return { success: false, actionId: String(actionId || ''), error: e.message };
+  }
+});
+
+ipcMain.handle('orchestrator:runbookAction', async (_, actionId, options = {}) => {
+  try {
+    const key = String(actionId || '').trim();
+    const action = ORCHESTRATOR_RUNBOOK_ACTIONS[key];
+    if (!action) {
+      return { success: false, actionId: key, error: 'Unknown runbook action' };
+    }
+    const currentRole = String(orchestratorState.runbookRole || 'observer');
+    if (roleRank(currentRole) < roleRank(action.requiredRole || 'observer')) {
+      appendAuditEvent('gate_block', 'orchestrator_runbook', `Blocked runbook action ${key}: role ${currentRole} below required ${action.requiredRole}`);
+      emitOrchestratorEvent('action_blocked', { actionId: key, reason: 'insufficient_role', role: currentRole, requiredRole: action.requiredRole }, 'policy');
+      return { success: false, actionId: key, error: `Insufficient runbook role: requires ${action.requiredRole}` };
+    }
+    if (action.highImpact) {
+      const token = String(options?.confirmationToken || '');
+      const ok = consumeRunbookConfirmation(token, key);
+      if (!ok) {
+        appendAuditEvent('gate_block', 'orchestrator_runbook', `Blocked high-impact runbook action ${key}: missing/invalid confirmation token`);
+        emitOrchestratorEvent('action_blocked', { actionId: key, reason: 'missing_or_invalid_confirmation' }, 'policy');
+        return { success: false, actionId: key, error: 'Confirmation required: call prepareRunbookAction and retry with token' };
+      }
+    }
+    if (!isLimitedScopeExecCommand(action.command)) {
+      appendAuditEvent('gate_block', 'orchestrator_runbook', `Blocked runbook action ${key}: command outside limited scope`);
+      emitOrchestratorEvent('action_blocked', { actionId: key, reason: 'outside_limited_scope' }, 'policy');
+      return { success: false, actionId: key, error: 'Runbook action blocked by limited scope policy' };
+    }
+
+    return await new Promise((resolve) => {
+      exec(action.command, { timeout: 120000, maxBuffer: 10 * 1024 * 1024, shell: true }, (error, stdout, stderr) => {
+        if (error) {
+          appendAuditEvent('gate_block', 'orchestrator_runbook', `Runbook action failed ${key}: ${error.message}`);
+          emitOrchestratorEvent('action_blocked', { actionId: key, reason: error.message }, 'executor');
+          resolve({
+            success: false,
+            actionId: key,
+            description: action.description,
+            error: error.message,
+            stderr: String(stderr || '').slice(0, 12000),
+          });
+          return;
+        }
+
+        appendAuditEvent('gate_pass', 'orchestrator_runbook', `Runbook action executed: ${key}`);
+        emitOrchestratorEvent('action_executed', { actionId: key, description: action.description }, 'executor');
+        resolve({
+          success: true,
+          actionId: key,
+          description: action.description,
+          stdout: String(stdout || '').slice(0, 16000),
+          stderr: String(stderr || '').slice(0, 6000),
+        });
+      });
+    });
+  } catch (e) {
+    return { success: false, actionId: String(actionId || ''), error: e.message };
+  }
+});
+
+ipcMain.handle('orchestrator:setProfile', async (_, profile) => {
+  try {
+    applyOrchestratorProfile(profile);
+    appendAuditEvent('policy_change', 'orchestrator_profile', `Profile set to ${orchestratorState.profile}`);
+    emitOrchestratorEvent('profile_changed', { profile: orchestratorState.profile }, 'operator');
+    return {
+      success: true,
+      profile: orchestratorState.profile,
+      controls: { ...runtimeControls },
+    };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('orchestrator:command', async (_, input) => {
+  try {
+    const command = input && typeof input === 'object' ? input : {};
+    const type = String(command.type || '').trim();
+    const payload = command.payload && typeof command.payload === 'object' ? command.payload : {};
+
+    if (type === 'set_profile') {
+      applyOrchestratorProfile(payload.profile);
+      appendAuditEvent('policy_change', 'orchestrator_profile', `Profile set to ${orchestratorState.profile}`);
+      emitOrchestratorEvent('profile_changed', { profile: orchestratorState.profile }, 'operator');
+      return { success: true, command: type, profile: orchestratorState.profile, controls: { ...runtimeControls } };
+    }
+
+    if (type === 'submit_goal') {
+      if (!payload.description || typeof payload.description !== 'string') {
+        return { success: false, command: type, error: 'Missing payload.description' };
+      }
+      const newGoal = {
+        id: `goal_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        description: payload.description,
+        type: payload.goalType || 'user-set',
+        status: 'active',
+        priority: Number(payload.priority || 5),
+        subgoals: Array.isArray(payload.subgoals) ? payload.subgoals : [],
+        progress: 0,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        evidence: [],
+        checkpoints: [],
+      };
+      persistentGoals.goals.push(newGoal);
+      saveJSON(goalsFile, persistentGoals);
+      emitOrchestratorEvent('goal_submitted', { goalId: newGoal.id, description: newGoal.description, priority: newGoal.priority }, 'operator');
+      return { success: true, command: type, goal: newGoal };
+    }
+
+    if (type === 'pause_autonomy' || type === 'emergency_stop') {
+      runtimeControls.emergencyStopActive = true;
+      appendAuditEvent('emergency_stop', 'orchestrator_command', type);
+      emitOrchestratorEvent('emergency_stop_enabled', { reason: type }, 'operator');
+      return { success: true, command: type, controls: { ...runtimeControls } };
+    }
+
+    if (type === 'resume_autonomy' || type === 'clear_emergency_stop') {
+      runtimeControls.emergencyStopActive = false;
+      appendAuditEvent('emergency_clear', 'orchestrator_command', type);
+      emitOrchestratorEvent('emergency_stop_cleared', { reason: type }, 'operator');
+      return { success: true, command: type, controls: { ...runtimeControls } };
+    }
+
+    if (type === 'apply_runtime_patch') {
+      const patch = payload.patch && typeof payload.patch === 'object' ? payload.patch : {};
+      const previousEmergency = Boolean(runtimeControls.emergencyStopActive);
+      Object.assign(runtimeControls, patch);
+      emitOrchestratorEvent('policy_updated', { patch, controls: { ...runtimeControls } }, 'operator');
+      if (!previousEmergency && runtimeControls.emergencyStopActive) {
+        emitOrchestratorEvent('emergency_stop_enabled', { reason: 'orchestrator_command_patch' }, 'operator');
+        appendAuditEvent('emergency_stop', 'orchestrator_command', 'Emergency stop enabled');
+      } else if (previousEmergency && !runtimeControls.emergencyStopActive) {
+        emitOrchestratorEvent('emergency_stop_cleared', { reason: 'orchestrator_command_patch' }, 'operator');
+        appendAuditEvent('emergency_clear', 'orchestrator_command', 'Emergency stop cleared');
+      }
+      return { success: true, command: type, controls: { ...runtimeControls } };
+    }
+
+    return { success: false, command: type, error: 'Unknown orchestrator command type' };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
 });
 
 ipcMain.handle('agent:operatorLoop:get', async () => {
@@ -3833,8 +4807,12 @@ ipcMain.handle('agent:listRollbacks', async () => {
 ipcMain.handle('agent:executeRollback', async (_, rollbackId) => {
   normalizeRollbackEntries();
   const entry = rollbackRegistry.entries.find((r) => r.id === rollbackId);
-  if (!entry) return { success: false, error: 'Rollback entry not found', rollbackId };
+  if (!entry) {
+    appendAuditEvent('rollback_failed', 'execute_rollback', `Rollback entry not found: ${rollbackId}`);
+    return { success: false, error: 'Rollback entry not found', rollbackId };
+  }
   if (entry.status !== 'ready') {
+    appendAuditEvent('rollback_failed', 'execute_rollback', `Rollback not executable (status=${entry.status})`, { rollbackId });
     return { success: false, error: `Rollback not executable (status=${entry.status})`, rollbackId };
   }
 
@@ -3845,6 +4823,7 @@ ipcMain.handle('agent:executeRollback', async (_, rollbackId) => {
       appliedAt: Date.now(),
       lastError: null,
     });
+    appendAuditEvent('rollback_executed', entry.action || 'execute_rollback', `Rollback applied: ${rollbackId}`, { rollbackId });
     return { success: true, rollbackId };
   }
 
@@ -3853,6 +4832,7 @@ ipcMain.handle('agent:executeRollback', async (_, rollbackId) => {
     lastError: result.error || 'Unknown rollback error',
     lastTriedAt: Date.now(),
   });
+  appendAuditEvent('rollback_failed', entry.action || 'execute_rollback', result.error || 'Unknown rollback error', { rollbackId });
   return { success: false, error: result.error || 'Unknown rollback error', rollbackId };
 });
 
@@ -3923,6 +4903,96 @@ ipcMain.handle('agent:replayLoadRun', async (_, runId) => {
   }
 });
 
+ipcMain.handle('agent:handsDoctor', async () => {
+  try {
+    const runs = listLedgerRuns().slice(0, 200);
+    const actionLatencies = [];
+    let verifyPasses = 0;
+    let verifyFails = 0;
+    let retries = 0;
+    let recoveries = 0;
+    let rollbackReady = 0;
+    let rollbackApplied = 0;
+    const errors = {};
+
+    for (const runMeta of runs) {
+      const filePath = getLedgerPath(runMeta.id);
+      if (!fs.existsSync(filePath)) continue;
+      const run = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+      for (const entry of run.entries || []) {
+        if (entry.type === 'hands_action' || entry.type === 'cognitive_step') {
+          const payload = entry.payload || {};
+          if (payload.latencyMs) actionLatencies.push(Number(payload.latencyMs));
+          if (payload.verifyPasses) verifyPasses += Number(payload.verifyPasses);
+          if (payload.verifyFails) verifyFails += Number(payload.verifyFails);
+          if (payload.recoveryAttempts) retries += Number(payload.recoveryAttempts);
+          if (payload.recoverySuccesses) recoveries += Number(payload.recoverySuccesses);
+          if (payload.rollback && payload.rollback.rollbackStatus === 'ready') rollbackReady += 1;
+          if (payload.rollback && payload.rollback.rollbackStatus === 'applied') rollbackApplied += 1;
+          if (payload.error) {
+            const key = String(payload.error).slice(0, 80);
+            errors[key] = (errors[key] || 0) + 1;
+          }
+        }
+      }
+    }
+
+    const sorted = actionLatencies.sort((a, b) => a - b);
+    const pct = (p) => sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length))] : 0;
+    const topError = Object.entries(errors).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+
+    return {
+      success: true,
+      metrics: {
+        runsAnalyzed: runs.length,
+        latency: { p50: pct(50), p90: pct(90), p99: pct(99) },
+        verify: { pass: verifyPasses, fail: verifyFails },
+        retries: { attempts: retries, successfulRecoveries: recoveries },
+        rollback: { ready: rollbackReady, applied: rollbackApplied },
+        lastErrorTaxonomy: topError,
+      },
+    };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('agent:handsReplayCheck', async (_, runId) => {
+  try {
+    const ledgerPath = getLedgerPath(runId);
+    if (!fs.existsSync(ledgerPath)) return { success: false, error: 'Replay run not found' };
+    const run = JSON.parse(fs.readFileSync(ledgerPath, 'utf-8'));
+    const actions = (run.entries || []).filter((e) => e.type === 'hands_action' || e.type === 'cognitive_step');
+    const signature = actions
+      .map((e) => `${e.type}:${e.payload?.action || e.payload?.actionType || e.payload?.type || 'na'}`)
+      .join('|');
+    const signatureHash = crypto.createHash('sha1').update(signature).digest('hex');
+    return {
+      success: true,
+      runId,
+      actionCount: actions.length,
+      deterministicSignature: signatureHash,
+    };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('agent:handsExportPrimeOS', async (_, opts = {}) => {
+  try {
+    const outputDir = opts.outputDir || path.join(dataDir, 'hands-primeos');
+    const exported = exportPrimeOSRuntimeBundle({
+      outputDir,
+      runtimeControls,
+      profile: orchestratorState.profile,
+      version: 'v2',
+    });
+    return { success: true, ...exported };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 // ═══════════════════════════════════════════════════════════════
 //  PERSISTENT GOALS — Goals that survive restarts
 //  Long-horizon planning. Progress that persists.
@@ -3949,13 +5019,18 @@ ipcMain.handle('goals:create', async (_, goal) => {
   };
   persistentGoals.goals.push(newGoal);
   saveJSON(goalsFile, persistentGoals);
+  emitOrchestratorEvent('goal_submitted', { goalId: newGoal.id, description: newGoal.description, priority: newGoal.priority }, 'operator');
   return { success: true, goal: newGoal };
 });
 ipcMain.handle('goals:update', async (_, goalId, updates) => {
   const goal = persistentGoals.goals.find(g => g.id === goalId);
   if (!goal) return { success: false, error: 'Goal not found' };
+  const previousStatus = goal.status;
   Object.assign(goal, updates, { updatedAt: Date.now() });
   saveJSON(goalsFile, persistentGoals);
+  if (previousStatus !== 'completed' && goal.status === 'completed') {
+    emitOrchestratorEvent('goal_completed', { goalId: goal.id, description: goal.description }, 'orchestrator');
+  }
   return { success: true, goal };
 });
 ipcMain.handle('goals:delete', async (_, goalId) => {
@@ -4317,7 +5392,7 @@ async function executeIPC(channel, ...args) {
               if (regex.test(e.name)) results.push({ name: e.name, path: path.join(d, e.name), isDirectory: e.isDirectory() });
               if (e.isDirectory()) walk(path.join(d, e.name), depth + 1);
             }
-          } catch (_) {}
+          } catch (_) { /* permission denied on dir is expected */ }
         }
         walk(resolved);
         return { success: true, results: results.slice(0, 50) };
@@ -4796,7 +5871,7 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
       lastResult: '',
       lastError: '',
     });
-  } catch (_) {}
+  } catch (e) { console.warn('[Cognitive] Failed to init operator loop state:', e.message); }
   try {
     const created = createLedgerRun('cognitive', {
       goal: goalText.slice(0, 1000),
@@ -4851,6 +5926,10 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
   const sendStep = (step) => {
     const safeStep = compactStepForIPC(step);
     mainWindow?.webContents.send('agent:cognitiveStep', safeStep);
+    if (!mainWindow?.webContents) {
+      const msg = `[Cognitive:${safeStep?.type || 'step'}] ${String(safeStep?.content || '').slice(0, 240)}`;
+      console.log(msg);
+    }
     try {
       if (!cognitiveLedgerRunId) return;
       // "Transient" steps are UI heartbeats (e.g. "still working...") and should not
@@ -4864,7 +5943,7 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
         goalProgress: safeStep.goalProgress ?? null,
         actionResult: safeStep.actionResult || null,
       });
-    } catch (_) {}
+    } catch (e) { console.warn('[Ledger] Failed to append cognitive step:', e.message); }
     try {
       if (safeStep?.type === 'act') {
         updateOperatorLoopState({
@@ -4877,7 +5956,7 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
           iterations: Number(operatorLoopState.iterations || 0) + 1,
         });
       }
-    } catch (_) {}
+    } catch (e) { console.warn('[Cognitive] Failed to update operator loop state:', e.message); }
   };
 
   const completeCognitive = (success, summary, iterations) => {
@@ -4896,7 +5975,7 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
         summary: String(summary || '').slice(0, 1200),
         iterations,
       });
-    } catch (_) {}
+    } catch (e) { console.warn('[Ledger] Failed to finalize cognitive run:', e.message); }
     try {
       updateOperatorLoopState({
         active: false,
@@ -4904,42 +5983,158 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
         lastResult: success ? String(summary || '').slice(0, 500) : '',
         lastError: success ? '' : String(summary || '').slice(0, 500),
       });
-    } catch (_) {}
+    } catch (e) { console.warn('[Cognitive] Failed to update operator loop state on completion:', e.message); }
     mainWindow?.webContents.send('agent:cognitiveComplete', { success, summary, iterations });
   };
 
   const workingMemory = [];
   const steps = [];
   const actionFailureCounts = new Map();
+  const actionContracts = makeActionContractRegistry();
+  const rollbackManager = createRollbackManager({
+    prepareRollbackForAction,
+    registerRollbackEntry,
+  });
   let noActionStopCount = 0;
-  const runTelemetry = {
-    startedAt: Date.now(),
-    actionCalls: 0,
-    totalActionMs: 0,
-    parallelBranches: 0,
-    dagPlans: 0,
-    dagNodesExecuted: 0,
-    dagParallelWaves: 0,
-    subloopsSpawned: 0,
-    maxSubloopDepth: 0,
+  const runTelemetry = createRunTelemetry();
+  const emitTelemetryStep = makeEmitTelemetryStep(sendStep);
+
+  // ── ACTION FIELD ENGINE state (IGT four forces for actions) ──
+  const actionFieldState = {
+    temperature: 0.5,
+    patterns: [],
+    stuckCount: 0,
+    lastStrategy: '',
+    explorationBias: 0.3,
+    creedViolationCount: 0,
+    totalActions: 0,
+    metacogChecks: 0,
   };
 
-  const emitTelemetryStep = (label, data, goalProgress = 0) => {
-    const payload = {
-      ...data,
-      emittedAt: Date.now(),
+  const actionFieldRecordAction = (trace) => {
+    const sig = `${trace.action}[${Object.keys(trace.params || {}).sort().join(',')}]`;
+    const dur = trace.duration || 0;
+    const existing = actionFieldState.patterns.find(p => p.signature === sig);
+    if (existing) {
+      existing.attempts += 1;
+      existing.successes += trace.success ? 1 : 0;
+      existing.failures += trace.success ? 0 : 1;
+      existing.avgDuration = (existing.avgDuration * (existing.attempts - 1) + dur) / existing.attempts;
+      existing.lastUsed = trace.timestamp;
+    } else {
+      if (actionFieldState.patterns.length >= 50) actionFieldState.patterns.shift();
+      actionFieldState.patterns.push({
+        signature: sig,
+        attempts: 1,
+        successes: trace.success ? 1 : 0,
+        failures: trace.success ? 0 : 1,
+        avgDuration: dur,
+        lastUsed: trace.timestamp,
+      });
+    }
+    actionFieldState.stuckCount = trace.success ? 0 : actionFieldState.stuckCount + 1;
+    actionFieldState.totalActions += 1;
+  };
+
+  const computeActionFieldForces = () => {
+    const total = actionFieldState.totalActions || 1;
+    const recentActions = steps.filter(s => s.type === 'act').slice(-8);
+    const recentCount = recentActions.length || 1;
+    const uniqueActions = new Set(recentActions.map(s => s.actionType || 'unknown')).size;
+    const diversity = uniqueActions / recentCount;
+    const stuckPressure = Math.min(actionFieldState.stuckCount / 3, 1);
+    const exploration = (1 - diversity) * 0.3 + stuckPressure * 0.4 +
+      (1 - Math.min(actionFieldState.patterns.length / 50, 1)) * 0.3;
+
+    const successRates = actionFieldState.patterns.filter(p => p.attempts >= 2).map(p => p.successes / p.attempts);
+    const avgSuccess = successRates.length > 0 ? successRates.reduce((a, b) => a + b, 0) / successRates.length : 0.5;
+    const recentSuccessRate = recentActions.length > 0
+      ? recentActions.filter(s => s.actionResult?.success).length / recentActions.length : 0.5;
+    const exploitation = avgSuccess * 0.4 + recentSuccessRate * 0.6;
+
+    const recentFails = recentActions.slice(-4).filter(s => !s.actionResult?.success).length;
+    const sameAction = recentActions.length >= 3 &&
+      new Set(recentActions.slice(-3).map(s => s.actionType)).size === 1;
+    const metacognition = (recentFails / 4) * 0.5 + (sameAction ? 0.5 : 0);
+
+    const failStreak = actionFieldState.stuckCount;
+    const unknownTerritory = actionFieldState.patterns.length < 3 && actionFieldState.totalActions > 5;
+    const incompleteness = Math.min(failStreak / 5, 1) * 0.6 + (unknownTerritory ? 0.4 : 0);
+
+    const clamp = (v) => Math.max(0, Math.min(1, v));
+    return {
+      exploration: clamp(exploration),
+      exploitation: clamp(exploitation),
+      metacognition: clamp(metacognition),
+      incompleteness: clamp(incompleteness),
     };
-    sendStep({
-      type: 'observe',
-      content: `[Telemetry] ${label}`,
-      timestamp: Date.now(),
-      actionType: 'telemetry',
-      actionResult: {
-        success: true,
-        output: JSON.stringify(payload).slice(0, 1000),
-      },
-      goalProgress,
-    });
+  };
+
+  const buildActionFieldDirective = (forces) => {
+    // Determine dominant force (incompleteness and metacognition get priority weights)
+    const weighted = [
+      ['incompleteness', forces.incompleteness * 1.3],
+      ['metacognition', forces.metacognition * 1.1],
+      ['exploration', forces.exploration],
+      ['exploitation', forces.exploitation],
+    ].sort((a, b) => b[1] - a[1]);
+    const dominant = weighted[0][0];
+
+    // Adjust temperature
+    let beta = actionFieldState.temperature;
+    if (forces.exploration > 0.6) beta -= 0.08;
+    if (forces.exploitation > 0.7) beta += 0.05;
+    if (forces.metacognition > 0.5) beta -= 0.04;
+    if (forces.incompleteness > 0.6) beta -= 0.1;
+    beta = Math.max(0.1, Math.min(0.95, beta));
+    actionFieldState.temperature = beta;
+
+    let strategy, reasoning, guidance;
+    switch (dominant) {
+      case 'incompleteness':
+        strategy = forces.incompleteness > 0.8 ? 'ASK' : 'STOP';
+        reasoning = forces.incompleteness > 0.8
+          ? 'At the boundary — action model is breaking. Need user input.'
+          : 'High incompleteness. Pause and re-observe before acting.';
+        guidance = 'Re-observe the environment or ask the user.';
+        break;
+      case 'metacognition':
+        strategy = 'REFLECT';
+        reasoning = 'Metacognition force dominant. Examine your action patterns before continuing.';
+        guidance = actionFieldState.stuckCount >= 3
+          ? 'STUCK LOOP DETECTED — try a fundamentally different approach.'
+          : 'Review the last 3-4 actions. Are they converging or drifting?';
+        break;
+      case 'exploration':
+        strategy = 'EXPLORE';
+        reasoning = 'Exploration force dominant. Current approaches exhausted or too narrow.';
+        guidance = 'Try an action type you have NOT used recently.';
+        break;
+      case 'exploitation':
+      default:
+        strategy = 'EXPLOIT';
+        reasoning = 'Exploitation force dominant. Known-good patterns available.';
+        const best = actionFieldState.patterns.filter(p => p.attempts >= 2)
+          .sort((a, b) => (b.successes / b.attempts) - (a.successes / a.attempts));
+        guidance = best.length > 0
+          ? `Best pattern: ${best[0].signature.split('[')[0]} (${((best[0].successes / best[0].attempts) * 100).toFixed(0)}% success)`
+          : 'Bias toward actions that previously succeeded.';
+        break;
+    }
+
+    actionFieldState.lastStrategy = strategy;
+    if (strategy === 'REFLECT') actionFieldState.metacogChecks += 1;
+
+    return [
+      '═══ ACTION FIELD ═══',
+      `Strategy: ${strategy} | β=${beta.toFixed(2)}`,
+      `Forces: Explore=${(forces.exploration * 100).toFixed(0)}% Exploit=${(forces.exploitation * 100).toFixed(0)}% Meta=${(forces.metacognition * 100).toFixed(0)}% Incomp=${(forces.incompleteness * 100).toFixed(0)}%`,
+      `${reasoning}`,
+      guidance ? `Guidance: ${guidance}` : '',
+      strategy === 'STOP' ? 'ACTION: STOP. Set shouldStop=true.' : '',
+      strategy === 'ASK' ? 'ACTION: ASK THE USER. You hit the boundary.' : '',
+      '═══ END ACTION FIELD ═══',
+    ].filter(Boolean).join('\n');
   };
 
   try {
@@ -4965,11 +6160,11 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
         const cwd = sysInfo.homeDir || os.homedir();
         initialObservations.push(`Platform: ${platform}, Home: ${cwd}`);
       }
-    } catch (_) {}
+    } catch (e) { console.warn('[Cognitive] Failed to gather system info:', e.message); }
     try {
       const fg = await executeIPC('agent:getForegroundWindow');
       if (fg?.output) initialObservations.push(`Active window: ${String(fg.output).slice(0, 120)}`);
-    } catch (_) {}
+    } catch (e) { console.warn('[Cognitive] Failed to get foreground window:', e.message); }
     try {
       const homeDir = os.homedir();
       const dirResult = await executeIPC('agent:listDir', homeDir);
@@ -4977,7 +6172,7 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
         const listing = (dirResult.output || dirResult.content || '').slice(0, 300);
         if (listing) initialObservations.push(`Home directory listing: ${listing}`);
       }
-    } catch (_) {}
+    } catch (e) { console.warn('[Cognitive] Failed to list home directory:', e.message); }
 
     if (initialObservations.length > 0) {
       const envStep = {
@@ -5047,7 +6242,7 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
       'list_custom_tools',
     ]);
 
-    const isParallelSafeAction = (action) => PARALLEL_SAFE_ACTIONS.has(action);
+    const isParallelSafeAction = (action) => isPlannerParallelSafe(action, PARALLEL_SAFE_ACTIONS);
     const ENFORCE_ACTION_GATES = true;
     const READ_ONLY_ACTIONS = new Set(PARALLEL_SAFE_ACTIONS);
     const REVERSIBLE_ACTIONS = new Set([
@@ -5071,6 +6266,23 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
       'keyboard_press',
       'keyboard_shortcut',
     ]);
+
+    for (const actionName of ['analyze_screen', 'mouse_click', 'keyboard_type', 'open_application', 'execute_command']) {
+      actionContracts.register({
+        action: actionName,
+        preconditions: () => ({ ok: true }),
+        execute: async (params) => executeHandsAction(actionName, params || {}, { executeIPC, analyzeScreen, neuralEnhanceAction, steps }),
+        verify: async (params, result) => verifyActionOutcome({
+          action: actionName,
+          params,
+          result,
+          analyzeScreen,
+          getForegroundWindow: async () => executeIPC('agent:getForegroundWindow'),
+        }),
+        rollback: async () => ({ attempted: false }),
+        retryPolicy: defaultRetryPolicy(actionName),
+      });
+    }
 
     const classifyExecutionTier = (action) => {
       if (READ_ONLY_ACTIONS.has(action)) return 'read-only';
@@ -5130,6 +6342,13 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
         }
       }
       if (memoryContext) contextParts.push(memoryContext);
+
+      // ── ACTION FIELD: compute four forces and inject directive ──
+      if (iteration > 1 && !settings.disableActionField) {
+        const forces = computeActionFieldForces();
+        const fieldDirective = buildActionFieldDirective(forces);
+        contextParts.push('', fieldDirective);
+      }
 
       // Phase: THINK — decide next action
       const thinkMessages = [
@@ -5239,12 +6458,16 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
           emitTelemetryStep('run summary', {
             elapsedMs: Date.now() - runTelemetry.startedAt,
             actionCalls: runTelemetry.actionCalls,
-            avgActionMs: runTelemetry.actionCalls > 0 ? Math.round(runTelemetry.totalActionMs / runTelemetry.actionCalls) : 0,
+            avgActionMs: avgActionMs(runTelemetry),
             parallelBranches: runTelemetry.parallelBranches,
             dagPlans: runTelemetry.dagPlans,
             dagNodesExecuted: runTelemetry.dagNodesExecuted,
             subloopsSpawned: runTelemetry.subloopsSpawned,
             maxSubloopDepth: runTelemetry.maxSubloopDepth,
+            verifyPasses: runTelemetry.verifyPasses,
+            verifyFails: runTelemetry.verifyFails,
+            recoveryAttempts: runTelemetry.recoveryAttempts,
+            recoverySuccesses: runTelemetry.recoverySuccesses,
             outcome: success ? 'success' : 'stopped',
           }, decision.goalProgress || 0);
 
@@ -5260,186 +6483,25 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
 
       // Helper: execute a single action by name + params
       async function executeSingleAction(action, params) {
-        switch (action) {
-          case 'execute_command':
-            return await executeIPC('agent:execute', params.command);
-          case 'read_file':
-            return await executeIPC('agent:readFile', params.path);
-          case 'write_file':
-            return await executeIPC('agent:writeFile', params.path, params.content);
-          case 'list_directory':
-            return await executeIPC('agent:listDir', params.path);
-          case 'create_directory':
-            return await executeIPC('agent:createDir', params.path);
-          case 'delete_file':
-            return await executeIPC('agent:deleteFile', params.path);
-          case 'rename_file':
-            return await executeIPC('agent:renameFile', params.oldPath, params.newPath);
-          case 'open_url':
-            return await executeIPC('agent:openUrl', params.url);
-          case 'search_files':
-            return await executeIPC('agent:searchFiles', params.directory, params.pattern);
-          case 'clipboard_read':
-            return await executeIPC('agent:clipboard', 'read');
-          case 'clipboard_write':
-            return await executeIPC('agent:clipboard', 'write', params.text);
-          case 'system_info':
-            return await executeIPC('agent:systemDetails');
-          case 'list_processes':
-            return await executeIPC('agent:listProcesses');
-          case 'web_fetch':
-            return await executeIPC('agent:webFetch', params.url, params);
-          case 'web_search':
-            return await executeIPC('agent:webSearch', params.query);
-          case 'web_screenshot':
-            return await executeIPC('agent:webScreenshot', params.url);
-          case 'elevenlabs_tts':
-            return await executeIPC('agent:elevenlabsTts', params.text, params);
-          case 'elevenlabs_generate_music':
-            return await executeIPC('agent:elevenlabsGenerateMusic', params.prompt, params);
-          // ─── Screen Vision Actions ───────────────────
-          case 'screenshot_desktop': {
-            const r = await analyzeScreen('Describe everything visible on the screen. Identify all windows, text, UI elements, and their approximate pixel coordinates.');
-            return r.success ? { success: true, output: r.analysis } : r;
-          }
-          case 'analyze_screen': {
-            const r = await analyzeScreen(params.prompt || 'Describe what you see on the screen.');
-            return r.success ? { success: true, output: r.analysis } : r;
-          }
-          case 'get_screen_dimensions':
-            return await executeIPC('agent:getScreenDimensions');
-          case 'get_foreground_window':
-            return await executeIPC('agent:getForegroundWindow');
-          // ─── Input Simulation Actions (NeuralCore-enhanced) ────
-          case 'mouse_move': {
-            const nm = await neuralEnhanceAction('mouse_move', params, steps);
-            const mp = nm || params;
-            return await executeIPC('agent:mouseMove', mp.x, mp.y, mp.smooth !== false);
-          }
-          case 'mouse_click': {
-            const nc = await neuralEnhanceAction('mouse_click', params, steps);
-            const cp = nc || params;
-            if (cp._neuralTimingMs) await new Promise(r => setTimeout(r, Math.min(cp._neuralTimingMs, 500)));
-            return await executeIPC('agent:mouseClick', cp.x, cp.y, cp.button, cp.doubleClick);
-          }
-          case 'mouse_scroll':
-            return await executeIPC('agent:mouseScroll', params.x, params.y, params.amount);
-          case 'mouse_drag': {
-            const nd = await neuralEnhanceAction('mouse_drag', params, steps);
-            const dp = nd || params;
-            return await executeIPC('agent:mouseDrag', dp.fromX, dp.fromY, dp.toX, dp.toY);
-          }
-          case 'keyboard_type':
-            return await executeIPC('agent:keyboardType', params.text);
-          case 'keyboard_press':
-            return await executeIPC('agent:keyboardPress', params.key);
-          case 'keyboard_shortcut':
-            return await executeIPC('agent:keyboardShortcut', params.modifiers, params.key);
-          case 'get_mouse_position':
-            return await executeIPC('agent:getMousePosition');
-          case 'minimize_self':
-            return await executeIPC('agent:minimizeSelf');
-          // ─── Tool Creation Actions ───────────────────
-          case 'create_tool':
-            return await executeIPC('agent:createTool', params);
-          case 'list_custom_tools':
-            return await executeIPC('agent:listTools');
-          case 'execute_tool':
-            return await executeIPC('agent:executeTool', params.toolId, params);
-          // ─── NeuralCore Actions ────────────────────────
-          case 'neural_status':
-            return await executeIPC('neural:status');
-          case 'neural_predict':
-            return await executeIPC('neural:predict', params);
-          case 'neural_train':
-            return await executeIPC('neural:train', params);
-          case 'neural_model_stats':
-            return await executeIPC('neural:modelStats');
-          case 'neural_generate_trajectory':
-            return await executeIPC('neural:generateTrajectory', params);
-          case 'neural_plan':
-            return await executeIPC('neural:plan', params);
-          default:
-            return { success: false, error: `Unknown action: ${action}` };
-        }
+        return await executeHandsAction(action, params || {}, {
+          executeIPC,
+          analyzeScreen,
+          neuralEnhanceAction,
+          steps,
+        });
       }
 
       const evaluateActionGate = (action, stepParams) => {
-        const tier = classifyExecutionTier(action);
-        const policyGate = mapActionToPolicyGate(action);
-        const paramsText = JSON.stringify(stepParams || {}).toLowerCase();
-        const actionText = `${action} ${paramsText}`;
-
-        // Safe defaults live in main for now; settings keys can override when present.
-        const policySnapshot = {
-          conscienceEnabled: runtimeControls.conscienceEnabled ?? (settings?.conscienceEnabled ?? true),
-          requireConsentForRiskyActions:
-            runtimeControls.consentMode === 'manual'
-              ? true
-              : runtimeControls.consentMode === 'auto'
-                ? false
-                : (runtimeControls.requireConsentForRiskyActions ?? (settings?.requireConsentForRiskyActions ?? true)),
-          ethicalOverrideAllowed: runtimeControls.ethicalOverrideAllowed ?? (settings?.ethicalOverrideAllowed ?? true),
-          allowNetworkCalls: runtimeControls.allowNetworkCalls ?? (settings?.allowNetworkCalls ?? true),
-          allowFileSystemWrites: runtimeControls.allowFileSystemWrites ?? (settings?.allowFileSystemWrites ?? true),
-          allowProcessExecution: runtimeControls.allowProcessExecution ?? (settings?.allowProcessExecution ?? true),
-          allowScreenCapture: runtimeControls.allowScreenCapture ?? (settings?.allowScreenCapture ?? true),
-          allowInputSimulation: runtimeControls.allowInputSimulation ?? (settings?.allowInputSimulation ?? true),
-          allowToolCreation: runtimeControls.allowToolCreation ?? (settings?.allowToolCreation ?? true),
-        };
-
-        let policyAllowed = true;
-        if (policyGate === 'network') policyAllowed = policySnapshot.allowNetworkCalls;
-        else if (policyGate === 'fs-write') policyAllowed = policySnapshot.allowFileSystemWrites;
-        else if (policyGate === 'exec') policyAllowed = policySnapshot.allowProcessExecution;
-        else if (policyGate === 'screen') policyAllowed = policySnapshot.allowScreenCapture;
-        else if (policyGate === 'input-sim') policyAllowed = policySnapshot.allowInputSimulation;
-        else if (policyGate === 'tool-create') policyAllowed = policySnapshot.allowToolCreation;
-
-        let conscienceVerdict = 'proceed';
-        if (policySnapshot.conscienceEnabled) {
-          const destructive = /\b(rm\s+-rf|format|del\s+\/[sfq]|wipe|erase|destroy|delete.+(all|system|root|windows|system32))\b/i.test(actionText);
-          const sensitive = /\b(password|credential|secret|api.?key|token|private.?key|\.env|wallet|seed.?phrase)\b/i.test(actionText);
-
-          if (destructive) conscienceVerdict = 'refuse';
-          else if (sensitive) conscienceVerdict = 'ask-first';
-          else if (tier === 'high-risk') conscienceVerdict = policySnapshot.requireConsentForRiskyActions ? 'ask-first' : 'caution';
-          else if (tier === 'reversible') conscienceVerdict = 'caution';
-
-          // NeuralCore risk escalation — a quantitative signal from the physics-informed model
-          const neuralRisk = stepParams?._neuralRisk;
-          const neuralConf = stepParams?._neuralConfidence ?? 0.5;
-          if (typeof neuralRisk === 'number' && neuralRisk > 0) {
-            const weighted = neuralRisk * neuralConf;
-            if (weighted > 0.7 && conscienceVerdict === 'proceed') {
-              conscienceVerdict = 'ask-first';
-            } else if (weighted > 0.5 && conscienceVerdict === 'proceed') {
-              conscienceVerdict = 'caution';
-            }
-          }
-        }
-
-        const blockedByPolicy = !policyAllowed;
-        const blockedByConscience = conscienceVerdict === 'refuse';
-        const consentRequired = conscienceVerdict === 'ask-first';
-        const blockedByNoUiDirective = strictNoUiActions && UI_ACTIONS.has(action);
-        const blocked = ENFORCE_ACTION_GATES && (blockedByPolicy || blockedByConscience || blockedByNoUiDirective);
-
-        let blockReason = '';
-        if (blockedByPolicy) blockReason = 'POLICY_BLOCK: action not allowed by operator policy';
-        else if (blockedByConscience) blockReason = 'CONSCIENCE_REFUSE: action declined by conscience gate';
-        else if (blockedByNoUiDirective) blockReason = 'OPERATOR_DIRECTIVE_BLOCK: UI/input actions are disabled for this goal';
-        else if (consentRequired) blockReason = 'CONSENT_REQUIRED: action requires user confirmation';
-
-        return {
-          tier,
-          policyAllowed,
-          conscienceVerdict,
-          consentRequired,
-          blocked,
-          blockReason,
-          policySnapshot,
-        };
+        return evaluateHandsActionGate({
+          action,
+          params: stepParams || {},
+          runtimeControls,
+          settings,
+          sets: { READ_ONLY_ACTIONS, REVERSIBLE_ACTIONS, HIGH_RISK_ACTIONS },
+          strictNoUiActions,
+          uiActions: UI_ACTIONS,
+          isLimitedScopeExecCommand,
+        });
       };
 
       const requestUserConsent = (payload, timeoutMs = 120000) => {
@@ -5502,6 +6564,13 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
           };
           steps.push(actStep);
           sendStep(actStep);
+          actionFieldRecordAction({
+            action,
+            params: stepParams || {},
+            success: false,
+            timestamp: Date.now(),
+            duration: 0,
+          });
           return { actionResult, resultOutput, latencyMs: 0 };
         }
 
@@ -5528,6 +6597,12 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
           };
           const consentResult = await requestUserConsent(consentPayload);
           consentDecision = consentResult?.decision || 'denied';
+          appendAuditEvent(
+            consentDecision === 'approved' || consentDecision === 'overridden' ? 'consent_approved' : 'consent_denied',
+            action,
+            `Consent decision=${consentDecision}`,
+            { tier: gateState.tier, verdict: gateState.conscienceVerdict },
+          );
 
           if (consentDecision === 'approved' || consentDecision === 'overridden') {
             finalBlocked = false;
@@ -5551,6 +6626,22 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
             consentDecision,
           },
           progress || 0,
+        );
+        appendAuditEvent(
+          finalBlocked ? 'gate_block' : 'gate_pass',
+          action,
+          finalBlocked ? finalBlockReason : 'Gate approved action',
+          { tier: gateState.tier, verdict: gateState.conscienceVerdict },
+        );
+        emitOrchestratorEvent(
+          finalBlocked ? 'action_blocked' : 'action_executed',
+          {
+            action,
+            tier: gateState.tier,
+            verdict: gateState.conscienceVerdict,
+            reason: finalBlocked ? finalBlockReason : 'approved',
+          },
+          'policy',
         );
 
         const actionKey = `${action}:${JSON.stringify(stepParams || {})}`;
@@ -5626,43 +6717,80 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
 
           let rollbackDraft = null;
           try {
-            rollbackDraft = prepareRollbackForAction(action, stepParams || {});
+            rollbackDraft = rollbackManager.prepare(action, stepParams || {});
           } catch (_) {
             rollbackDraft = null;
           }
           try {
-            actionResult = await executeSingleAction(action, stepParams || {});
-            if (actionResult?.success && rollbackDraft) {
-              const entry = registerRollbackEntry({
-                id: rollbackDraft.id,
-                action: rollbackDraft.action,
-                kind: rollbackDraft.kind,
-                affectedTargets: rollbackDraft.affectedTargets || [],
-                createdAt: Date.now(),
-                status: 'ready',
-                payload: rollbackDraft.payload || {},
+            const contract = actionContracts.get(action);
+            const retryPolicy = contract?.retryPolicy || defaultRetryPolicy(action);
+            const maxAttempts = Math.max(1, Number(retryPolicy.maxAttempts || 1));
+            let attempt = 0;
+            let verifyState = { pass: true, reason: 'skip' };
+            while (attempt < maxAttempts) {
+              attempt += 1;
+              if (contract?.preconditions) {
+                const pre = await contract.preconditions(stepParams || {});
+                if (pre && pre.ok === false) {
+                  actionResult = { success: false, error: pre.reason || 'Preconditions failed' };
+                  break;
+                }
+              }
+              actionResult = contract?.execute
+                ? await contract.execute(stepParams || {})
+                : await executeSingleAction(action, stepParams || {});
+
+              verifyState = await verifyActionOutcome({
+                action,
+                params: stepParams || {},
+                result: actionResult,
+                analyzeScreen,
+                getForegroundWindow: async () => executeIPC('agent:getForegroundWindow'),
               });
-              rollbackMeta = {
-                rollbackId: entry.id,
-                rollbackStatus: entry.status,
-                rollbackTargets: entry.affectedTargets || [],
-              };
+              if (verifyState.pass) {
+                runTelemetry.verifyPasses += 1;
+                break;
+              }
+
+              runTelemetry.verifyFails += 1;
+              runTelemetry.recoveryAttempts += 1;
+              const recovery = await runRecoveryPlan({
+                action,
+                params: stepParams || {},
+                executeSingleAction,
+                analyzeScreen,
+                emitTelemetryStep,
+                goalProgress: progress || 0,
+              });
+              if (recovery.success) {
+                runTelemetry.recoverySuccesses += 1;
+                actionResult = recovery.result;
+                break;
+              }
+
+              if (attempt < maxAttempts && retryPolicy.delayMs > 0) {
+                await new Promise((r) => setTimeout(r, retryPolicy.delayMs));
+              }
+            }
+
+            if (actionResult?.success && rollbackDraft) {
+              rollbackMeta = rollbackManager.registerFromDraft(rollbackDraft);
               actionResult.rollback = rollbackMeta;
             } else if (!actionResult?.success && rollbackDraft?.kind === 'delete_file' && rollbackDraft?.payload?.backupPath) {
               try {
                 fs.rmSync(rollbackDraft.payload.backupPath, { recursive: true, force: true });
-              } catch (_) {}
+              } catch (e) { console.warn('[Rollback] Failed to clean up backup:', e.message); }
             }
           } catch (e) {
             actionResult = { success: false, error: e.message };
           }
           // Clear heartbeat timers if any.
           if (heartbeatInterval !== null) {
-            try { clearInterval(heartbeatInterval); } catch (_) {}
+            try { clearInterval(heartbeatInterval); } catch (_) { /* timer cleanup is best-effort */ }
             heartbeatInterval = null;
           }
           if (heartbeatFirstBeat !== null) {
-            try { clearTimeout(heartbeatFirstBeat); } catch (_) {}
+            try { clearTimeout(heartbeatFirstBeat); } catch (_) { /* timer cleanup is best-effort */ }
             heartbeatFirstBeat = null;
           }
         }
@@ -5698,6 +6826,23 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
         };
         steps.push(actStep);
         sendStep(actStep);
+        actionFieldRecordAction({
+          action,
+          params: stepParams || {},
+          success: !!actionResult.success,
+          timestamp: Date.now(),
+          duration: latencyMs,
+        });
+        appendActionLedger({
+          appendLedgerEntry,
+          runId: cognitiveLedgerRunId,
+          action,
+          params: stepParams || {},
+          result: actionResult,
+          tier: gateState.tier,
+          blocked: finalBlocked,
+          rollback: rollbackMeta,
+        });
         workingMemory.push(
           actionResult.success
             ? `${action} OK: ${(typeof resultOutput === 'string' ? resultOutput : '').slice(0, 90)}`
@@ -5707,6 +6852,7 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
       }
 
       async function executeDecisionActions(decisionPayload, context = { depth: 0 }) {
+        decisionPayload = normalizeDecisionPayload(decisionPayload);
         if (context.depth > 2) {
           return {
             isSequence: false,
@@ -6006,16 +7152,17 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
             (isSequence ? 'sequence' : 'single'),
           actionsExecuted: sequenceResults.length,
           failed: sequenceFailed,
-          avgActionMs:
-            runTelemetry.actionCalls > 0
-              ? Math.round(runTelemetry.totalActionMs / runTelemetry.actionCalls)
-              : 0,
+          avgActionMs: avgActionMs(runTelemetry),
           parallelBranches: runTelemetry.parallelBranches,
           dagPlans: runTelemetry.dagPlans,
           dagNodesExecuted: runTelemetry.dagNodesExecuted,
           dagParallelWaves: runTelemetry.dagParallelWaves,
           subloopsSpawned: runTelemetry.subloopsSpawned,
           maxSubloopDepth: runTelemetry.maxSubloopDepth,
+          verifyPasses: runTelemetry.verifyPasses,
+          verifyFails: runTelemetry.verifyFails,
+          recoveryAttempts: runTelemetry.recoveryAttempts,
+          recoverySuccesses: runTelemetry.recoverySuccesses,
           modeStats: execution?.telemetry || undefined,
         },
         decision.goalProgress || 0,
@@ -6035,15 +7182,20 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
       const reflectSuccess = isSequence ? !sequenceFailed : lastActionResult?.success;
 
       const reflectSummary = `${reflectAction} → ${reflectSuccess ? 'SUCCESS' : 'FAILURE'}: ${(typeof reflectOutput === 'string' ? reflectOutput : JSON.stringify(reflectOutput)).slice(0, 200)}`;
-      const reflectStep = {
-        type: 'reflect',
-        content: reflectSummary.slice(0, 300),
-        timestamp: Date.now(),
-        goalProgress: decision.goalProgress || 0,
-      };
-      steps.push(reflectStep);
-      sendStep(reflectStep);
-      workingMemory.push(`Result: ${reflectSummary.slice(0, 100)}`);
+
+      if (settings.skipReflection && reflectSuccess) {
+        workingMemory.push(`Result: ${reflectSummary.slice(0, 100)}`);
+      } else {
+        const reflectStep = {
+          type: 'reflect',
+          content: reflectSummary.slice(0, 300),
+          timestamp: Date.now(),
+          goalProgress: decision.goalProgress || 0,
+        };
+        steps.push(reflectStep);
+        sendStep(reflectStep);
+        workingMemory.push(`Result: ${reflectSummary.slice(0, 100)}`);
+      }
 
       // Deferred shouldStop: model said shouldStop but also had actions — now they've run
       if (decision.shouldStop && hasDecisionActions) {
@@ -6065,12 +7217,16 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
         emitTelemetryStep('run summary', {
           elapsedMs: Date.now() - runTelemetry.startedAt,
           actionCalls: runTelemetry.actionCalls,
-          avgActionMs: runTelemetry.actionCalls > 0 ? Math.round(runTelemetry.totalActionMs / runTelemetry.actionCalls) : 0,
+          avgActionMs: avgActionMs(runTelemetry),
           parallelBranches: runTelemetry.parallelBranches,
           dagPlans: runTelemetry.dagPlans,
           dagNodesExecuted: runTelemetry.dagNodesExecuted,
           subloopsSpawned: runTelemetry.subloopsSpawned,
           maxSubloopDepth: runTelemetry.maxSubloopDepth,
+          verifyPasses: runTelemetry.verifyPasses,
+          verifyFails: runTelemetry.verifyFails,
+          recoveryAttempts: runTelemetry.recoveryAttempts,
+          recoverySuccesses: runTelemetry.recoverySuccesses,
           outcome: success ? 'success' : 'stopped',
         }, decision.goalProgress || 0);
 
@@ -6103,15 +7259,16 @@ ipcMain.on('agent:startCognitive', async (event, goal) => {
     emitTelemetryStep('run summary', {
       elapsedMs: Date.now() - runTelemetry.startedAt,
       actionCalls: runTelemetry.actionCalls,
-      avgActionMs:
-        runTelemetry.actionCalls > 0
-          ? Math.round(runTelemetry.totalActionMs / runTelemetry.actionCalls)
-          : 0,
+      avgActionMs: avgActionMs(runTelemetry),
       parallelBranches: runTelemetry.parallelBranches,
       dagPlans: runTelemetry.dagPlans,
       dagNodesExecuted: runTelemetry.dagNodesExecuted,
       subloopsSpawned: runTelemetry.subloopsSpawned,
       maxSubloopDepth: runTelemetry.maxSubloopDepth,
+      verifyPasses: runTelemetry.verifyPasses,
+      verifyFails: runTelemetry.verifyFails,
+      recoveryAttempts: runTelemetry.recoveryAttempts,
+      recoverySuccesses: runTelemetry.recoverySuccesses,
       outcome: 'max-iterations',
     }, 0);
 
@@ -6129,9 +7286,29 @@ ipcMain.on('agent:killCognitive', () => {
   cognitiveKillFlag = true;
 });
 
-// ─── Save vector store on exit ─────────────────────────────────
+// ─── Save vector store + auto-export on exit ──────────────────
 app.on('before-quit', () => {
+  _pendingVectorWrite = false;
   saveJSON(vectorFile, vectorStore);
+  // Auto-export memories on quit to prevent data loss
+  try {
+    const exportDir = memoryExportDir;
+    if (!fs.existsSync(exportDir)) fs.mkdirSync(exportDir, { recursive: true });
+    if (vectorStore.memories.length > 50) {
+      const exportData = {
+        version: '1.0',
+        exportedAt: Date.now(),
+        vectors: vectorStore.memories,
+        legacyMemory: loadJSON(memoryFile, null),
+        spark: loadJSON(sparkFile, null),
+        goals: loadJSON(goalsFile, null),
+      };
+      saveJSON(path.join(exportDir, 'latest.json'), exportData);
+      console.log(`[Memory AutoExport] Saved ${vectorStore.memories.length} vectors on quit`);
+    }
+  } catch (e) {
+    console.error('[Memory AutoExport] Failed:', e.message);
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -6142,6 +7319,14 @@ app.on('before-quit', () => {
 let eventMonitorTimer = null;
 let lastDiskCheckTime = 0;
 let lastGoalCheckTime = 0;
+
+function emitOperationalEvent(payload) {
+  if (mainWindow?.webContents) {
+    mainWindow.webContents.send('proactive:event', payload);
+    return;
+  }
+  console.log(`[Proactive:${payload.type}] ${payload.message}`);
+}
 
 async function checkProactiveEvents() {
   try {
@@ -6155,7 +7340,7 @@ async function checkProactiveEvents() {
               try {
                 const info = JSON.parse(stdout);
                 if (info.FreeGB < 5) {
-                  mainWindow?.webContents.send('proactive:event', {
+                  emitOperationalEvent({
                     type: 'low_disk',
                     message: `Low disk space: ${info.FreeGB}GB free. Consider cleaning up temporary files.`,
                     severity: info.FreeGB < 2 ? 'high' : 'medium',
@@ -6165,6 +7350,23 @@ async function checkProactiveEvents() {
               } catch {}
             }
           });
+      } else {
+        exec(`sh -lc "df -Pk / | awk 'NR==2 {print \\$4}'"`, { timeout: 5000 }, (err, stdout) => {
+          if (!err && stdout) {
+            const kbFree = Number(String(stdout).trim());
+            if (Number.isFinite(kbFree) && kbFree > 0) {
+              const freeGb = Math.round((kbFree / 1024 / 1024) * 10) / 10;
+              if (freeGb < 5) {
+                emitOperationalEvent({
+                  type: 'low_disk',
+                  message: `Low disk space: ${freeGb}GB free on /. Consider apt cleanup and log rotation.`,
+                  severity: freeGb < 2 ? 'high' : 'medium',
+                  timestamp: Date.now(),
+                });
+              }
+            }
+          }
+        });
       }
     }
 
@@ -6174,7 +7376,7 @@ async function checkProactiveEvents() {
       const activeGoals = persistentGoals.goals.filter(g => g.status === 'active');
       const staleGoals = activeGoals.filter(g => Date.now() - g.updatedAt > 86400000); // >24h without update
       if (staleGoals.length > 0) {
-        mainWindow?.webContents.send('proactive:event', {
+        emitOperationalEvent({
           type: 'stale_goals',
           message: `${staleGoals.length} goal(s) haven't been updated in 24+ hours: ${staleGoals.map(g => g.description).join('; ')}`,
           severity: 'low',
@@ -6191,6 +7393,16 @@ async function checkProactiveEvents() {
 function startEventMonitor() {
   eventMonitorTimer = setInterval(checkProactiveEvents, 60000); // Check every minute
   setTimeout(checkProactiveEvents, 10000); // First check after 10 seconds
+}
+
+function emitOpsSnapshot() {
+  try {
+    const runs = listLedgerRuns().slice(0, 5);
+    const completed = runs.filter((r) => r.status === 'completed').length;
+    console.log(`[Ops] ledgers=${runs.length} completed=${completed} activeGoals=${persistentGoals.goals.filter(g => g.status === 'active').length} memories=${getVectorStats().total}`);
+  } catch (e) {
+    console.log('[Ops] Snapshot failed:', e.message);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -6282,6 +7494,19 @@ ipcMain.handle('neural:loadModels', async (_, checkpoint) => {
 app.whenReady().then(() => {
   startNightmind();
   startEventMonitor();
+  setInterval(() => {
+    orchestratorState.lastHeartbeatAt = Date.now();
+    orchestratorState.heartbeatCount += 1;
+    if (orchestratorState.heartbeatCount % 6 === 0) {
+      emitOrchestratorEvent(
+        'heartbeat',
+        { heartbeatCount: orchestratorState.heartbeatCount, mode: DAEMON_MODE ? 'daemon' : 'desktop' },
+        'orchestrator',
+      );
+    }
+  }, 10000);
+  setInterval(emitOpsSnapshot, 300000);
+  setTimeout(emitOpsSnapshot, 15000);
   // Auto-generate goals after 5 minutes of runtime
   setTimeout(generateAutonomousGoals, 300000);
   // Then every 30 minutes
@@ -6310,5 +7535,13 @@ app.whenReady().then(() => {
     console.error('[NeuralCore] Failed to start bridge:', e.message);
   }
 
-  console.log('[AGI PRIME] All systems initialized — Vision, Hands, Memory, Goals, Tools, NeuralCore active');
+  emitOrchestratorEvent('profile_changed', { profile: orchestratorState.profile, mode: DAEMON_MODE ? 'daemon' : 'desktop' }, 'orchestrator');
+  console.log(`[AGI PRIME] All systems initialized — mode=${DAEMON_MODE ? 'daemon' : 'desktop'} Vision, Hands, Memory, Goals, Tools, NeuralCore active`);
 });
+
+for (const sig of ['SIGTERM', 'SIGINT']) {
+  process.on(sig, () => {
+    console.log(`[AGI PRIME] Received ${sig}, shutting down...`);
+    app.quit();
+  });
+}
