@@ -540,12 +540,12 @@ Provide a structured response that clearly demonstrates each criterion. Include 
           provenance: 'synthetic',
         });
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       results.push({
         capabilityId: capability.id,
         score: 0,
         passed: false,
-        summary: `Execution failed: ${error?.message || 'Unknown error'}`,
+        summary: `Execution failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
         latencyMs: Date.now() - t0,
         provenance: 'synthetic',
       });

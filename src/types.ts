@@ -512,6 +512,28 @@ export interface RuntimeControlSyncState {
   lastError: string | null;
 }
 
+export interface RuntimeHealthIssue {
+  key: string;
+  severity: 'info' | 'warn' | 'error' | 'critical';
+  count: number;
+  lastSeenAt: number | null;
+  samples: string[];
+}
+
+export interface RuntimeHealthSummary {
+  generatedAt: number;
+  dataDir: string;
+  auditLogPath: string;
+  orchestratorEventsPath: string;
+  totalAuditEntries: number;
+  totalOrchestratorEvents: number;
+  issues: RuntimeHealthIssue[];
+  services: {
+    neuralBridgeReady: boolean;
+    rendererResponsive: boolean;
+  };
+}
+
 // ─── NeuralCore (Physics-Informed Neural Engine) ────────────────
 
 export interface NeuralCoreState {
@@ -1487,6 +1509,7 @@ declare global {
           soul: Record<string, unknown>;
           consciousness: Record<string, unknown>;
         }>;
+        healthSummary: () => Promise<RuntimeHealthSummary>;
       };
       nightmind?: {
         onInsight: (cb: (data: { insight: string; timestamp: number }) => void) => () => void;

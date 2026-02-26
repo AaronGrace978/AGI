@@ -192,6 +192,16 @@ class NeuralBridgeServer:
         # Send progress events during training
         history = self.trainer.train(verbose=False)
 
+        if len(history) == 0:
+            return {
+                "error": (
+                    "No training demonstrations found yet. "
+                    "Run a few HANDS tasks first so AGI PRIME can record action ledgers."
+                ),
+                "epochs_completed": 0,
+                "checkpoint_saved": False,
+            }
+
         for result in history:
             self._send_event("training_progress", {
                 "epoch": result.epoch,

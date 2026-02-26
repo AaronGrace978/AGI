@@ -3,7 +3,9 @@
 //  Each icon is an independent OS module of the AGI
 // ═══════════════════════════════════════════════════════════════
 
+import { memo } from 'react';
 import { useStore } from '../store';
+import { useShallow } from 'zustand/react/shallow';
 import type { ModuleId } from '../types';
 
 interface SidebarItem {
@@ -32,10 +34,10 @@ function getStatusClass(state: string): string {
   return '';
 }
 
-export default function Sidebar() {
+export default memo(function Sidebar() {
   const activeModule = useStore((s) => s.activeModule);
   const setActiveModule = useStore((s) => s.setActiveModule);
-  const moduleStates = useStore((s) => s.moduleStates);
+  const moduleStates = useStore(useShallow((s) => s.moduleStates));
 
   return (
     <nav className="sidebar">
@@ -75,4 +77,4 @@ export default function Sidebar() {
       </div>
     </nav>
   );
-}
+});

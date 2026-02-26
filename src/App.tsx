@@ -3,29 +3,41 @@
 //  The operating system for artificial general intelligence
 // ═══════════════════════════════════════════════════════════════
 
-import { useEffect } from 'react';
+import { useEffect, lazy, Suspense, memo } from 'react';
 import { useStore } from './store';
-import MatrixRain from './components/MatrixRain';
 import Sidebar from './components/Sidebar';
-import NexusPanel from './components/NexusPanel';
-import MemoryPanel from './components/MemoryPanel';
-import HeartPanel from './components/HeartPanel';
-import MindPanel from './components/MindPanel';
-import HandsPanel from './components/HandsPanel';
-import ForgePanel from './components/ForgePanel';
-import GauntletPanel from './components/GauntletPanel';
-import SovereignPanel from './components/SovereignPanel';
-import SparkPanel from './components/SparkPanel';
-import VoiceBox from './components/VoiceBox';
-import CreedPanel from './components/CreedPanel';
-import SettingsPanel from './components/SettingsPanel';
+import agiPrimeLogo from './assets/agi-prime-logo.svg';
+import { AppErrorBoundary } from './components/AppErrorBoundary';
+
+const NexusPanel = lazy(() => import('./components/NexusPanel'));
+const MemoryPanel = lazy(() => import('./components/MemoryPanel'));
+const HeartPanel = lazy(() => import('./components/HeartPanel'));
+const MindPanel = lazy(() => import('./components/MindPanel'));
+const HandsPanel = lazy(() => import('./components/HandsPanel'));
+const ForgePanel = lazy(() => import('./components/ForgePanel'));
+const GauntletPanel = lazy(() => import('./components/GauntletPanel'));
+const SovereignPanel = lazy(() => import('./components/SovereignPanel'));
+const SparkPanel = lazy(() => import('./components/SparkPanel'));
+const VoiceBox = lazy(() => import('./components/VoiceBox'));
+const CreedPanel = lazy(() => import('./components/CreedPanel'));
+const SettingsPanel = lazy(() => import('./components/SettingsPanel'));
+
+function PanelLoader() {
+  return (
+    <div className="panel-loader">
+      <div className="panel-loader-dot" />
+    </div>
+  );
+}
 
 function TitleBar() {
   return (
     <div className="titlebar">
       <div className="titlebar-drag">
         <div className="titlebar-brand">
-          <div className="titlebar-logo">◆</div>
+          <div className="titlebar-logo">
+            <img src={agiPrimeLogo} alt="AGI PRIME logo" className="titlebar-logo-image" />
+          </div>
           <span className="titlebar-text">AGI PRIME</span>
           <span className="titlebar-version">v1.0</span>
         </div>
@@ -48,38 +60,28 @@ function TitleBar() {
   );
 }
 
-function ActivePanel() {
+const ActivePanel = memo(function ActivePanel() {
   const activeModule = useStore((s) => s.activeModule);
 
+  let panel: React.ReactNode;
   switch (activeModule) {
-    case 'nexus':
-      return <NexusPanel />;
-    case 'memory':
-      return <MemoryPanel />;
-    case 'heart':
-      return <HeartPanel />;
-    case 'mind':
-      return <MindPanel />;
-    case 'hands':
-      return <HandsPanel />;
-    case 'forge':
-      return <ForgePanel />;
-    case 'gauntlet':
-      return <GauntletPanel />;
-    case 'sovereign':
-      return <SovereignPanel />;
-    case 'spark':
-      return <SparkPanel />;
-    case 'voice':
-      return <VoiceBox />;
-    case 'creed':
-      return <CreedPanel />;
-    case 'settings':
-      return <SettingsPanel />;
-    default:
-      return <NexusPanel />;
+    case 'nexus':    panel = <NexusPanel />; break;
+    case 'memory':   panel = <MemoryPanel />; break;
+    case 'heart':    panel = <HeartPanel />; break;
+    case 'mind':     panel = <MindPanel />; break;
+    case 'hands':    panel = <HandsPanel />; break;
+    case 'forge':    panel = <ForgePanel />; break;
+    case 'gauntlet': panel = <GauntletPanel />; break;
+    case 'sovereign': panel = <SovereignPanel />; break;
+    case 'spark':    panel = <SparkPanel />; break;
+    case 'voice':    panel = <VoiceBox />; break;
+    case 'creed':    panel = <CreedPanel />; break;
+    case 'settings': panel = <SettingsPanel />; break;
+    default:         panel = <NexusPanel />;
   }
-}
+
+  return <Suspense fallback={<PanelLoader />}>{panel}</Suspense>;
+});
 
 export default function App() {
   const initialize = useStore((s) => s.initialize);
@@ -91,20 +93,25 @@ export default function App() {
 
   return (
     <div className="app">
-      <MatrixRain />
       <TitleBar />
       <div className="app-body">
-        <Sidebar />
-        <main className="main-content">
-          {initialized ? <ActivePanel /> : (
-            <div className="boot-screen">
-              <div className="boot-logo">◆</div>
-              <div className="boot-text">INITIALIZING AGI PRIME</div>
-              <div className="boot-bar"><div className="boot-bar-fill" /></div>
-              <div className="boot-status">Loading consciousness modules...</div>
-            </div>
-          )}
-        </main>
+        <AppErrorBoundary>
+          <Sidebar />
+        </AppErrorBoundary>
+        <AppErrorBoundary>
+          <main className="main-content">
+            {initialized ? <ActivePanel /> : (
+              <div className="boot-screen">
+                <div className="boot-logo">
+                  <img src={agiPrimeLogo} alt="AGI PRIME logo" className="boot-logo-image" />
+                </div>
+                <div className="boot-text">INITIALIZING AGI PRIME</div>
+                <div className="boot-bar"><div className="boot-bar-fill" /></div>
+                <div className="boot-status">Loading consciousness modules...</div>
+              </div>
+            )}
+          </main>
+        </AppErrorBoundary>
       </div>
     </div>
   );

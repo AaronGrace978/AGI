@@ -301,10 +301,15 @@ class DemoLoader:
                     collated[key] = torch.stack(tensors)
             return collated
 
+        # RandomSampler requires a positive dataset size. If no demonstrations
+        # exist yet, keep shuffle disabled so callers can gracefully detect
+        # an empty dataset (instead of crashing with num_samples=0).
+        safe_shuffle = shuffle and len(dataset) > 0
+
         return DataLoader(
             dataset,
             batch_size=batch_size,
-            shuffle=shuffle,
+            shuffle=safe_shuffle,
             collate_fn=collate_fn,
             drop_last=False,
         )

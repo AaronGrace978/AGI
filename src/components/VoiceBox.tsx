@@ -60,6 +60,8 @@ const BEAT_PRESETS = [
 
 // ─── Waveform Visualization ────────────────────────────────────
 
+const FRAME_INTERVAL = 1000 / 24; // ~24fps cap
+
 interface WaveLayer {
   freq: number;
   amp: number;
@@ -122,6 +124,7 @@ function Waveform({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const timeRef = useRef(0);
+  const lastFrameRef = useRef(0);
   const currentLayersRef = useRef<WaveLayer[]>([]);
   const targetLayersRef = useRef<WaveLayer[]>([]);
 
@@ -144,7 +147,12 @@ function Waveform({
     resize();
     window.addEventListener('resize', resize);
 
-    function draw() {
+    function draw(now: number) {
+      animId = requestAnimationFrame(draw);
+      const delta = now - lastFrameRef.current;
+      if (delta < FRAME_INTERVAL) return;
+      lastFrameRef.current = now - (delta % FRAME_INTERVAL);
+
       const rect = canvas!.getBoundingClientRect();
       const W = rect.width;
       const H = rect.height;
@@ -176,7 +184,7 @@ function Waveform({
         if (wave.amp < 0.001) continue;
 
         ctx.save();
-        ctx.shadowBlur = 15;
+        ctx.shadowBlur = 4;
         ctx.shadowColor = wave.color;
         ctx.beginPath();
         ctx.strokeStyle = wave.color;
@@ -222,11 +230,9 @@ function Waveform({
       ctx.moveTo(0, centerY);
       ctx.lineTo(W, centerY);
       ctx.stroke();
-
-      animId = requestAnimationFrame(draw);
     }
 
-    draw();
+    animId = requestAnimationFrame(draw);
     return () => {
       cancelAnimationFrame(animId);
       window.removeEventListener('resize', resize);

@@ -14,6 +14,7 @@ import type {
   EmotionVoiceProfile,
   LivingPresenceState,
 } from '../types';
+import { CircuitBreaker, withRetryBudget } from './circuit-breaker';
 
 function formatPrediction(
   prediction: string | number | boolean | Record<string, unknown> | Array<unknown>,
@@ -133,6 +134,11 @@ let musicInitialized = false;
 let musicStep = 0;
 let currentMusicEmotion = { valence: 0.5, arousal: 0.3, dominance: 0.5 };
 let currentMusicVolume = 0.12;
+const voiceNetworkBreaker = new CircuitBreaker('voice.network', {
+  failureThreshold: 3,
+  coolDownMs: 25_000,
+  halfOpenMaxCalls: 1,
+});
 
 // Scales mapped to emotional valence
 const MAJOR_PENTATONIC = [0, 2, 4, 7, 9];       // happy, bright
@@ -170,7 +176,9 @@ function getMusicContext(): AudioContext {
     musicInitialized = false;
   }
   if (musicCtx.state === 'suspended') {
-    musicCtx.resume().catch(() => {});
+    musicCtx.resume().catch((error) => {
+      console.warn('[voice] Failed to resume music context:', error);
+    });
   }
   return musicCtx;
 }
@@ -376,43 +384,45 @@ export async function trySoundPrimeAmbient(
     `${url}/ambient`,
   ];
 
-  for (const endpoint of endpoints) {
-    try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          emotion,
-          intensity,
-          valence: vad.valence,
-          arousal: vad.arousal,
-          dominance: vad.dominance,
-          loop: true,
-          duration: 30,
-        }),
-        signal: AbortSignal.timeout(8000),
-      });
-      if (!response.ok) continue;
+  const body = JSON.stringify({
+    emotion,
+    intensity,
+    valence: vad.valence,
+    arousal: vad.arousal,
+    dominance: vad.dominance,
+    loop: true,
+    duration: 30,
+  });
 
-      const payload = await response.json().catch(() => null);
-      const audio = extractAudioPayload(payload);
-      if (audio) {
-        if (soundprimeAmbientAudio) {
-          soundprimeAmbientAudio.pause();
-          soundprimeAmbientAudio = null;
-        }
-        soundprimeAmbientAudio = new Audio(`data:${audio.mimeType};base64,${audio.audioBase64}`);
-        soundprimeAmbientAudio.loop = true;
-        soundprimeAmbientAudio.volume = 0.06;
-        await soundprimeAmbientAudio.play();
-        soundprimeAmbientActive = true;
-        return true;
-      }
-    } catch {
-      continue;
+  const tryEndpoint = async (endpoint: string): Promise<{ audioBase64: string; mimeType: string }> => {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!response.ok) throw new Error('not ok');
+    const payload = await response.json().catch(() => null);
+    const audio = extractAudioPayload(payload);
+    if (!audio) throw new Error('no audio');
+    return audio;
+  };
+
+  try {
+    const audio = await Promise.any(endpoints.map((ep) => tryEndpoint(ep)));
+    if (soundprimeAmbientAudio) {
+      soundprimeAmbientAudio.pause();
+      soundprimeAmbientAudio = null;
     }
+    soundprimeAmbientAudio = new Audio(`data:${audio.mimeType};base64,${audio.audioBase64}`);
+    soundprimeAmbientAudio.loop = true;
+    soundprimeAmbientAudio.volume = 0.06;
+    await soundprimeAmbientAudio.play();
+    soundprimeAmbientActive = true;
+    return true;
+  } catch {
+    return false;
   }
-  return false;
 }
 
 export function stopSoundPrimeAmbient(): void {
@@ -552,17 +562,19 @@ function normalizeBaseUrl(url: string): string {
   return String(url || '').trim().replace(/\/+$/, '');
 }
 
-function extractAudioPayload(payload: any): { audioBase64: string; mimeType: string } | null {
+function extractAudioPayload(payload: unknown): { audioBase64: string; mimeType: string } | null {
   if (!payload || typeof payload !== 'object') return null;
-  const direct = payload.audioBase64 || payload.audio_base64;
+  const p = payload as Record<string, unknown>;
+  const direct = p.audioBase64 || p.audio_base64;
   if (typeof direct === 'string' && direct.length > 32) {
-    return { audioBase64: direct, mimeType: payload.mimeType || payload.mime_type || 'audio/mpeg' };
+    return { audioBase64: direct, mimeType: String(p.mimeType || p.mime_type || 'audio/mpeg') };
   }
-  const nested = payload.data || payload.result || payload.payload;
+  const nested = p.data || p.result || p.payload;
   if (nested && typeof nested === 'object') {
-    const nestedAudio = nested.audioBase64 || nested.audio_base64;
+    const n = nested as Record<string, unknown>;
+    const nestedAudio = n.audioBase64 || n.audio_base64;
     if (typeof nestedAudio === 'string' && nestedAudio.length > 32) {
-      return { audioBase64: nestedAudio, mimeType: nested.mimeType || nested.mime_type || 'audio/mpeg' };
+      return { audioBase64: nestedAudio, mimeType: String(n.mimeType || n.mime_type || 'audio/mpeg') };
     }
   }
   return null;
@@ -615,7 +627,9 @@ function normalizeAudioMime(mime: string): string {
 
 async function playBase64Audio(audioBase64: string, mimeType: string = 'audio/mpeg'): Promise<void> {
   // Best-effort attempt (may be a no-op if not called inside a gesture).
-  primeAudioOutput().catch(() => {});
+  primeAudioOutput().catch((error) => {
+    console.warn('[voice] primeAudioOutput failed:', error);
+  });
 
   const safeMime = normalizeAudioMime(mimeType);
   const byteString = atob(audioBase64);
@@ -624,7 +638,7 @@ async function playBase64Audio(audioBase64: string, mimeType: string = 'audio/mp
   playbackCancelled = false;
 
   const formatErr = (err: unknown): string => {
-    const e: any = err;
+    const e = err as Record<string, unknown> | null;
     const name = e && typeof e === 'object' && typeof e.name === 'string' ? e.name : '';
     const msg =
       err instanceof Error
@@ -769,7 +783,7 @@ export async function speakWithConfiguredProvider(
     // Priority path: when ElevenLabs is enabled in settings, try it first
     // regardless of the ambient provider setting.
     if (shouldUseElevenFirst) {
-      const result: any = await window.api.agent.elevenlabsTts(text, {
+      const result = await window.api.agent.elevenlabsTts(text, {
         voiceId: options.elevenLabsVoiceId,
         modelId: options.elevenLabsModelId,
         stability: profile ? (1 - profile.breathiness) : undefined,
@@ -795,51 +809,51 @@ export async function speakWithConfiguredProvider(
         `${baseUrl}/tts`,
       ];
 
-      for (const endpoint of candidateEndpoints) {
-        try {
-          const response = await fetch(endpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              text,
-              provider: 'soundprime',
-              use_elevenlabs_tts: !!options.useElevenLabsTts,
-              voice_id: options.elevenLabsVoiceId || undefined,
-              model_id: options.elevenLabsModelId || undefined,
-              emotion: profile ? {
-                rate: profile.rate,
-                pitch: profile.pitch,
-                warmth: profile.warmth,
-                breathiness: profile.breathiness,
-                volume: profile.volume,
-              } : undefined,
-            }),
-            signal: AbortSignal.timeout(15000),
-          });
-          if (!response.ok) continue;
-          const payload = await response.json().catch(() => null);
-          const audio = extractAudioPayload(payload);
-          if (audio) {
-            try {
-              await playBase64Audio(audio.audioBase64, audio.mimeType);
-              return;
-            } catch {
-              // Try the next endpoint.
-            }
-          }
-        } catch {
-          // Try the next endpoint.
-        }
+      const body = JSON.stringify({
+        text,
+        provider: 'soundprime',
+        use_elevenlabs_tts: !!options.useElevenLabsTts,
+        voice_id: options.elevenLabsVoiceId || undefined,
+        model_id: options.elevenLabsModelId || undefined,
+        emotion: profile ? {
+          rate: profile.rate,
+          pitch: profile.pitch,
+          warmth: profile.warmth,
+          breathiness: profile.breathiness,
+          volume: profile.volume,
+        } : undefined,
+      });
+
+      const tryEndpoint = async (endpoint: string): Promise<{ audioBase64: string; mimeType: string }> => {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body,
+          signal: AbortSignal.timeout(15000),
+        });
+        if (!response.ok) throw new Error('not ok');
+        const payload = await response.json().catch(() => null);
+        const audio = extractAudioPayload(payload);
+        if (!audio) throw new Error('no audio');
+        return audio;
+      };
+
+      try {
+        const audio = await Promise.any(candidateEndpoints.map((ep) => tryEndpoint(ep)));
+        await playBase64Audio(audio.audioBase64, audio.mimeType);
+        return;
+      } catch {
+        // All endpoints failed, fall through to ElevenLabs fallback or browser speak.
       }
 
       if (options.useElevenLabsTts && window.api?.agent?.elevenlabsTts) {
-        const result: any = await window.api.agent.elevenlabsTts(text, {
+        const result = await window.api.agent.elevenlabsTts(text, {
           voiceId: options.elevenLabsVoiceId,
           modelId: options.elevenLabsModelId,
           stability: profile ? (1 - profile.breathiness) : undefined,
           similarity_boost: profile ? profile.warmth : undefined,
         });
-        const audio = extractAudioPayload(result);
+        const audio = extractAudioPayload(result as Record<string, unknown>);
         if (audio) {
           try {
             await playBase64Audio(audio.audioBase64, audio.mimeType);
@@ -1624,19 +1638,25 @@ export async function singWithElevenLabs(
   // Attempt 1: Full composition plan (plan + compose with lyrics)
   if (window.api?.agent?.elevenlabsSing) {
     try {
-      const result: any = await window.api.agent.elevenlabsSing({
-        prompt: musicPrompt,
-        lyrics,
-        durationMs,
-        voiceId: voiceId || undefined,
-      });
+      const result = await voiceNetworkBreaker.execute(() =>
+        withRetryBudget(
+          () =>
+            window.api.agent.elevenlabsSing({
+              prompt: musicPrompt,
+              lyrics,
+              durationMs,
+              voiceId: voiceId || undefined,
+            }) as Promise<Record<string, unknown>>,
+          { maxAttempts: 2, initialDelayMs: 300, factor: 2 },
+        ),
+      );
 
       if (result?.success && result.audioBase64) {
-        await playBase64Audio(result.audioBase64, result.mimeType || 'audio/mpeg');
+        await playBase64Audio(result.audioBase64 as string, (result.mimeType as string) || 'audio/mpeg');
         return { success: true };
       }
 
-      const planError = result?.error || 'Unknown error from composition plan';
+      const planError = String(result?.error || 'Unknown error from composition plan');
       console.warn('[singWithElevenLabs] Plan flow failed:', planError);
 
       // Attempt 2: Simple prompt-based music generation (no plan step)
@@ -1644,19 +1664,25 @@ export async function singWithElevenLabs(
         const fullPrompt = lyrics
           ? `${musicPrompt}. Lyrics: ${lyrics.slice(0, 500)}`
           : musicPrompt;
-        const fallbackResult: any = await window.api.agent.elevenlabsGenerateMusic(
-          fullPrompt,
-          { durationSeconds: Math.max(10, Math.floor(durationMs / 1000)) },
+        const fallbackResult = await voiceNetworkBreaker.execute(() =>
+          withRetryBudget(
+            () =>
+              window.api.agent.elevenlabsGenerateMusic(
+                fullPrompt,
+                { durationSeconds: Math.max(10, Math.floor(durationMs / 1000)) },
+              ) as Promise<Record<string, unknown>>,
+            { maxAttempts: 2, initialDelayMs: 400, factor: 2 },
+          ),
         );
 
         if (fallbackResult?.success && fallbackResult.audioBase64) {
-          await playBase64Audio(fallbackResult.audioBase64, fallbackResult.mimeType || 'audio/mpeg');
+          await playBase64Audio(fallbackResult.audioBase64 as string, (fallbackResult.mimeType as string) || 'audio/mpeg');
           return { success: true };
         }
 
         return {
           success: false,
-          error: fallbackResult?.error || planError,
+          error: String(fallbackResult?.error || planError),
         };
       }
 

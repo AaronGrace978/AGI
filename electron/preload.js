@@ -130,6 +130,7 @@ contextBridge.exposeInMainWorld('api', {
   // ─── System ────────────────────────────────────────────
   system: {
     info: () => ipcRenderer.invoke('system:info'),
+    healthSummary: () => ipcRenderer.invoke('system:healthSummary'),
   },
 
   // ─── NightMind ─────────────────────────────────────────

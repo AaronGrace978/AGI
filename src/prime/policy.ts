@@ -24,6 +24,7 @@ export interface OwnerPolicy {
   allowToolCreation: boolean;
   allowCodeSelfMod: boolean;
   allowAutonomousGoals: boolean;
+  allowLimitedExecOnly: boolean;
 
   // Evolution
   maxConcurrentPipelines: number;
@@ -71,6 +72,7 @@ export const SOVEREIGN_POLICY: OwnerPolicy = {
   allowToolCreation: true,
   allowCodeSelfMod: false,
   allowAutonomousGoals: true,
+  allowLimitedExecOnly: false,
 
   maxConcurrentPipelines: 4,
   maxGenerations: 0,
@@ -100,6 +102,19 @@ export const SOVEREIGN_POLICY: OwnerPolicy = {
 export function createPolicy(overrides?: Partial<OwnerPolicy>): OwnerPolicy {
   return { ...SOVEREIGN_POLICY, ...(overrides ?? {}) };
 }
+
+export const PRIMEOS_AUTONOMOUS_POLICY: OwnerPolicy = {
+  ...SOVEREIGN_POLICY,
+  autonomyLevel: 'autonomous',
+  allowNetworkCalls: false,
+  allowFileSystemWrites: false,
+  allowScreenCapture: false,
+  allowInputSimulation: false,
+  allowToolCreation: false,
+  allowLimitedExecOnly: true,
+  requireConsentForRiskyActions: false,
+  operatorNotes: 'PrimeOS autonomous ops profile: limited to service/log/package commands.',
+};
 
 export function policyAllowsAction(
   policy: OwnerPolicy,
@@ -141,6 +156,7 @@ export function policyToLog(policy: OwnerPolicy): string[] {
     `Screen capture: ${policy.allowScreenCapture ? 'ENABLED' : 'disabled'}`,
     `Input simulation: ${policy.allowInputSimulation ? 'ENABLED' : 'disabled'}`,
     `Tool creation: ${policy.allowToolCreation ? 'ENABLED' : 'disabled'}`,
+    `Limited exec scope: ${policy.allowLimitedExecOnly ? 'ENABLED' : 'disabled'}`,
     `Code self-mod: ${policy.allowCodeSelfMod ? 'ENABLED' : 'disabled'}`,
     `Autonomous goals: ${policy.allowAutonomousGoals ? 'ENABLED' : 'disabled'}`,
     `Mutation aggression: ${(policy.mutationAggressiveness * 100).toFixed(0)}%`,

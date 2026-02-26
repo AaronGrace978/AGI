@@ -37,13 +37,58 @@ export interface SystemAddendumInput {
   sparkContext?: SparkContextSnapshot | null;
   pieContext?: string;
   neuralContext?: NeuralContextSnapshot | null;
+  /** Timestamp (ms since epoch) captured at request entry. If omitted, uses Date.now(). */
+  requestTimestamp?: number;
+}
+
+/**
+ * Formats a timestamp into a human-readable date/time string for LLM context.
+ * Exported so callers can preview the format or use it elsewhere.
+ */
+export function formatTimestamp(timestamp: number): {
+  full: string;
+  weekday: string;
+  iso: string;
+} {
+  const date = new Date(timestamp);
+  const dateStr = date.toLocaleDateString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+  const timeStr = date.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return {
+    full: `${dateStr} at ${timeStr} (${tz})`,
+    weekday: date.toLocaleDateString('en-US', { weekday: 'long' }),
+    iso: date.toISOString(),
+  };
 }
 
 export function buildSystemAddendum(input: SystemAddendumInput): string {
   const chunks: string[] = [];
 
+  // Use the request timestamp if provided, otherwise capture now.
+  const ts = input.requestTimestamp ?? Date.now();
+  const { full, weekday } = formatTimestamp(ts);
+
+  // TODAY — First and foremost. The model must use this, not guess.
+  chunks.push(
+    [
+      '=== TODAY (USE THIS — DO NOT GUESS) ===',
+      `It is ${full}.`,
+      `Today is ${weekday}.`,
+      'When you say "this afternoon", "Tuesday", "yesterday", etc., use the date above. Never invent a day.',
+      '=== END TODAY ===',
+    ].join('\n'),
+  );
+
   // Runtime directive: this app is stateful and *does* persist context.
-  // Avoid the generic "I have no memory between sessions" disclaimer unless the data is truly missing.
   chunks.push(
     [
       '=== RUNTIME DIRECTIVE ===',

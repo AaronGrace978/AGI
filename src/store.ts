@@ -40,6 +40,7 @@ import type {
   ReplayState,
   ExecutionTierLimit,
   RuntimeControlSyncState,
+  RuntimeHealthSummary,
   OperatorProfile,
   OperatorObservation,
   SynthesisSessionState,
@@ -59,6 +60,8 @@ import {
 import type { GenerateFn } from './prime/runtime';
 import type { OwnerPolicy, AutonomyLevel } from './prime/policy';
 import { SOVEREIGN_POLICY } from './prime/policy';
+import { createPrimeKernel, type KernelAction, type KernelExecutionResult } from './prime/kernel';
+import { appendRuntimeSignal, createRuntimeSignal, type RuntimeSignal } from './prime/observability';
 import { runSovereignLoop } from './prime/sovereign';
 import type { SovereignPhase } from './prime/sovereign';
 import { injectCreed } from './prime/soul';
@@ -162,6 +165,11 @@ let messageCounter = 0;
 // App.tsx calls `initialize()` in a useEffect, so we must dedupe concurrent
 // initialize() calls to avoid duplicated intervals/background loops.
 let initializeInFlight: Promise<void> | null = null;
+const primeKernel = createPrimeKernel();
+
+function logNonFatal(scope: string, error: unknown): void {
+  console.warn(`[${scope}] non-fatal:`, error);
+}
 function genId(): string {
   return `msg_${Date.now()}_${++messageCounter}`;
 }
@@ -408,6 +416,7 @@ const DEFAULT_SETTINGS: Settings = {
   singingMinGapSeconds: 300,
   model: 'llama3.2',
   ollamaUrl: 'http://localhost:11434',
+  ollamaApiKey: '',
   anthropicKey: '',
   openaiKey: '',
   arcApiKey: '',
@@ -424,6 +433,10 @@ const DEFAULT_SETTINGS: Settings = {
   theme: 'prime',
   streamingEnabled: true,
   operatorName: '',
+  skipReflection: false,
+  disableConscience: false,
+  disableActionField: false,
+  disableNeuralCore: false,
 };
 
 const DEFAULT_FORGE_CONFIG: ForgeRunConfig = {
@@ -699,6 +712,9 @@ interface AGIStore {
   rollbackEntries: RollbackEntry[];
   replay: ReplayState;
   runtimeControlSync: RuntimeControlSyncState;
+  runtimeSignals: RuntimeSignal[];
+  runtimeHealth: RuntimeHealthSummary | null;
+  kernelLastResult: KernelExecutionResult | null;
   consentMode: ConsentMode;
   executionTierLimit: ExecutionTierLimit;
   emergencyStopActive: boolean;
@@ -711,6 +727,8 @@ interface AGIStore {
   triggerEmergencyStop: () => void;
   clearEmergencyStop: () => void;
   syncRuntimeControls: () => Promise<void>;
+  loadRuntimeHealth: () => Promise<void>;
+  kernelDispatch: (actionType: string, payload?: Record<string, unknown>) => Promise<KernelExecutionResult>;
   resolveConsentAction: (requestId: string, decision: ConsentDecision) => Promise<void>;
   refreshRollbacks: () => Promise<void>;
   executeRollback: (rollbackId: string) => Promise<void>;
@@ -915,10 +933,13 @@ export const useStore = create<AGIStore>((set, get) => ({
   },
 
   sendMessage: (content: string) => {
+    // Capture request timestamp once — single source of truth for date/time context.
+    const requestTimestamp = Date.now();
+
     const isNewConversation = !get().activeConversationId;
     const conversationId = (get().activeConversationId || genConversationId()) as string;
-    const conversationCreatedAt = get().activeConversationCreatedAt || Date.now();
-    const runId = `chat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const conversationCreatedAt = get().activeConversationCreatedAt || requestTimestamp;
+    const runId = `chat_${requestTimestamp}_${Math.random().toString(36).slice(2, 8)}`;
 
     const userMessage: ChatMessage = {
       id: genId(),
@@ -1035,6 +1056,7 @@ export const useStore = create<AGIStore>((set, get) => ({
             const contextAddendum = buildSystemAddendum({
               conscienceState: get().conscience,
               championPrompt: get().championPrompt,
+              requestTimestamp,
             });
             get().startCognitive({ goal, contextAddendum, origin: 'nexus' });
           }
@@ -1622,6 +1644,7 @@ Output ONLY valid JSON:
         sparkContext: sparkCtx,
         pieContext: pieContextStr,
         neuralContext: neuralCtx,
+        requestTimestamp,
       });
       soulHistory = applySystemAddendum(soulHistory, addendum);
 
@@ -1927,6 +1950,9 @@ Output ONLY valid JSON:
   rollbackEntries: [],
   replay: createDefaultReplayState(),
   runtimeControlSync: createDefaultRuntimeControlSyncState(),
+  runtimeSignals: [],
+  runtimeHealth: null,
+  kernelLastResult: null,
   consentMode: 'ask-first',
   executionTierLimit: 'high-risk',
   emergencyStopActive: false,
@@ -2354,6 +2380,96 @@ Output ONLY valid JSON:
         },
       }));
     }
+  },
+
+  loadRuntimeHealth: async () => {
+    if (!window.api?.system?.healthSummary) return;
+    try {
+      const summary = await window.api.system.healthSummary();
+      set((state) => ({
+        runtimeHealth: summary,
+        runtimeSignals: appendRuntimeSignal(
+          state.runtimeSignals,
+          createRuntimeSignal({
+            source: 'main',
+            code: 'runtime.healthSummary.loaded',
+            severity: 'info',
+            message: `Runtime health loaded (${summary.issues.length} issue classes)`,
+            metadata: {
+              totalAuditEntries: summary.totalAuditEntries,
+              totalOrchestratorEvents: summary.totalOrchestratorEvents,
+            },
+          }),
+        ),
+      }));
+    } catch (error) {
+      set((state) => ({
+        runtimeSignals: appendRuntimeSignal(
+          state.runtimeSignals,
+          createRuntimeSignal({
+            source: 'renderer',
+            code: 'runtime.healthSummary.error',
+            severity: 'warn',
+            message: 'Failed to load runtime health summary',
+            metadata: {
+              error: error instanceof Error ? error.message : String(error),
+            },
+          }),
+        ),
+      }));
+    }
+  },
+
+  kernelDispatch: async (actionType, payload = {}) => {
+    const state = get();
+    const action: KernelAction = {
+      id: `kernel_action_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      type: actionType,
+      payload,
+      source: 'renderer',
+    };
+    const result = await primeKernel.dispatch(
+      action,
+      {
+        policy: {
+          conscienceEnabled: state.sovereignPolicy.conscienceEnabled,
+          requireConsentForRiskyActions: state.sovereignPolicy.requireConsentForRiskyActions,
+          ethicalOverrideAllowed: state.sovereignPolicy.ethicalOverrideAllowed,
+          allowNetworkCalls: state.sovereignPolicy.allowNetworkCalls,
+          allowFileSystemWrites: state.sovereignPolicy.allowFileSystemWrites,
+          allowProcessExecution: state.sovereignPolicy.allowProcessExecution,
+          allowScreenCapture: state.sovereignPolicy.allowScreenCapture,
+          allowInputSimulation: state.sovereignPolicy.allowInputSimulation,
+          allowToolCreation: state.sovereignPolicy.allowToolCreation,
+          allowLimitedExecOnly: state.sovereignPolicy.allowLimitedExecOnly,
+        },
+      },
+      {
+        audit: async () => undefined,
+      },
+    );
+
+    set((s) => ({
+      kernelLastResult: result,
+      runtimeSignals: appendRuntimeSignal(
+        s.runtimeSignals,
+        createRuntimeSignal({
+          source: 'kernel',
+          code: result.ok ? 'kernel.action.ok' : 'kernel.action.blocked',
+          severity: result.ok ? 'info' : 'error',
+          message: result.ok
+            ? `Kernel action executed: ${actionType}`
+            : `Kernel action failed: ${result.error || actionType}`,
+          correlationId: result.correlationId,
+          metadata: {
+            actionType,
+            gate: result.gate?.blockReason || null,
+            stage: result.stage,
+          },
+        }),
+      ),
+    }));
+    return result;
   },
 
   resolveConsentAction: async (requestId, decision) => {
@@ -3650,6 +3766,11 @@ Output ONLY valid JSON:
         return await llmGenerate(packed, cfg);
       }
       : undefined;
+    const rawPolicy = get().sovereignPolicy;
+    const shouldAutoBoundSovereignRun =
+      rawPolicy.allowUnboundedLoops &&
+      rawPolicy.maxGenerations === 0 &&
+      rawPolicy.maxRuntimeMs === 0;
 
     set((state) => ({
       sovereignKillFlag: false,
@@ -3660,12 +3781,22 @@ Output ONLY valid JSON:
         logs: [
           'SOVEREIGN igniting...',
           hasLLM ? 'LLM evaluation: ONLINE' : 'LLM evaluation: UNAVAILABLE (keyword fallback)',
+          ...(shouldAutoBoundSovereignRun
+            ? ['AUTO-BOUND: This run uses safe limits (12 generations / 180s).']
+            : []),
         ],
       },
       moduleStates: { ...state.moduleStates, sovereign: 'processing' },
     }));
 
-    const policy = get().sovereignPolicy;
+    const policy = shouldAutoBoundSovereignRun
+      ? {
+        ...rawPolicy,
+        // Safety rails for operator UX: avoid runs that appear "stuck" forever.
+        maxGenerations: 12,
+        maxRuntimeMs: 180000,
+      }
+      : rawPolicy;
     const ledgerBenchmarks = await deriveForgeBenchmarksFromLedgers(3);
     const gauntletBenchmarks = gauntletCapabilitiesToForgeBenchmarks(
       get().gauntlet.baselineCapabilities,
@@ -5086,7 +5217,7 @@ Output ONLY valid JSON:
     }
 
     // IMPORTANT: unlock audio inside the user click gesture (autoplay policy).
-    primeAudioOutput().catch(() => {});
+    primeAudioOutput().catch((error) => logNonFatal('voice.primeAudioOutput', error));
 
     set((s) => ({
       voiceState: { ...s.voiceState, isSinging: true, currentText: 'Writing a song about you...' },
@@ -5228,7 +5359,7 @@ Output ONLY valid JSON:
       return;
     }
 
-    primeAudioOutput().catch(() => {});
+    primeAudioOutput().catch((error) => logNonFatal('voice.primeAudioOutput', error));
 
     const userEntry: VoiceTranscriptEntry = {
       id: `vt_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
@@ -5496,7 +5627,7 @@ Output ONLY valid JSON:
         }));
 
         get().voiceSpeak(response.trim(), 'response');
-        get().sparkRunCycle(text).catch(() => {});
+        get().sparkRunCycle(text).catch((error) => logNonFatal('spark.autocycle', error));
       } catch {
         get().voiceSpeak("Something broke in my thoughts. Give me a second.", 'error');
       }
@@ -5616,7 +5747,7 @@ Output ONLY valid JSON:
       // Don't run or restart ambient oscillators while ElevenLabs music is playing.
     } else if (isAmbientActive()) {
       updateAmbientEmotion(vad.valence, vad.arousal, vad.dominance);
-    } else if (voiceState.presence.mode !== 'off') {
+    } else {
       startAmbientAudio(vad.valence, vad.arousal, vad.dominance);
     }
 
@@ -5699,7 +5830,9 @@ Output ONLY valid JSON:
       if (status) {
         set((s) => ({ neuralCore: updateNeuralFromStatus(s.neuralCore, status) }));
       }
-    } catch { /* non-fatal */ }
+    } catch (error) {
+      logNonFatal('neural.status.refresh', error);
+    }
   },
 
   neuralTrain: async (params) => {
@@ -5727,7 +5860,9 @@ Output ONLY valid JSON:
       if (result?.loaded) {
         set((s) => ({ neuralCore: { ...s.neuralCore, modelsLoaded: true, lastError: null } }));
       }
-    } catch { /* non-fatal */ }
+    } catch (error) {
+      logNonFatal('neural.models.load', error);
+    }
   },
 
   // ─── Settings ─────────────────────────────────────────
@@ -5739,7 +5874,7 @@ Output ONLY valid JSON:
       const s = await window.api.settings.get();
       const merged = { ...DEFAULT_SETTINGS, ...s };
       set((state) => {
-        const next = { settings: merged };
+        const next: Record<string, unknown> = { settings: merged };
         if (merged.operatorName && state.spark.social.actors.some((a) => a.id === 'operator')) {
           next.spark = {
             ...state.spark,
@@ -5763,7 +5898,7 @@ Output ONLY valid JSON:
       const updated = await window.api.settings.set(partial);
       const merged = { ...DEFAULT_SETTINGS, ...updated };
       set((state) => {
-        const next = { settings: merged };
+        const next: Record<string, unknown> = { settings: merged };
         if (merged.operatorName && state.spark.social.actors.some((a) => a.id === 'operator')) {
           next.spark = {
             ...state.spark,
@@ -5841,6 +5976,7 @@ Output ONLY valid JSON:
       await get().checkOllama();
       await get().loadSystemInfo();
       await get().agiScoreLoad();
+      await get().loadRuntimeHealth();
 
       // Load persisted Operator Synthesis profile (set-and-forget)
       await get().loadOperatorProfile();
@@ -5869,12 +6005,14 @@ Output ONLY valid JSON:
           };
           set({ spark: merged });
         }
-      } catch {
-        // SPARK persistence failure is non-fatal
+      } catch (error) {
+        logNonFatal('spark.persistence.load', error);
       }
 
       // NeuralCore status check on startup
-      get().neuralRefreshStatus().catch(() => {});
+      get().neuralRefreshStatus().catch((error) => {
+        logNonFatal('neural.status.startup', error);
+      });
 
       set({ initialized: true });
 
@@ -5882,7 +6020,12 @@ Output ONLY valid JSON:
       setInterval(() => {
         get().loadSystemInfo();
         get().checkOllama();
-        get().neuralRefreshStatus().catch(() => {});
+        get().neuralRefreshStatus().catch((error) => {
+          logNonFatal('neural.status.interval', error);
+        });
+        get().loadRuntimeHealth().catch((error) => {
+          logNonFatal('runtime.health.interval', error);
+        });
       }, 30000);
 
       // Listen for NightMind insights (internal reflection)

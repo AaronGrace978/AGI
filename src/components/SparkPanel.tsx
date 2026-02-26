@@ -6,7 +6,7 @@
 //  Meta-Cognition | Self-Modification | Temporal Reasoning
 // ═══════════════════════════════════════════════════════════════
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useMemo, useCallback, memo } from 'react';
 import { useStore } from '../store';
 import { usePinnedAutoScroll } from '../hooks/usePinnedAutoScroll';
 
@@ -26,24 +26,29 @@ function formatPrediction(
 
 // ─── Sub-components ────────────────────────────────────────────
 
-function WorldModelSection() {
-  const spark = useStore((s) => s.spark);
-  const { entities, relations } = spark.worldModel;
+const WorldModelSection = memo(function WorldModelSection() {
+  const worldModel = useStore((s) => s.spark.worldModel);
+  const { entities, relations } = worldModel;
   const [filter, setFilter] = useState('');
 
-  const filtered = filter
-    ? entities.filter(
-        (e) =>
-          e.name.toLowerCase().includes(filter.toLowerCase()) ||
-          e.type.toLowerCase().includes(filter.toLowerCase()),
-      )
-    : entities.slice(-20);
+  const filtered = useMemo(
+    () => filter
+      ? entities.filter(
+          (e) =>
+            e.name.toLowerCase().includes(filter.toLowerCase()) ||
+            e.type.toLowerCase().includes(filter.toLowerCase()),
+        )
+      : entities.slice(-20),
+    [entities, filter],
+  );
 
-  // Group entities by type
-  const byType = new Map<string, number>();
-  for (const e of entities) {
-    byType.set(e.type, (byType.get(e.type) || 0) + 1);
-  }
+  const byType = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const e of entities) {
+      map.set(e.type, (map.get(e.type) || 0) + 1);
+    }
+    return map;
+  }, [entities]);
 
   return (
     <div className="spark-section">
@@ -104,11 +109,11 @@ function WorldModelSection() {
       </div>
     </div>
   );
-}
+});
 
-function CuriositySection() {
-  const spark = useStore((s) => s.spark);
-  const { questions, curiosityScore, totalQuestionsGenerated } = spark.curiosity;
+const CuriositySection = memo(function CuriositySection() {
+  const curiosity = useStore((s) => s.spark.curiosity);
+  const { questions, curiosityScore, totalQuestionsGenerated } = curiosity;
   const openQuestions = questions.filter((q) => q.status === 'open');
 
   return (
@@ -147,11 +152,10 @@ function CuriositySection() {
       </div>
     </div>
   );
-}
+});
 
-function ReasonerSection() {
-  const spark = useStore((s) => s.spark);
-  const chains = spark.reasoning;
+const ReasonerSection = memo(function ReasonerSection() {
+  const chains = useStore((s) => s.spark.reasoning);
 
   return (
     <div className="spark-section">
@@ -198,15 +202,15 @@ function ReasonerSection() {
       </div>
     </div>
   );
-}
+});
 
-function GoalsSection() {
-  const spark = useStore((s) => s.spark);
+const GoalsSection = memo(function GoalsSection() {
+  const goals = useStore((s) => s.spark.goals);
   const addGoal = useStore((s) => s.sparkAddGoal);
   const [newGoal, setNewGoal] = useState('');
-  const activeGoals = spark.goals.goals.filter((g) => g.status === 'active');
-  const completedGoals = spark.goals.goals.filter((g) => g.status === 'completed');
-  const activePlan = spark.goals.horizonPlans.find((p) => p.id === spark.goals.activeHorizonPlanId);
+  const activeGoals = goals.goals.filter((g) => g.status === 'active');
+  const completedGoals = goals.goals.filter((g) => g.status === 'completed');
+  const activePlan = goals.horizonPlans.find((p) => p.id === goals.activeHorizonPlanId);
 
   const handleAddGoal = () => {
     if (newGoal.trim()) {
@@ -287,12 +291,12 @@ function GoalsSection() {
       </div>
     </div>
   );
-}
+});
 
-function MetaCognitionSection() {
-  const spark = useStore((s) => s.spark);
+const MetaCognitionSection = memo(function MetaCognitionSection() {
+  const metacognition = useStore((s) => s.spark.metacognition);
   const { calibrationScore, knownLimitations, blindSpots, totalPredictions, correctPredictions } =
-    spark.metacognition;
+    metacognition;
 
   return (
     <div className="spark-section">
@@ -350,11 +354,11 @@ function MetaCognitionSection() {
       </div>
     </div>
   );
-}
+});
 
-function TemporalSection() {
-  const spark = useStore((s) => s.spark);
-  const { events, activePredictions, predictionAccuracy } = spark.temporal;
+const TemporalSection = memo(function TemporalSection() {
+  const temporal = useStore((s) => s.spark.temporal);
+  const { events, activePredictions, predictionAccuracy } = temporal;
 
   return (
     <div className="spark-section">
@@ -403,12 +407,12 @@ function TemporalSection() {
       </div>
     </div>
   );
-}
+});
 
-function SelfModSection() {
-  const spark = useStore((s) => s.spark);
+const SelfModSection = memo(function SelfModSection() {
+  const selfmod = useStore((s) => s.spark.selfmod);
   const { modifications, currentStrategy, totalModifications, successfulModifications } =
-    spark.selfmod;
+    selfmod;
 
   return (
     <div className="spark-section spark-selfmod">
@@ -448,17 +452,16 @@ function SelfModSection() {
       </div>
     </div>
   );
-}
+});
 
-function GenomeSection() {
-  const spark = useStore((s) => s.spark);
+const GenomeSection = memo(function GenomeSection() {
+  const g = useStore((s) => s.spark.genome);
   const setDrive = useStore((s) => s.setGenomeDrive);
   const setTrait = useStore((s) => s.setGenomeTrait);
   const setPlasticity = useStore((s) => s.setGenomePlasticity);
   const setTrauma = useStore((s) => s.setGenomeTraumaSensitivity);
   const setAttachmentStyle = useStore((s) => s.setGenomeAttachmentStyle);
   const applyPreset = useStore((s) => s.applyGenomePreset);
-  const g = spark.genome;
 
   const sliderRow = (
     label: string,
@@ -527,11 +530,10 @@ function GenomeSection() {
       </div>
     </div>
   );
-}
+});
 
-function MetabolismSection() {
-  const spark = useStore((s) => s.spark);
-  const m = spark.metabolism;
+const MetabolismSection = memo(function MetabolismSection() {
+  const m = useStore((s) => s.spark.metabolism);
   return (
     <div className="spark-section">
       <div className="spark-section-header">
@@ -555,22 +557,22 @@ function MetabolismSection() {
       </div>
     </div>
   );
-}
+});
 
-function SocialSection() {
-  const spark = useStore((s) => s.spark);
-  const actor = spark.social.actors.find((a) => a.id === 'operator');
+const SocialSection = memo(function SocialSection() {
+  const social = useStore((s) => s.spark.social);
+  const actor = social.actors.find((a) => a.id === 'operator');
   return (
     <div className="spark-section">
       <div className="spark-section-header">
         <span className="spark-section-icon">🤝</span>
         <span className="spark-section-title">SOCIAL SIMULATION</span>
-        <span className="spark-section-badge">{spark.social.actors.length} actors</span>
+        <span className="spark-section-badge">{social.actors.length} actors</span>
       </div>
       <div className="spark-section-body">
         <div className="spark-stat-row">
-          <span>Ruptures: {spark.social.totalRuptures}</span>
-          <span>Repairs: {spark.social.totalRepairs}</span>
+          <span>Ruptures: {social.totalRuptures}</span>
+          <span>Repairs: {social.totalRepairs}</span>
         </div>
         {actor && (
           <div className="spark-stat-row">
@@ -581,11 +583,10 @@ function SocialSection() {
       </div>
     </div>
   );
-}
+});
 
-function EcologySection() {
-  const spark = useStore((s) => s.spark);
-  const e = spark.ecology;
+const EcologySection = memo(function EcologySection() {
+  const e = useStore((s) => s.spark.ecology);
   return (
     <div className="spark-section">
       <div className="spark-section-header">
@@ -605,18 +606,18 @@ function EcologySection() {
       </div>
     </div>
   );
-}
+});
 
-function NightCycleTimeline() {
-  const spark = useStore((s) => s.spark);
+const NightCycleTimeline = memo(function NightCycleTimeline() {
+  const sparkLogs = useStore((s) => s.spark.logs);
   const memoryConsolidation = useStore((s) => s.memoryConsolidation);
   const runNightly = useStore((s) => s.runNightlyReconsolidation);
-  const reconEvents = [
-    ...spark.logs.filter((line) => line.includes('[RECON]')),
+  const reconEvents = useMemo(() => [
+    ...sparkLogs.filter((line) => line.includes('[RECON]')),
     ...memoryConsolidation.logs.filter((line) =>
       line.toLowerCase().includes('night reconsolidation'),
     ),
-  ].slice(-12).reverse();
+  ].slice(-12).reverse(), [sparkLogs, memoryConsolidation.logs]);
 
   return (
     <div className="spark-section">
@@ -646,20 +647,20 @@ function NightCycleTimeline() {
       </div>
     </div>
   );
-}
+});
 
-function SparkLog() {
-  const spark = useStore((s) => s.spark);
+const SparkLog = memo(function SparkLog() {
+  const sparkLogs = useStore((s) => s.spark.logs);
   const sparkLive = useStore((s) => s.sparkLiveLog);
   const logRef = useRef<HTMLDivElement>(null);
 
   usePinnedAutoScroll(
     logRef,
-    [sparkLive.length, spark.logs.length],
+    [sparkLive.length, sparkLogs.length],
     { behavior: 'auto', bottomThresholdPx: 64 },
   );
 
-  const allLogs = [...spark.logs, ...sparkLive];
+  const allLogs = useMemo(() => [...sparkLogs, ...sparkLive], [sparkLogs, sparkLive]);
 
   return (
     <div className="spark-log-section">
@@ -679,24 +680,12 @@ function SparkLog() {
       </div>
     </div>
   );
-}
+});
 
 // ─── Thermodynamics Section ────────────────────────────────────
 
-function ThermoSection() {
-  const spark = useStore((s) => s.spark);
-  const { thermo } = spark;
-  const [pulse, setPulse] = useState(0);
-
-  useEffect(() => {
-    if (!thermo.ignited) return;
-    const id = setInterval(() => setPulse((p) => (p + 1) % 360), 50);
-    return () => clearInterval(id);
-  }, [thermo.ignited]);
-
-  const pulseOpacity = thermo.ignited
-    ? 0.5 + Math.sin((pulse * Math.PI) / 180) * 0.5
-    : 0.2;
+const ThermoSection = memo(function ThermoSection() {
+  const thermo = useStore((s) => s.spark.thermo);
 
   return (
     <div className="spark-thermo">
@@ -704,7 +693,6 @@ function ThermoSection() {
       <div className="spark-thermo-row">
         <div
           className={`spark-heartbeat ${thermo.ignited ? 'alive' : 'dead'}`}
-          style={{ opacity: pulseOpacity }}
         >
           {thermo.ignited ? '●' : '○'}
         </div>
@@ -754,13 +742,19 @@ function ThermoSection() {
       </div>
     </div>
   );
-}
+});
 
 // ─── Main Panel ────────────────────────────────────────────────
 
 export default function SparkPanel() {
-  const spark = useStore((s) => s.spark);
-  const memoryConsolidation = useStore((s) => s.memoryConsolidation);
+  const phase = useStore((s) => s.spark.phase);
+  const isIgnited = useStore((s) => s.spark.thermo.ignited);
+  const cycleCount = useStore((s) => s.spark.cycleCount);
+  const entityCount = useStore((s) => s.spark.worldModel.entities.length);
+  const relationCount = useStore((s) => s.spark.worldModel.relations.length);
+  const horizonPlanCount = useStore((s) => s.spark.goals.horizonPlans.length);
+  const circadianPhase = useStore((s) => s.spark.metabolism.circadianPhase);
+  const consolidationRuns = useStore((s) => s.memoryConsolidation.totalRuns);
   const runCycle = useStore((s) => s.sparkRunCycle);
   const runDeep = useStore((s) => s.sparkRunDeepThought);
   const ignite = useStore((s) => s.sparkIgnite);
@@ -769,17 +763,16 @@ export default function SparkPanel() {
   const [input, setInput] = useState('');
 
   const isProcessing =
-    spark.phase === 'thinking' ||
-    spark.phase === 'exploring' ||
-    spark.phase === 'evolving';
-  const isIgnited = spark.thermo.ignited;
+    phase === 'thinking' ||
+    phase === 'exploring' ||
+    phase === 'evolving';
 
-  const handleProcess = () => {
+  const handleProcess = useCallback(() => {
     if (input.trim() && !isProcessing) {
       runCycle(input.trim());
       setInput('');
     }
-  };
+  }, [input, isProcessing, runCycle]);
 
   return (
     <div className="panel spark-panel">
@@ -800,24 +793,24 @@ export default function SparkPanel() {
         <ThermoSection />
 
         <div className="spark-status-row">
-          <span className={`spark-phase ${spark.phase}`}>
-            {spark.phase.toUpperCase()}
+          <span className={`spark-phase ${phase}`}>
+            {phase.toUpperCase()}
           </span>
-          <span className="spark-stat">Cycles: {spark.cycleCount}</span>
+          <span className="spark-stat">Cycles: {cycleCount}</span>
           <span className="spark-stat">
-            Entities: {spark.worldModel.entities.length}
-          </span>
-          <span className="spark-stat">
-            Relations: {spark.worldModel.relations.length}
+            Entities: {entityCount}
           </span>
           <span className="spark-stat">
-            Horizon plans: {spark.goals.horizonPlans.length}
+            Relations: {relationCount}
           </span>
           <span className="spark-stat">
-            Consolidation runs: {memoryConsolidation.totalRuns}
+            Horizon plans: {horizonPlanCount}
           </span>
           <span className="spark-stat">
-            Metabolism: {spark.metabolism.circadianPhase}
+            Consolidation runs: {consolidationRuns}
+          </span>
+          <span className="spark-stat">
+            Metabolism: {circadianPhase}
           </span>
         </div>
 
@@ -840,7 +833,7 @@ export default function SparkPanel() {
             disabled={isProcessing}
             title="Autonomous deep thinking — the system reflects on itself"
           >
-            {isProcessing && spark.phase === 'evolving'
+            {isProcessing && phase === 'evolving'
               ? '◌ THINKING...'
               : '◈ DEEP THOUGHT'}
           </button>
@@ -870,7 +863,7 @@ export default function SparkPanel() {
             onClick={handleProcess}
             disabled={isProcessing || !input.trim()}
           >
-            {isProcessing && spark.phase === 'thinking'
+            {isProcessing && phase === 'thinking'
               ? '◌ PROCESSING...'
               : '⚡ PROCESS'}
           </button>

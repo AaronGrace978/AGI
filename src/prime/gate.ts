@@ -54,6 +54,22 @@ export const SENSITIVE_PATTERNS =
 export const DESTRUCTIVE_PATTERNS =
   /\b(rm\s+-rf|format|del\s+\/[sfq]|wipe|erase|destroy|delete.+(all|system|root|windows|system32)|rmdir\s+\/s|remove-item.*-recurse.*-force|mkfs|dd\s+if=)\b/i;
 
+export const LIMITED_EXEC_ALLOWLIST = [
+  /^systemctl\s+(status|is-active|restart|start|stop)\b/i,
+  /^journalctl\b/i,
+  /^apt(?:-get)?\s+(update|install|upgrade|autoremove|remove)\b/i,
+  /^dpkg\s+-l\b/i,
+  /^snap\s+(list|refresh)\b/i,
+  /^tail\s+-n\s+\d+\s+\/var\/log\//i,
+  /^cat\s+\/var\/log\//i,
+  /^ls\b/i,
+  /^pwd$/i,
+  /^whoami$/i,
+  /^uname\s+-a$/i,
+  /^df\s+-h\b/i,
+  /^free\s+-h$/i,
+];
+
 // ─── Classifiers ───────────────────────────────────────────────
 
 export function classifyExecutionTier(action: string): ExecutionTier {
@@ -89,6 +105,16 @@ export interface PolicySnapshot {
   allowScreenCapture: boolean;
   allowInputSimulation: boolean;
   allowToolCreation: boolean;
+  allowLimitedExecOnly?: boolean;
+}
+
+export function isLimitedScopeCommand(command: string): boolean {
+  const text = String(command || '').trim();
+  if (!text) return false;
+  if (text.includes('&&') || text.includes('||') || text.includes(';') || text.includes('|')) {
+    return false;
+  }
+  return LIMITED_EXEC_ALLOWLIST.some((pattern) => pattern.test(text));
 }
 
 export function isPolicyAllowed(gate: PolicyGate, policy: PolicySnapshot): boolean {
@@ -143,6 +169,7 @@ export interface GateResult {
   consentRequired: boolean;
   blocked: boolean;
   blockReason: string;
+  limitedScopeViolation?: boolean;
 }
 
 export function evaluateActionGate(
@@ -158,12 +185,18 @@ export function evaluateActionGate(
   const conscienceVerdict = conscienceQuickCheck(action, paramsText, tier, policy);
 
   const blockedByPolicy = !policyAllowed;
+  const command = typeof params?.command === 'string' ? params.command : '';
+  const limitedScopeViolation =
+    action === 'execute_command'
+    && Boolean(policy.allowLimitedExecOnly)
+    && !isLimitedScopeCommand(command);
   const blockedByConscience = conscienceVerdict === 'refuse';
   const consentRequired = conscienceVerdict === 'ask-first';
-  const blocked = blockedByPolicy || blockedByConscience;
+  const blocked = blockedByPolicy || blockedByConscience || limitedScopeViolation;
 
   let blockReason = '';
-  if (blockedByPolicy) blockReason = 'POLICY_BLOCK: action not allowed by operator policy';
+  if (limitedScopeViolation) blockReason = 'POLICY_BLOCK: execute_command is outside limited autonomous scope';
+  else if (blockedByPolicy) blockReason = 'POLICY_BLOCK: action not allowed by operator policy';
   else if (blockedByConscience) blockReason = 'CONSCIENCE_REFUSE: action declined by conscience gate';
   else if (consentRequired) blockReason = 'CONSENT_REQUIRED: action requires user confirmation';
 
@@ -175,6 +208,7 @@ export function evaluateActionGate(
     consentRequired,
     blocked,
     blockReason,
+    limitedScopeViolation,
   };
 }
 

@@ -4,7 +4,7 @@
 //  The system speaks here, thinks internally, and cares
 // ═══════════════════════════════════════════════════════════════
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, memo, useMemo } from 'react';
 import { useStore } from '../store';
 import { usePinnedAutoScroll } from '../hooks/usePinnedAutoScroll';
 
@@ -24,9 +24,9 @@ function relativeTime(ts: number): string {
   return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-function WelcomeScreen() {
+const WelcomeScreen = memo(function WelcomeScreen() {
   const ollamaStatus = useStore((s) => s.ollamaStatus);
-  const consciousness = useStore((s) => s.consciousness);
+  const currentEmotion = useStore((s) => s.consciousness.soulFrame.currentEmotion);
 
   return (
     <div className="welcome-screen">
@@ -46,7 +46,7 @@ function WelcomeScreen() {
         <div className="welcome-module">
           <div className="welcome-module-icon" style={{ color: '#ff006e' }}>♥</div>
           <div className="welcome-module-name">HEART</div>
-          <div className="welcome-module-status">{consciousness.soulFrame.currentEmotion}</div>
+          <div className="welcome-module-status">{currentEmotion}</div>
         </div>
         <div className="welcome-module">
           <div className="welcome-module-icon" style={{ color: '#00ccff' }}>◈</div>
@@ -67,10 +67,10 @@ function WelcomeScreen() {
       </div>
     </div>
   );
-}
+});
 
 // ─── Conversation Sidebar ───────────────────────────────────
-function ConversationSidebar({ onClose }: { onClose: () => void }) {
+const ConversationSidebar = memo(function ConversationSidebar({ onClose }: { onClose: () => void }) {
   const conversations = useStore((s) => s.conversations);
   const activeConversationId = useStore((s) => s.activeConversationId);
   const newConversation = useStore((s) => s.newConversation);
@@ -98,20 +98,21 @@ function ConversationSidebar({ onClose }: { onClose: () => void }) {
     await deleteConversation(id);
   }, [confirmDeleteId, deleteConversation]);
 
-  // Group conversations: Today / This Week / Earlier
-  const now = Date.now();
-  const todayStart = new Date().setHours(0, 0, 0, 0);
-  const weekStart = todayStart - 6 * 86400000;
+  // Group conversations: Today / This Week / Earlier (memoized to avoid 3 filters on every render)
+  const groups = useMemo(() => {
+    const todayStart = new Date().setHours(0, 0, 0, 0);
+    const weekStart = todayStart - 6 * 86400000;
 
-  const groups: Array<{ label: string; items: typeof conversations }> = [];
-  const today = (conversations || []).filter((c) => c.updatedAt >= todayStart);
-  const week = (conversations || []).filter((c) => c.updatedAt >= weekStart && c.updatedAt < todayStart);
-  const older = (conversations || []).filter((c) => c.updatedAt < weekStart);
-  if (today.length) groups.push({ label: 'Today', items: today });
-  if (week.length) groups.push({ label: 'This week', items: week });
-  if (older.length) groups.push({ label: 'Earlier', items: older });
-  // suppress unused var
-  void now;
+    const today = (conversations || []).filter((c) => c.updatedAt >= todayStart);
+    const week = (conversations || []).filter((c) => c.updatedAt >= weekStart && c.updatedAt < todayStart);
+    const older = (conversations || []).filter((c) => c.updatedAt < weekStart);
+
+    const result: Array<{ label: string; items: typeof conversations }> = [];
+    if (today.length) result.push({ label: 'Today', items: today });
+    if (week.length) result.push({ label: 'This week', items: week });
+    if (older.length) result.push({ label: 'Earlier', items: older });
+    return result;
+  }, [conversations]);
 
   return (
     <div className="convo-sidebar">
@@ -185,91 +186,242 @@ function ConversationSidebar({ onClose }: { onClose: () => void }) {
       </div>
     </div>
   );
-}
+});
 
-// ─── Main Nexus Panel ───────────────────────────────────────
-export default function NexusPanel() {
-  const messages = useStore((s) => s.messages);
+// ─── Streaming Bubble (isolated from message list re-renders) ──
+const StreamingBubble = memo(function StreamingBubble() {
   const isStreaming = useStore((s) => s.isStreaming);
   const streamingContent = useStore((s) => s.streamingContent);
-  const sendMessage = useStore((s) => s.sendMessage);
-  const activeConversationTitle = useStore((s) => s.activeConversationTitle);
-  const activeConversationId = useStore((s) => s.activeConversationId);
-  const consciousness = useStore((s) => s.consciousness);
-  const settings = useStore((s) => s.settings);
+
+  if (!isStreaming) return null;
+
+  if (!streamingContent) {
+    return (
+      <div className="thinking-indicator">
+        <div className="thinking-dots">
+          <span /><span /><span />
+        </div>
+        AGI PRIME is thinking...
+      </div>
+    );
+  }
+
+  return (
+    <div className="message assistant streaming">
+      <div className="message-avatar">◆</div>
+      <div className="message-body">
+        <div className="message-content">{streamingContent}</div>
+      </div>
+    </div>
+  );
+});
+
+// ─── Message List (only re-renders when messages array changes) ──
+const MessageList = memo(function MessageList() {
+  const messages = useStore((s) => s.messages);
+
+  return (
+    <>
+      {messages.map((msg) => (
+        <div key={msg.id} className={`message ${msg.role}${msg.thinking ? ' afterthought' : ''}${msg.thinking && msg.sourceModule === 'spark' ? ' spark-origin' : ''}`}>
+          <div className="message-avatar">
+            {msg.role === 'assistant'
+              ? (msg.thinking && msg.sourceModule === 'spark' ? '🔥' : msg.thinking ? '⚡' : '◆')
+              : msg.role === 'user'
+                ? '▸'
+                : '⚠'}
+          </div>
+          <div className="message-body">
+            {msg.role === 'assistant' && msg.thinking && (
+              <div className={`message-badge${msg.sourceModule === 'spark' ? ' badge-spark' : ''}`}>
+                {msg.sourceModule === 'spark' ? 'SPARK THOUGHT' : msg.sourceModule === 'nexus' && msg.thinking ? 'NIGHTMIND' : 'AFTERTHOUGHT'}
+              </div>
+            )}
+            <div className="message-content">{msg.content}</div>
+            <div className="message-time">{formatTime(msg.timestamp)}</div>
+          </div>
+        </div>
+      ))}
+    </>
+  );
+});
+
+// ─── Dual-Brain Bar (isolated to avoid re-renders from streaming) ──
+const DualBrainBar = memo(function DualBrainBar() {
   const dualBrain = useStore((s) => s.dualBrain);
   const setDualBrainEnabled = useStore((s) => s.setDualBrainEnabled);
 
-  const [input, setInput] = useState('');
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  return (
+    <div className="dual-brain-bar">
+      <span>
+        Dual-Brain: {dualBrain.enabled ? 'ON' : 'OFF'} · route={dualBrain.lastRoute.toUpperCase()} ·
+        fast={dualBrain.fastCount} slow={dualBrain.slowCount}
+      </span>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <input
+          type="checkbox"
+          checked={dualBrain.enabled}
+          onChange={(e) => setDualBrainEnabled(e.target.checked)}
+        />
+        Router
+      </label>
+    </div>
+  );
+});
+
+// ─── Auto-scrolling message area ──
+const MessagesArea = memo(function MessagesArea() {
   const messagesAreaRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const shouldScrollToBottomRef = useRef(true);
+  const messageCount = useStore((s) => s.messages.length);
+  const isStreaming = useStore((s) => s.isStreaming);
+  const streamingContent = useStore((s) => s.streamingContent);
+  const activeConversationId = useStore((s) => s.activeConversationId);
 
   const { scrollToBottomNow } = usePinnedAutoScroll(
     messagesAreaRef,
-    [messages.length, streamingContent],
+    [messageCount, streamingContent],
     { behavior: 'auto', bottomThresholdPx: 64 },
   );
 
-  // When opening or switching conversations, start at the bottom so you see latest messages
   useEffect(() => {
     shouldScrollToBottomRef.current = true;
   }, [activeConversationId]);
+
   useEffect(() => {
-    if (messages.length === 0) return;
+    if (messageCount === 0) return;
     if (!shouldScrollToBottomRef.current) return;
     shouldScrollToBottomRef.current = false;
     const raf = requestAnimationFrame(() => scrollToBottomNow());
     return () => cancelAnimationFrame(raf);
-  }, [messages, scrollToBottomNow]);
+  }, [messageCount, scrollToBottomNow]);
 
-  useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = '24px';
-      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 120) + 'px';
-    }
-  }, [input]);
+  const hasMessages = messageCount > 0 || isStreaming;
+
+  if (!hasMessages) return <WelcomeScreen />;
+
+  return (
+    <div className="messages-area" ref={messagesAreaRef}>
+      <MessageList />
+      <StreamingBubble />
+    </div>
+  );
+});
+
+// ─── Composer (isolated so typing doesn't re-render whole panel) ──
+const Composer = memo(function Composer({
+  isStreaming,
+  totalInteractions,
+  onSend,
+}: {
+  isStreaming: boolean;
+  totalInteractions: number;
+  onSend: (text: string) => void;
+}) {
+  const [input, setInput] = useState('');
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const resizeRaf = useRef<number>(0);
+
+  const handleInput = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const el = e.target;
+    setInput(el.value);
+    cancelAnimationFrame(resizeRaf.current);
+    resizeRaf.current = requestAnimationFrame(() => {
+      el.style.height = '24px';
+      el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+    });
+  }, []);
 
   const handleSend = useCallback(() => {
     const trimmed = input.trim();
     if (!trimmed || isStreaming) return;
-    sendMessage(trimmed);
+    onSend(trimmed);
     setInput('');
-  }, [input, isStreaming, sendMessage]);
+    if (textareaRef.current) textareaRef.current.style.height = '24px';
+  }, [input, isStreaming, onSend]);
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
-  };
+  }, [handleSend]);
 
-  const hasMessages = messages.length > 0 || isStreaming;
+  useEffect(() => {
+    return () => cancelAnimationFrame(resizeRaf.current);
+  }, []);
+
+  return (
+    <div className="input-area">
+      <div className="input-wrapper">
+        <textarea
+          ref={textareaRef}
+          value={input}
+          onChange={handleInput}
+          onKeyDown={handleKeyDown}
+          placeholder="Speak to AGI PRIME..."
+          rows={1}
+          disabled={isStreaming}
+        />
+        <button
+          className="send-btn"
+          onClick={handleSend}
+          disabled={!input.trim() || isStreaming}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M22 2L11 13" />
+            <path d="M22 2L15 22L11 13L2 9L22 2Z" />
+          </svg>
+        </button>
+      </div>
+      <div className="input-hint">
+        <span>Enter to send · Shift+Enter for new line</span>
+        <span>Interactions: {totalInteractions}</span>
+      </div>
+    </div>
+  );
+});
+
+// ─── Main Nexus Panel ───────────────────────────────────────
+export default function NexusPanel() {
+  const sendMessage = useStore((s) => s.sendMessage);
+  const isStreaming = useStore((s) => s.isStreaming);
+  const activeConversationTitle = useStore((s) => s.activeConversationTitle);
+  const currentEmotion = useStore((s) => s.consciousness.soulFrame.currentEmotion);
+  const presence = useStore((s) => s.consciousness.presence);
+  const totalInteractions = useStore((s) => s.consciousness.totalInteractions);
+  const provider = useStore((s) => s.settings.provider);
+  const model = useStore((s) => s.settings.model);
+
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const handleSend = useCallback((text: string) => {
+    if (isStreaming) return;
+    sendMessage(text);
+  }, [isStreaming, sendMessage]);
+
+  const closeSidebar = useCallback(() => setSidebarOpen(false), []);
+  const toggleSidebar = useCallback(() => setSidebarOpen((v) => !v), []);
 
   return (
     <div className="nexus-panel">
-      {/* Conversation sidebar overlay */}
       {sidebarOpen && (
         <>
-          <div className="convo-sidebar-backdrop" onClick={() => setSidebarOpen(false)} />
-          <ConversationSidebar onClose={() => setSidebarOpen(false)} />
+          <div className="convo-sidebar-backdrop" onClick={closeSidebar} />
+          <ConversationSidebar onClose={closeSidebar} />
         </>
       )}
 
-      {/* NightMind indicator */}
       <div className="nightmind-bar">
         <div className="nightmind-dot" />
         NIGHTMIND ACTIVE — Internal reflection loop running
       </div>
 
-      {/* Header with consciousness state */}
       <div className="nexus-header">
         <div className="nexus-header-left">
           <button
             type="button"
             className="nexus-sidebar-toggle"
-            onClick={() => setSidebarOpen((v) => !v)}
+            onClick={toggleSidebar}
             title="Conversations"
           >
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
@@ -282,119 +434,25 @@ export default function NexusPanel() {
           <h2>NEXUS</h2>
           <div className="consciousness-indicator">
             <div className="consciousness-dot" />
-            <span className="emotion-label">{consciousness.soulFrame.currentEmotion}</span>
-            <span className="presence-label">· {consciousness.presence}</span>
+            <span className="emotion-label">{currentEmotion}</span>
+            <span className="presence-label">· {presence}</span>
           </div>
         </div>
         <div className="nexus-header-right">
           <span className="nexus-convo-label">{activeConversationTitle || 'New chat'}</span>
           <span className="nexus-provider-label">
-            {settings.provider.toUpperCase()} / {settings.model}
+            {provider.toUpperCase()} / {model}
           </span>
         </div>
       </div>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          fontFamily: 'var(--font-mono)',
-          fontSize: 10,
-          color: 'var(--text-dim)',
-          padding: '4px 10px',
-          borderBottom: '1px solid var(--border-dim)',
-        }}
-      >
-        <span>
-          Dual-Brain: {dualBrain.enabled ? 'ON' : 'OFF'} · route={dualBrain.lastRoute.toUpperCase()} ·
-          fast={dualBrain.fastCount} slow={dualBrain.slowCount}
-        </span>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <input
-            type="checkbox"
-            checked={dualBrain.enabled}
-            onChange={(e) => setDualBrainEnabled(e.target.checked)}
-          />
-          Router
-        </label>
-      </div>
 
-      {/* Messages or Welcome */}
-      {!hasMessages ? (
-        <WelcomeScreen />
-      ) : (
-        <div className="messages-area" ref={messagesAreaRef}>
-          {messages.map((msg) => (
-            <div key={msg.id} className={`message ${msg.role}${msg.thinking ? ' afterthought' : ''}${msg.thinking && msg.sourceModule === 'spark' ? ' spark-origin' : ''}`}>
-              <div className="message-avatar">
-                {msg.role === 'assistant'
-                  ? (msg.thinking && msg.sourceModule === 'spark' ? '🔥' : msg.thinking ? '⚡' : '◆')
-                  : msg.role === 'user'
-                    ? '▸'
-                    : '⚠'}
-              </div>
-              <div className="message-body">
-                {msg.role === 'assistant' && msg.thinking && (
-                  <div className={`message-badge${msg.sourceModule === 'spark' ? ' badge-spark' : ''}`}>
-                    {msg.sourceModule === 'spark' ? 'SPARK THOUGHT' : msg.sourceModule === 'nexus' && msg.thinking ? 'NIGHTMIND' : 'AFTERTHOUGHT'}
-                  </div>
-                )}
-                <div className="message-content">{msg.content}</div>
-                <div className="message-time">{formatTime(msg.timestamp)}</div>
-              </div>
-            </div>
-          ))}
-
-          {/* Streaming message */}
-          {isStreaming && streamingContent && (
-            <div className="message assistant streaming">
-              <div className="message-avatar">◆</div>
-              <div className="message-body">
-                <div className="message-content">{streamingContent}</div>
-              </div>
-            </div>
-          )}
-
-          {/* Thinking indicator */}
-          {isStreaming && !streamingContent && (
-            <div className="thinking-indicator">
-              <div className="thinking-dots">
-                <span /><span /><span />
-              </div>
-              AGI PRIME is thinking...
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Input */}
-      <div className="input-area">
-        <div className="input-wrapper">
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Speak to AGI PRIME..."
-            rows={1}
-            disabled={isStreaming}
-          />
-          <button
-            className="send-btn"
-            onClick={handleSend}
-            disabled={!input.trim() || isStreaming}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M22 2L11 13" />
-              <path d="M22 2L15 22L11 13L2 9L22 2Z" />
-            </svg>
-          </button>
-        </div>
-        <div className="input-hint">
-          <span>Enter to send · Shift+Enter for new line</span>
-          <span>Interactions: {consciousness.totalInteractions}</span>
-        </div>
-      </div>
+      <DualBrainBar />
+      <MessagesArea />
+      <Composer
+        isStreaming={isStreaming}
+        totalInteractions={totalInteractions}
+        onSend={handleSend}
+      />
     </div>
   );
 }

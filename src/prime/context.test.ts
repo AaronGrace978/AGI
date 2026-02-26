@@ -3,6 +3,16 @@ import { applySystemAddendum, buildSystemAddendum } from './context';
 import { createDefaultConscienceState } from './conscience';
 
 describe('context pack', () => {
+  it('buildSystemAddendum includes current date and time', () => {
+    const add = buildSystemAddendum({});
+    expect(add).toContain('=== TODAY (USE THIS — DO NOT GUESS) ===');
+    expect(add).toContain('Today is');
+    expect(add).toContain('RUNTIME DIRECTIVE');
+    const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const hasWeekday = weekdays.some((d) => add.includes(d));
+    expect(hasWeekday).toBe(true);
+  });
+
   it('buildSystemAddendum composes champion + rag', () => {
     const add = buildSystemAddendum({
       ragContext: 'RAG: memory snippet',

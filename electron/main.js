@@ -195,6 +195,8 @@ class NeuralCoreBridge {
     this.modelsLoaded = false;
     this.ready = false;
     this.buffer = '';
+    this.circuitFailures = 0;
+    this.circuitOpenUntil = 0;
   }
 
   start() {
@@ -281,6 +283,9 @@ class NeuralCoreBridge {
 
   _sendRequest(method, params = {}) {
     return new Promise((resolve, reject) => {
+      if (Date.now() < this.circuitOpenUntil) {
+        return reject(new Error(`NeuralCore circuit open for ${method}`));
+      }
       if (!this.process) return reject(new Error('NeuralCore not running'));
       const id = `req_${++this.requestId}`;
       this.pendingRequests.set(id, { resolve, reject });
@@ -293,6 +298,11 @@ class NeuralCoreBridge {
       setTimeout(() => {
         if (this.pendingRequests.has(id)) {
           this.pendingRequests.delete(id);
+          this.circuitFailures += 1;
+          if (this.circuitFailures >= 3) {
+            this.circuitOpenUntil = Date.now() + 30000;
+            console.warn('[NeuralCore] Circuit opened after repeated timeouts');
+          }
           reject(new Error(`NeuralCore timeout: ${method}`));
         }
       }, 180000);
@@ -301,16 +311,34 @@ class NeuralCoreBridge {
 
   async loadModels(checkpoint = 'best') {
     const result = await this._sendRequest('load', { checkpoint });
+    this.circuitFailures = 0;
+    this.circuitOpenUntil = 0;
     this.modelsLoaded = result?.loaded || false;
     return result;
   }
 
-  async getStatus() { return this._sendRequest('status'); }
-  async predict(params) { return this._sendRequest('predict', params); }
-  async train(params) { return this._sendRequest('train', params); }
-  async getModelStats() { return this._sendRequest('model_stats'); }
-  async generateTrajectory(params) { return this._sendRequest('generate_trajectory', params); }
-  async plan(params) { return this._sendRequest('plan', params); }
+  async getStatus() { return this._sendWithCircuit('status'); }
+  async predict(params) { return this._sendWithCircuit('predict', params); }
+  async train(params) { return this._sendWithCircuit('train', params); }
+  async getModelStats() { return this._sendWithCircuit('model_stats'); }
+  async generateTrajectory(params) { return this._sendWithCircuit('generate_trajectory', params); }
+  async plan(params) { return this._sendWithCircuit('plan', params); }
+
+  async _sendWithCircuit(method, params = {}) {
+    try {
+      const result = await this._sendRequest(method, params);
+      this.circuitFailures = 0;
+      this.circuitOpenUntil = 0;
+      return result;
+    } catch (error) {
+      this.circuitFailures += 1;
+      if (this.circuitFailures >= 3) {
+        this.circuitOpenUntil = Date.now() + 30000;
+        console.warn(`[NeuralCore] Circuit opened after failures (${method})`);
+      }
+      throw error;
+    }
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -572,6 +600,54 @@ function summarizeAuditEntries(limit = 200) {
     recentBlocks: entries.filter((e) => e.kind === 'gate_block').length,
     recentApprovals: entries.filter((e) => e.kind === 'gate_pass').length,
     recentEmergency: entries.filter((e) => e.kind === 'emergency_stop' || e.kind === 'emergency_clear').length,
+  };
+}
+
+function summarizeRuntimeIssuesFromEntries(entries = []) {
+  const buckets = new Map();
+  for (const entry of entries) {
+    const detailText = String(entry?.detail || entry?.message || entry?.error || '').slice(0, 180);
+    const key = String(entry?.kind || entry?.type || 'unknown');
+    if (!buckets.has(key)) {
+      buckets.set(key, { key, count: 0, lastSeenAt: null, samples: [] });
+    }
+    const current = buckets.get(key);
+    current.count += 1;
+    current.lastSeenAt = Math.max(current.lastSeenAt || 0, Number(entry?.timestamp || entry?.emittedAt || 0) || 0);
+    if (detailText && current.samples.length < 2) current.samples.push(detailText);
+  }
+  return Array.from(buckets.values())
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 12)
+    .map((item) => ({
+      key: item.key,
+      count: item.count,
+      lastSeenAt: item.lastSeenAt || null,
+      samples: item.samples,
+      severity: item.key.includes('error') || item.key.includes('fail') || item.key.includes('block')
+        ? 'error'
+        : item.key.includes('warn')
+          ? 'warn'
+          : 'info',
+    }));
+}
+
+function getRuntimeHealthSummary() {
+  const auditEntries = Array.isArray(auditLog?.entries) ? auditLog.entries.slice(-1200) : [];
+  const orchestratorEntries = listOrchestratorEvents(1200);
+  const issues = summarizeRuntimeIssuesFromEntries([...auditEntries, ...orchestratorEntries]);
+  return {
+    generatedAt: Date.now(),
+    dataDir,
+    auditLogPath: auditLogFile,
+    orchestratorEventsPath: orchestratorEventsFile,
+    totalAuditEntries: Array.isArray(auditLog?.entries) ? auditLog.entries.length : 0,
+    totalOrchestratorEvents: Array.isArray(orchestratorEntries) ? orchestratorEntries.length : 0,
+    issues,
+    services: {
+      neuralBridgeReady: Boolean(neuralBridge?.available),
+      rendererResponsive: Boolean(mainWindow && !mainWindow.webContents.isCrashed()),
+    },
   };
 }
 
@@ -3312,6 +3388,10 @@ ipcMain.handle('system:info', () => {
     soul: memory.soul,
     consciousness: memory.consciousness,
   };
+});
+
+ipcMain.handle('system:healthSummary', () => {
+  return getRuntimeHealthSummary();
 });
 
 // ═══════════════════════════════════════════════════════════════

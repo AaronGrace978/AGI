@@ -14,6 +14,7 @@ import {
   gateVerdictMessage,
   consentTimeoutMessage,
   rollbackFailureMessage,
+  isLimitedScopeCommand,
   READ_ONLY_ACTIONS,
   REVERSIBLE_ACTIONS,
   HIGH_RISK_ACTIONS,
@@ -153,6 +154,21 @@ describe('isBlockedCommand', () => {
   });
 });
 
+describe('isLimitedScopeCommand', () => {
+  it('allows autonomous ops scope commands', () => {
+    expect(isLimitedScopeCommand('systemctl status NetworkManager')).toBe(true);
+    expect(isLimitedScopeCommand('journalctl -u agiprime-orchestrator.service -n 100')).toBe(true);
+    expect(isLimitedScopeCommand('apt-get update')).toBe(true);
+    expect(isLimitedScopeCommand('dpkg -l')).toBe(true);
+  });
+
+  it('rejects commands outside limited scope or chained commands', () => {
+    expect(isLimitedScopeCommand('rm -rf /')).toBe(false);
+    expect(isLimitedScopeCommand('cat /etc/shadow')).toBe(false);
+    expect(isLimitedScopeCommand('apt-get update && apt-get upgrade')).toBe(false);
+  });
+});
+
 // ═══════════════════════════════════════════════════════════════
 //  4. POLICY ALLOWED CHECK
 // ═══════════════════════════════════════════════════════════════
@@ -258,6 +274,14 @@ describe('evaluateActionGate', () => {
     expect(result.consentRequired).toBe(true);
     expect(result.conscienceVerdict).toBe('ask-first');
     expect(result.blockReason).toContain('CONSENT_REQUIRED');
+  });
+
+  it('blocks exec commands outside limited autonomous scope', () => {
+    const limited = { ...PERMISSIVE_POLICY, allowLimitedExecOnly: true };
+    const result = evaluateActionGate('execute_command', { command: 'cat /etc/shadow' }, limited);
+    expect(result.blocked).toBe(true);
+    expect(result.limitedScopeViolation).toBe(true);
+    expect(result.blockReason).toContain('limited autonomous scope');
   });
 
   it('marks write_file as reversible/caution with rollback potential', () => {

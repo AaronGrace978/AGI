@@ -258,6 +258,7 @@ export default function SettingsPanel() {
 
   const [localModel, setLocalModel] = useState(settings.model);
   const [localUrl, setLocalUrl] = useState(settings.ollamaUrl);
+  const [localOllamaApiKey, setLocalOllamaApiKey] = useState(settings.ollamaApiKey);
   const [localAnthropicKey, setLocalAnthropicKey] = useState(settings.anthropicKey);
   const [localOpenaiKey, setLocalOpenaiKey] = useState(settings.openaiKey);
   const [localArcApiKey, setLocalArcApiKey] = useState(settings.arcApiKey);
@@ -277,6 +278,7 @@ export default function SettingsPanel() {
   useEffect(() => {
     setLocalModel(settings.model);
     setLocalUrl(settings.ollamaUrl);
+    setLocalOllamaApiKey(settings.ollamaApiKey);
     setLocalAnthropicKey(settings.anthropicKey);
     setLocalOpenaiKey(settings.openaiKey);
     setLocalArcApiKey(settings.arcApiKey);
@@ -296,6 +298,7 @@ export default function SettingsPanel() {
     updateSettings({
       model: localModel,
       ollamaUrl: localUrl,
+      ollamaApiKey: localOllamaApiKey,
       anthropicKey: localAnthropicKey,
       openaiKey: localOpenaiKey,
       arcApiKey: localArcApiKey,
@@ -391,22 +394,41 @@ export default function SettingsPanel() {
         />
 
         {settings.provider === 'ollama' && (
-          <div className="settings-row">
-            <div className="settings-label">
-              Ollama URL
-              <small>Local: http://localhost:11434 — Cloud: https://ollama.com (set OLLAMA_API_KEY in .env)</small>
+          <>
+            <div className="settings-row">
+              <div className="settings-label">
+                Ollama URL
+                <small>Local: http://localhost:11434 — Cloud: https://ollama.com</small>
+              </div>
+              <input
+                className="settings-input"
+                value={localUrl}
+                onChange={(e) => setLocalUrl(e.target.value)}
+                onBlur={() => {
+                  save();
+                  checkOllama();
+                }}
+                placeholder="http://localhost:11434 or https://ollama.com"
+              />
             </div>
-            <input
-              className="settings-input"
-              value={localUrl}
-              onChange={(e) => setLocalUrl(e.target.value)}
-              onBlur={() => {
-                save();
-                checkOllama();
-              }}
-              placeholder="http://localhost:11434 or https://ollama.com"
-            />
-          </div>
+            <div className="settings-row">
+              <div className="settings-label">
+                Ollama API Key
+                <small>Used for Ollama Cloud. Leave blank for local Ollama.</small>
+              </div>
+              <input
+                className="settings-input"
+                type="password"
+                value={localOllamaApiKey}
+                onChange={(e) => setLocalOllamaApiKey(e.target.value)}
+                onBlur={() => {
+                  save();
+                  checkOllama();
+                }}
+                placeholder="ollama_..."
+              />
+            </div>
+          </>
         )}
 
         {settings.provider === 'anthropic' && (
@@ -694,6 +716,72 @@ export default function SettingsPanel() {
         </div>
         <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>
           Memory consolidation runs: {memoryConsolidation.totalRuns} · pending episodes: {memoryConsolidation.pendingEpisodes.length}
+        </div>
+      </div>
+
+      {/* Performance Toggles */}
+      <div className="settings-section">
+        <div className="settings-section-title" style={{ color: 'var(--cyan, #0ff)' }}>
+          SPEED CONTROLS
+        </div>
+        <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 8 }}>
+          Turn off heavy features to make Hands faster. Each toggle saves processing time per action.
+        </div>
+        <div className="settings-row">
+          <div className="settings-label">
+            Skip Reflection
+            <small>Skip the REFLECT step after successful actions — saves 1 LLM call per iteration</small>
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={!!settings.skipReflection}
+              onChange={(e) => updateSettings({ skipReflection: e.target.checked })}
+            />
+            Faster
+          </label>
+        </div>
+        <div className="settings-row">
+          <div className="settings-label">
+            Disable Conscience
+            <small>Skip ethical checks — faster gate, less safe</small>
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={!!settings.disableConscience}
+              onChange={(e) => updateSettings({ disableConscience: e.target.checked })}
+            />
+            Faster
+          </label>
+        </div>
+        <div className="settings-row">
+          <div className="settings-label">
+            Disable Action Field
+            <small>Skip four-forces computation — raw speed, no metacognition</small>
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={!!settings.disableActionField}
+              onChange={(e) => updateSettings({ disableActionField: e.target.checked })}
+            />
+            Faster
+          </label>
+        </div>
+        <div className="settings-row">
+          <div className="settings-label">
+            Disable NeuralCore
+            <small>Skip physics-informed neural predictions during actions</small>
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={!!settings.disableNeuralCore}
+              onChange={(e) => updateSettings({ disableNeuralCore: e.target.checked })}
+            />
+            Faster
+          </label>
         </div>
       </div>
 

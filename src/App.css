@@ -144,6 +144,24 @@ select:focus-visible {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  will-change: contents;
+  contain: layout style;
+}
+
+.panel-loader {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-height: 200px;
+}
+.panel-loader-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green, #00ff41);
+  opacity: 0.6;
+  animation: statusPulse 1s ease-in-out infinite;
 }
 
 /* ─── Matrix Rain Canvas ────────────────────────────────────── */
@@ -190,10 +208,15 @@ select:focus-visible {
 }
 
 .titlebar-logo {
-  color: var(--green);
-  font-size: 17px;
-  text-shadow: 0 0 10px var(--green-glow);
+  width: 18px;
+  height: 18px;
   animation: logoPulse 4s ease-in-out infinite;
+}
+
+.titlebar-logo-image {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 @keyframes logoPulse {
@@ -412,6 +435,17 @@ select:focus-visible {
   align-items: center;
   justify-content: space-between;
   background: var(--bg-secondary);
+}
+
+.dual-brain-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border-dim);
 }
 
 .nexus-header-left {
@@ -753,7 +787,7 @@ select:focus-visible {
   border: 1px solid var(--border-default);
   border-radius: 14px;
   padding: 7px 7px 7px 16px;
-  transition: var(--transition-normal);
+  transition: border-color var(--transition-normal), box-shadow var(--transition-normal);
 }
 
 .input-wrapper:focus-within {
@@ -2304,7 +2338,7 @@ select:focus-visible {
   width: 420px;
   max-width: 90%;
   background: linear-gradient(180deg, rgba(26, 34, 54, 0.97) 0%, rgba(17, 24, 39, 0.99) 100%);
-  backdrop-filter: blur(20px);
+  backdrop-filter: blur(8px);
   border-left: 1px solid rgba(167, 139, 250, 0.1);
   z-index: 11;
   display: flex;
@@ -3028,7 +3062,7 @@ select:focus-visible {
   padding: 12px 20px 16px;
   border-top: 1px solid var(--border-subtle);
   background: var(--bg-glass);
-  backdrop-filter: blur(12px);
+  backdrop-filter: blur(6px);
   flex-shrink: 0;
 }
 
@@ -3590,10 +3624,11 @@ select:focus-visible {
 .sovereign-body {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 20px;
+  padding: 20px 24px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  contain: layout style;
+  gap: 18px;
 }
 
 /* Controls */
@@ -3764,18 +3799,19 @@ select:focus-visible {
 /* Telemetry */
 .sovereign-telemetry {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
 }
 
 .sovereign-metric {
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
   border-radius: 10px;
-  padding: 10px 12px;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
 }
 
 .sovereign-metric span {
@@ -3878,9 +3914,8 @@ select:focus-visible {
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
   border-radius: 12px;
-  padding: 14px;
-  flex: 1;
-  min-height: 180px;
+  padding: 16px;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
 }
@@ -3900,8 +3935,8 @@ select:focus-visible {
   border-radius: 8px;
   padding: 10px;
   overflow-y: auto;
-  flex: 1;
   max-height: 300px;
+  contain: content;
 }
 
 .sov-log-line {
@@ -3926,6 +3961,154 @@ select:focus-visible {
   padding-left: 4px;
   border-left: 2px solid rgba(255, 60, 60, 0.15);
   margin-left: 2px;
+}
+
+/* Mission Control (Aperture-style command room) */
+.mission-control-log {
+  background:
+    linear-gradient(180deg, rgba(251, 191, 36, 0.06), rgba(251, 191, 36, 0.01)),
+    var(--bg-card);
+  border-color: rgba(251, 191, 36, 0.2);
+}
+
+.mission-control-log h3 {
+  color: #f9d58a;
+}
+
+.mission-control-toolbar {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.mission-goal-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.mission-goal-row input {
+  flex: 1;
+}
+
+.sovereign-btn.mission-selected {
+  border-color: rgba(251, 191, 36, 0.55);
+  color: #f9d58a;
+  box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.2) inset;
+}
+
+.mission-metrics {
+  margin-bottom: 14px;
+}
+
+.mission-error {
+  color: #ff006e;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.mission-events-scroll {
+  max-height: 280px;
+  min-height: 120px;
+}
+
+.mission-timeline-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.mission-runbook-strip {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.mission-runbook-output {
+  margin: 0 0 10px 0;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(251, 191, 36, 0.2);
+  background: rgba(9, 13, 22, 0.85);
+  color: #e7edf9;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.55;
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.mission-filter-group,
+.mission-export-group {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.mission-filter-btn {
+  padding: 5px 10px;
+  font-size: 10px;
+  letter-spacing: 0.7px;
+}
+
+.mission-export-status {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: #f9d58a;
+  margin-bottom: 8px;
+}
+
+.mission-event {
+  display: grid;
+  grid-template-columns: 82px 1fr 92px;
+  gap: 8px;
+  align-items: center;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+  padding: 4px 0;
+}
+
+.mission-event-time {
+  color: var(--text-ghost);
+  font-size: 9px;
+}
+
+.mission-event-type {
+  font-weight: 600;
+  letter-spacing: 0.4px;
+}
+
+.mission-event-source {
+  justify-self: end;
+  font-size: 9px;
+  color: var(--text-dim);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  padding: 1px 8px;
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.mission-event.tone-good .mission-event-type {
+  color: var(--green-soft);
+}
+
+.mission-event.tone-warn .mission-event-type {
+  color: #f9d58a;
+}
+
+.mission-event.tone-danger .mission-event-type {
+  color: var(--red);
+}
+
+.mission-event.tone-neutral .mission-event-type {
+  color: var(--text-secondary);
 }
 
 /* ─── Placeholder Panel ─────────────────────────────────────── */
@@ -3983,10 +4166,15 @@ select:focus-visible {
 }
 
 .boot-logo {
-  font-size: 56px;
-  color: var(--cyan);
-  text-shadow: 0 0 30px var(--cyan-glow), 0 0 60px rgba(34, 211, 238, 0.15);
+  width: 64px;
+  height: 64px;
   animation: bootPulse 1.5s ease-in-out infinite;
+}
+
+.boot-logo-image {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 @keyframes bootPulse {
@@ -4615,6 +4803,7 @@ select:focus-visible {
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   overflow: hidden;
+  contain: content;
 }
 
 .spark-section-header {
@@ -5351,8 +5540,8 @@ select:focus-visible {
   flex-shrink: 0;
   background:
     linear-gradient(135deg, rgba(10, 25, 47, 0.6), rgba(15, 30, 55, 0.45));
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   box-shadow:
     0 2px 16px rgba(0, 0, 0, 0.25),
     inset 0 1px 0 rgba(56, 189, 248, 0.06);
@@ -5426,8 +5615,8 @@ select:focus-visible {
   border-radius: 14px;
   background:
     linear-gradient(135deg, rgba(10, 25, 47, 0.5), rgba(15, 30, 55, 0.35));
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   box-shadow:
     0 4px 24px rgba(0, 0, 0, 0.2),
     inset 0 1px 0 rgba(56, 189, 248, 0.04);
@@ -5754,8 +5943,8 @@ select:focus-visible {
   flex-shrink: 0;
   background:
     linear-gradient(135deg, rgba(10, 25, 47, 0.7), rgba(15, 30, 55, 0.55));
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   box-shadow:
     0 -4px 24px rgba(0, 0, 0, 0.3),
     inset 0 1px 0 rgba(56, 189, 248, 0.05);
@@ -6144,11 +6333,10 @@ select:focus-visible {
    ═══════════════════════════════════════════════════════════════ */
 
 .hardening-panel {
-  margin-top: 20px;
   border: 1px solid rgba(0, 255, 65, 0.15);
-  border-radius: 10px;
+  border-radius: 12px;
   background: rgba(0, 255, 65, 0.02);
-  padding: 16px;
+  padding: 18px;
 }
 
 .hardening-header h3 {
@@ -6161,13 +6349,13 @@ select:focus-visible {
 .hardening-header p {
   font-size: 11px;
   color: var(--text-ghost);
-  margin: 0 0 12px 0;
+  margin: 0 0 14px 0;
 }
 
 .hardening-controls {
   display: flex;
-  gap: 8px;
-  margin-bottom: 16px;
+  gap: 10px;
+  margin-bottom: 18px;
   flex-wrap: wrap;
 }
 

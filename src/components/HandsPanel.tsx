@@ -4,7 +4,7 @@
 //  No more one-shot planning. The mind pursues goals.
 // ═══════════════════════════════════════════════════════════════
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback, memo } from 'react';
 import { useStore } from '../store';
 import type { CognitiveStep } from '../types';
 import type { AutonomyLevel } from '../prime/policy';
@@ -29,6 +29,15 @@ type DesktopIntel = {
   mousePosition: string;
   processPreview: string[];
   controlsSummary: string;
+};
+
+type HandsDoctorMetrics = {
+  runsAnalyzed: number;
+  latency: { p50: number; p90: number; p99: number };
+  verify: { pass: number; fail: number };
+  retries: { attempts: number; successfulRecoveries: number };
+  rollback: { ready: number; applied: number };
+  lastErrorTaxonomy: string | null;
 };
 
 const STEP_COLORS: Record<string, string> = {
@@ -132,7 +141,7 @@ const ARC_TEST_COMMAND = `${PYTHON} scripts/arc_list_games.py`;
 const ARC_PLAY_COMMAND = `${PYTHON} scripts/arc_play.py --game ls20-cb3b57cc --steps 320 --policy search --search-trials 1000`;
 const ARC_PLAY_ALL_COMMAND = `${PYTHON} scripts/arc_play.py --games 3 --steps 220 --policy search --search-trials 350`;
 
-export default function HandsPanel() {
+export default memo(function HandsPanel() {
   const settings = useStore((s) => s.settings);
   const updateSettings = useStore((s) => s.updateSettings);
   const cognitive = useStore((s) => s.cognitive);
@@ -185,6 +194,13 @@ export default function HandsPanel() {
   const [macroDetails, setMacroDetails] = useState('');
   const [prefKey, setPrefKey] = useState('');
   const [prefValue, setPrefValue] = useState('');
+  const [handsDoctorMetrics, setHandsDoctorMetrics] = useState<HandsDoctorMetrics | null>(null);
+  const [handsDoctorLoading, setHandsDoctorLoading] = useState(false);
+  const [handsDoctorError, setHandsDoctorError] = useState<string | null>(null);
+  const [handsReplaySignature, setHandsReplaySignature] = useState<string>('');
+  const [handsReplayActionCount, setHandsReplayActionCount] = useState<number>(0);
+  const [handsReplayCheckBusy, setHandsReplayCheckBusy] = useState(false);
+  const [handsPrimeOSExportPath, setHandsPrimeOSExportPath] = useState<string>('');
   const handsPanelRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -224,15 +240,19 @@ export default function HandsPanel() {
     if (!showSettings || desktopIntelLoading || desktopIntel) return;
     void loadDesktopIntel();
   }, [showSettings, desktopIntelLoading, desktopIntel]);
+  useEffect(() => {
+    if (!showSettings || handsDoctorLoading || handsDoctorMetrics) return;
+    void refreshHandsDoctor();
+  }, [showSettings, handsDoctorLoading, handsDoctorMetrics]);
 
-  const handleSubmit = () => {
+  const handleSubmit = useCallback(() => {
     const trimmed = input.trim();
     if (!trimmed || cognitive.isActive || emergencyStopActive) return;
     startCognitive(trimmed);
     setInput('');
-  };
+  }, [input, cognitive.isActive, emergencyStopActive, startCognitive]);
 
-  const runExactCommand = () => {
+  const runExactCommand = useCallback(() => {
     const command = exactCommand.trim();
     if (!command || cognitive.isActive || emergencyStopActive) return;
     const goal = [
@@ -251,9 +271,9 @@ export default function HandsPanel() {
     }
     startCognitive(goal);
     setExactCommand('');
-  };
+  }, [exactCommand, cognitive.isActive, emergencyStopActive, startCognitive]);
 
-  const runArcExact = (command: string, label: string) => {
+  const runArcExact = useCallback((command: string, label: string) => {
     if (cognitive.isActive || emergencyStopActive) return;
     const goal = [
       'Execute exactly one command via execute_command.',
@@ -271,22 +291,20 @@ export default function HandsPanel() {
       });
     }
     startCognitive(goal);
-  };
-  const runArcTest = () => runArcExact(ARC_TEST_COMMAND, 'arc-list');
-  const runArcPlay = () => runArcExact(ARC_PLAY_COMMAND, 'arc-play');
-  const runArcPlayAll = () => runArcExact(ARC_PLAY_ALL_COMMAND, 'arc-play-all');
+  }, [cognitive.isActive, emergencyStopActive, startCognitive]);
+  const runArcTest = useCallback(() => runArcExact(ARC_TEST_COMMAND, 'arc-list'), [runArcExact]);
+  const runArcPlay = useCallback(() => runArcExact(ARC_PLAY_COMMAND, 'arc-play'), [runArcExact]);
+  const runArcPlayAll = useCallback(() => runArcExact(ARC_PLAY_ALL_COMMAND, 'arc-play-all'), [runArcExact]);
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    // While HANDS is actively running, allow free typing (including Enter/newlines)
-    // so the UI doesn't feel "frozen". Submit-on-Enter only when idle.
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (cognitive.isActive || emergencyStopActive) return;
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
     }
-  };
+  }, [cognitive.isActive, emergencyStopActive, handleSubmit]);
 
-  const telemetrySteps = cognitive.steps
+  const telemetrySteps = useMemo(() => cognitive.steps
     .filter((step) => step.actionType === 'telemetry' && !!step.actionResult?.output)
     .map((step) => {
       try {
@@ -298,16 +316,16 @@ export default function HandsPanel() {
         return null;
       }
     })
-    .filter(Boolean) as Array<{ step: CognitiveStep; payload: Record<string, unknown> }>;
+    .filter(Boolean) as Array<{ step: CognitiveStep; payload: Record<string, unknown> }>, [cognitive.steps]);
 
-  const latestIterationTelemetry = [...telemetrySteps]
+  const latestIterationTelemetry = useMemo(() => [...telemetrySteps]
     .reverse()
-    .find((t) => t.step.content.includes('iteration'));
-  const latestRunSummaryTelemetry = [...telemetrySteps]
+    .find((t) => t.step.content.includes('iteration')), [telemetrySteps]);
+  const latestRunSummaryTelemetry = useMemo(() => [...telemetrySteps]
     .reverse()
-    .find((t) => t.step.content.includes('run summary'));
-  const pendingConsents = pendingConsentActions.filter((r) => r.status === 'pending');
-  const readyRollbacks = rollbackEntries.filter((r) => r.status === 'ready');
+    .find((t) => t.step.content.includes('run summary')), [telemetrySteps]);
+  const pendingConsents = useMemo(() => pendingConsentActions.filter((r) => r.status === 'pending'), [pendingConsentActions]);
+  const readyRollbacks = useMemo(() => rollbackEntries.filter((r) => r.status === 'ready'), [rollbackEntries]);
   const replayCurrentStep = replay.steps.length > 0 ? replay.steps[replay.cursor] : null;
 
   const asResult = (value: unknown): ApiResult => (
@@ -412,6 +430,55 @@ export default function HandsPanel() {
     }
   };
 
+  const refreshHandsDoctor = async () => {
+    if (!window.api?.agent?.handsDoctor) return;
+    setHandsDoctorLoading(true);
+    setHandsDoctorError(null);
+    try {
+      const response = await window.api.agent.handsDoctor();
+      if (!response?.success || !response.metrics) {
+        throw new Error(response?.error || 'Failed to load HANDS doctor metrics');
+      }
+      setHandsDoctorMetrics(response.metrics);
+    } catch (e: unknown) {
+      setHandsDoctorError(e instanceof Error ? e.message : 'Failed to load HANDS doctor metrics');
+    } finally {
+      setHandsDoctorLoading(false);
+    }
+  };
+
+  const runHandsReplayCheck = async () => {
+    if (!window.api?.agent?.handsReplayCheck || !replay.selectedRunId) return;
+    setHandsReplayCheckBusy(true);
+    setHandsDoctorError(null);
+    try {
+      const response = await window.api.agent.handsReplayCheck(replay.selectedRunId);
+      if (!response?.success) {
+        throw new Error(response?.error || 'Replay signature check failed');
+      }
+      setHandsReplaySignature(response.deterministicSignature || '');
+      setHandsReplayActionCount(Number(response.actionCount || 0));
+    } catch (e: unknown) {
+      setHandsDoctorError(e instanceof Error ? e.message : 'Replay signature check failed');
+    } finally {
+      setHandsReplayCheckBusy(false);
+    }
+  };
+
+  const exportHandsPrimeOS = async () => {
+    if (!window.api?.agent?.handsExportPrimeOS) return;
+    setHandsDoctorError(null);
+    try {
+      const response = await window.api.agent.handsExportPrimeOS({});
+      if (!response?.success) {
+        throw new Error(response?.error || 'PrimeOS export failed');
+      }
+      setHandsPrimeOSExportPath(response.filePath || '');
+    } catch (e: unknown) {
+      setHandsDoctorError(e instanceof Error ? e.message : 'PrimeOS export failed');
+    }
+  };
+
   const handleCenterMouse = async () => {
     if (!window.api?.agent) return;
     await runOperatorAction(async () => {
@@ -427,6 +494,24 @@ export default function HandsPanel() {
   };
 
   const operatorPowerOn = !emergencyStopActive;
+  const doctorHealth = (() => {
+    if (handsDoctorLoading) return { label: 'DOCTOR: SCANNING', color: '#22d3ee' };
+    if (!handsDoctorMetrics) return { label: 'DOCTOR: UNKNOWN', color: 'var(--text-secondary)' };
+    const verifyTotal = handsDoctorMetrics.verify.pass + handsDoctorMetrics.verify.fail;
+    const verifyRate = verifyTotal > 0 ? (handsDoctorMetrics.verify.pass / verifyTotal) : 1;
+    const recoveryRate = handsDoctorMetrics.retries.attempts > 0
+      ? (handsDoctorMetrics.retries.successfulRecoveries / handsDoctorMetrics.retries.attempts)
+      : 1;
+    const p90 = handsDoctorMetrics.latency.p90;
+
+    if (verifyRate >= 0.9 && recoveryRate >= 0.75 && p90 <= 3000) {
+      return { label: 'DOCTOR: HEALTHY', color: '#34d399' };
+    }
+    if (verifyRate >= 0.75 && recoveryRate >= 0.5 && p90 <= 7000) {
+      return { label: 'DOCTOR: DEGRADED', color: '#fbbf24' };
+    }
+    return { label: 'DOCTOR: CRITICAL', color: '#fb7185' };
+  })();
 
   const setOperatorPower = async (targetOn: boolean) => {
     setOperatorBusy(true);
@@ -755,6 +840,15 @@ export default function HandsPanel() {
           <div className={`hands-status ${operatorPowerOn ? 'active' : ''}`} title="Operator power state">
             <div className="hands-status-dot" />
             {operatorPowerOn ? 'ON' : 'OFF'}
+          </div>
+          <div
+            className="hands-status active"
+            title="Live HANDS Doctor health status"
+            onClick={() => setShowSettings(true)}
+            style={{ cursor: 'pointer', borderColor: doctorHealth.color }}
+          >
+            <div className="hands-status-dot" style={{ background: doctorHealth.color }} />
+            {doctorHealth.label}
           </div>
           <button
             className="mind-ctrl-btn"
@@ -1529,6 +1623,82 @@ export default function HandsPanel() {
             </div>
           </div>
 
+          {/* HANDS Doctor */}
+          <div className="hands-telemetry-card">
+            <div className="hands-telemetry-header">
+              <span>HANDS Doctor</span>
+              <span style={{ opacity: 0.6 }}>{handsDoctorLoading ? 'Scanning...' : 'Diagnostics'}</span>
+            </div>
+            <div className="hands-telemetry-footer" style={{ marginBottom: 8 }}>
+              Reliability health: latency, verify pass rate, retries/recovery, rollback outcomes.
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+              <button className="mind-ctrl-btn" onClick={() => void refreshHandsDoctor()} disabled={handsDoctorLoading}>
+                Refresh Doctor
+              </button>
+              <button
+                className="mind-ctrl-btn"
+                onClick={() => void runHandsReplayCheck()}
+                disabled={handsReplayCheckBusy || !replay.selectedRunId}
+                title="Compute deterministic signature for selected replay run"
+              >
+                Replay Signature Check
+              </button>
+              <button className="mind-ctrl-btn" onClick={() => void exportHandsPrimeOS()}>
+                Export PrimeOS Bundle
+              </button>
+            </div>
+
+            {handsDoctorMetrics && (
+              <div className="hands-telemetry-grid" style={{ marginBottom: 8 }}>
+                <div className="hands-telemetry-item">
+                  <span className="hands-telemetry-label">runs analyzed</span>
+                  <span className="hands-telemetry-value">{handsDoctorMetrics.runsAnalyzed}</span>
+                </div>
+                <div className="hands-telemetry-item">
+                  <span className="hands-telemetry-label">latency p50/p90/p99</span>
+                  <span className="hands-telemetry-value">
+                    {handsDoctorMetrics.latency.p50}/{handsDoctorMetrics.latency.p90}/{handsDoctorMetrics.latency.p99}ms
+                  </span>
+                </div>
+                <div className="hands-telemetry-item">
+                  <span className="hands-telemetry-label">verify pass/fail</span>
+                  <span className="hands-telemetry-value">
+                    {handsDoctorMetrics.verify.pass}/{handsDoctorMetrics.verify.fail}
+                  </span>
+                </div>
+                <div className="hands-telemetry-item">
+                  <span className="hands-telemetry-label">recovery success</span>
+                  <span className="hands-telemetry-value">
+                    {handsDoctorMetrics.retries.successfulRecoveries}/{handsDoctorMetrics.retries.attempts}
+                  </span>
+                </div>
+                <div className="hands-telemetry-item">
+                  <span className="hands-telemetry-label">rollback ready/applied</span>
+                  <span className="hands-telemetry-value">
+                    {handsDoctorMetrics.rollback.ready}/{handsDoctorMetrics.rollback.applied}
+                  </span>
+                </div>
+                <div className="hands-telemetry-item">
+                  <span className="hands-telemetry-label">last error taxonomy</span>
+                  <span className="hands-telemetry-value">{handsDoctorMetrics.lastErrorTaxonomy || 'none'}</span>
+                </div>
+              </div>
+            )}
+
+            {handsReplaySignature && (
+              <pre className="hands-cognitive-output" style={{ marginBottom: 8 }}>
+                replay_signature[{handsReplayActionCount}]: {handsReplaySignature}
+              </pre>
+            )}
+            {handsPrimeOSExportPath && (
+              <pre className="hands-cognitive-output" style={{ marginBottom: 8 }}>
+                primeos_export: {handsPrimeOSExportPath}
+              </pre>
+            )}
+            {handsDoctorError && <pre className="hands-cognitive-error">{handsDoctorError}</pre>}
+          </div>
+
           {/* Deterministic Replay */}
           <div className="hands-telemetry-card">
             <div className="hands-telemetry-header">
@@ -1747,4 +1917,4 @@ export default function HandsPanel() {
       </div>
     </div>
   );
-}
+});

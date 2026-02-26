@@ -1,5 +1,4 @@
-"""IPC bridge between NeuralCore (Python) and AGI PRIME (Electron)."""
+"""IPC bridge between NeuralCore (Python) and AGI PRIME (Electron).
 
-from .serve import NeuralBridgeServer
-
-__all__ = ["NeuralBridgeServer"]
+Run as a subprocess:  python -m neuralcore.bridge.serve --user-data-path <path>
+"""

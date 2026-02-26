@@ -262,6 +262,7 @@ export function findPath(
 
 /**
  * Detects contradictions in the knowledge graph.
+ * Uses Map-indexed grouping to avoid O(n^2) pairwise checks.
  */
 export function detectContradictions(
   relations: WorldRelation[],
@@ -274,11 +275,22 @@ export function detectContradictions(
     ['is_a', 'is_not'],
   ]);
 
-  for (let i = 0; i < relations.length; i++) {
-    for (let j = i + 1; j < relations.length; j++) {
-      const r1 = relations[i];
-      const r2 = relations[j];
-      if (r1.source === r2.source && r1.target === r2.target) {
+  // Build Map keyed by `${source}::${target}` — only relations sharing the same
+  // source+target pair can contradict each other
+  const byKey = new Map<string, WorldRelation[]>();
+  for (const r of relations) {
+    const key = `${r.source}::${r.target}`;
+    const list = byKey.get(key) ?? [];
+    list.push(r);
+    byKey.set(key, list);
+  }
+
+  // Compare only within each key group
+  for (const group of byKey.values()) {
+    for (let i = 0; i < group.length; i++) {
+      for (let j = i + 1; j < group.length; j++) {
+        const r1 = group[i];
+        const r2 = group[j];
         const opp = OPPOSING.get(r1.type);
         if (opp === r2.type) {
           contradictions.push({
@@ -397,8 +409,8 @@ Quality over quantity. 5 precise extractions beat 15 vague ones.`;
     if (!jsonMatch) return { entities: [], relations: [] };
 
     const parsed = JSON.parse(jsonMatch[0]);
-    const entities: WorldEntity[] = (parsed.entities || []).map((e: any) =>
-      createEntity(e.name, e.type || 'concept', e.properties || {}),
+    const entities: WorldEntity[] = (parsed.entities || []).map((e: Record<string, unknown>) =>
+      createEntity(String(e.name), String(e.type || 'concept'), (e.properties as Record<string, string>) || {}),
     );
 
     // Resolve relation names to entity IDs
@@ -409,11 +421,11 @@ Quality over quantity. 5 precise extractions beat 15 vague ones.`;
     }
 
     const relations: WorldRelation[] = (parsed.relations || [])
-      .map((r: any) => {
-        const srcId = nameToId.get(r.source?.toLowerCase());
-        const tgtId = nameToId.get(r.target?.toLowerCase());
+      .map((r: Record<string, unknown>) => {
+        const srcId = nameToId.get(String(r.source || '').toLowerCase());
+        const tgtId = nameToId.get(String(r.target || '').toLowerCase());
         if (!srcId || !tgtId) return null;
-        return createRelation(srcId, tgtId, r.type || 'relates_to', r.evidence || '');
+        return createRelation(srcId, tgtId, String(r.type || 'relates_to'), String(r.evidence || ''));
       })
       .filter(Boolean) as WorldRelation[];
 
@@ -573,11 +585,11 @@ Output ONLY a JSON array:
     if (!jsonMatch) return [];
 
     const parsed = JSON.parse(jsonMatch[0]);
-    return (parsed || []).map((q: any) => ({
+    return (parsed || []).map((q: Record<string, unknown>) => ({
       id: uid('q'),
-      question: q.question,
-      domain: q.domain || 'general',
-      priority: Math.min(1, Math.max(0, q.priority || 0.5)),
+      question: String(q.question),
+      domain: String(q.domain || 'general'),
+      priority: Math.min(1, Math.max(0, Number(q.priority) || 0.5)),
       source: 'curiosity_engine',
       status: 'open' as const,
       timestamp: Date.now(),
@@ -774,8 +786,8 @@ Output JSON:
     if (!jsonMatch) return [];
 
     const parsed = JSON.parse(jsonMatch[0]);
-    return (parsed || []).map((sg: any) =>
-      createGoal(sg.description, 'derived', sg.priority || 0.5, goal.id),
+    return (parsed || []).map((sg: Record<string, unknown>) =>
+      createGoal(String(sg.description), 'derived', Number(sg.priority) || 0.5, goal.id),
     );
   } catch {
     return [];
@@ -1022,9 +1034,9 @@ Prefer surprising-but-grounded predictions over obvious ones. The best predictio
     if (!jsonMatch) return [];
 
     const parsed = JSON.parse(jsonMatch[0]);
-    return (parsed || []).map((p: any) => ({
+    return (parsed || []).map((p: Record<string, unknown>) => ({
       id: uid('pred'),
-      prediction: p.prediction,
+      prediction: p.prediction as string | number | boolean | Record<string, unknown>,
       kind:
         p.kind === 'language' || p.kind === 'numeric' || p.kind === 'categorical' || p.kind === 'structured'
           ? p.kind
@@ -1035,7 +1047,7 @@ Prefer surprising-but-grounded predictions over obvious ones. The best predictio
               : typeof p.prediction === 'object' && p.prediction !== null
                 ? 'structured'
                 : 'language',
-      confidence: Math.min(1, Math.max(0, p.confidence || 0.5)),
+      confidence: Math.min(1, Math.max(0, Number(p.confidence) || 0.5)),
       basedOn: recentEvents.slice(-3).map((e) => e.id),
       deadline: Date.now() + 3600000, // check in 1 hour
       resolved: false,
@@ -1232,7 +1244,7 @@ export async function runSparkCycle(
   generate: GenerateFn,
   onLog: (msg: string) => void,
 ): Promise<SparkState> {
-  const next: SparkState = JSON.parse(JSON.stringify(state));
+  const next: SparkState = structuredClone(state);
   next.worldModel = normalizeWorldModel(next.worldModel);
   next.cycleCount++;
   next.lastCycleAt = Date.now();
@@ -1494,7 +1506,7 @@ export async function runDeepThought(
   generate: GenerateFn,
   onLog: (msg: string) => void,
 ): Promise<SparkState> {
-  const next: SparkState = JSON.parse(JSON.stringify(state));
+  const next: SparkState = structuredClone(state);
   next.worldModel = normalizeWorldModel(next.worldModel);
   next.cycleCount++;
   next.lastCycleAt = Date.now();
@@ -1530,8 +1542,10 @@ export async function runDeepThought(
     );
 
     if (mod) {
-      const baseline = await evaluateStrategyGate(next.selfmod.currentStrategy, generate);
-      const challenger = await evaluateStrategyGate(mod.after, generate);
+      const [baseline, challenger] = await Promise.all([
+        evaluateStrategyGate(next.selfmod.currentStrategy, generate),
+        evaluateStrategyGate(mod.after, generate),
+      ]);
       mod.scoreBefore = baseline.overallScore;
       mod.scoreAfter = challenger.overallScore;
       mod.evaluationNotes = `${baseline.notes} -> ${challenger.notes}`;
@@ -1563,14 +1577,32 @@ export async function runDeepThought(
     onLog('  Self-modification proposal failed');
   }
 
-  // 3. Temporal predictions
+  // 3. Temporal predictions + 4. Curiosity (parallel)
   onLog('Generating predictions...');
-  try {
-    const predictions = await generatePredictions(
+  onLog('Exploring knowledge gaps...');
+  const gaps = identifyKnowledgeGaps(
+    next.worldModel.entities,
+    next.worldModel.relations,
+  );
+  const [predictionsSettled, questionsSettled] = await Promise.allSettled([
+    generatePredictions(
       next.temporal.events.slice(-10),
       next.worldModel,
       generate,
-    );
+    ),
+    gaps.length > 0
+      ? generateCuriosityQuestions(
+          gaps,
+          next.curiosity.questions,
+          entitySummary,
+          generate,
+        )
+      : Promise.resolve([]),
+  ]);
+
+  try {
+    if (predictionsSettled.status === 'rejected') throw predictionsSettled.reason;
+    const predictions = predictionsSettled.value;
     const anchors = next.temporal.events
       .slice(-4)
       .flatMap((evt) => evt.causalParents)
@@ -1598,20 +1630,10 @@ export async function runDeepThought(
     onLog('  Prediction generation failed');
   }
 
-  // 4. Curiosity
-  onLog('Exploring knowledge gaps...');
-  const gaps = identifyKnowledgeGaps(
-    next.worldModel.entities,
-    next.worldModel.relations,
-  );
   if (gaps.length > 0) {
     try {
-      const questions = await generateCuriosityQuestions(
-        gaps,
-        next.curiosity.questions,
-        entitySummary,
-        generate,
-      );
+      if (questionsSettled.status === 'rejected') throw questionsSettled.reason;
+      const questions = questionsSettled.value;
       next.curiosity = {
         ...next.curiosity,
         questions: [...next.curiosity.questions, ...questions].slice(-50),
@@ -1729,7 +1751,7 @@ export function computeThermodynamics(state: SparkState): {
  * The quiet hum of background cognition.
  */
 export function runLightCycle(state: SparkState): SparkState {
-  const next: SparkState = JSON.parse(JSON.stringify(state));
+  const next: SparkState = structuredClone(state);
   const now = Date.now();
   next.worldModel = decayWorldModelConfidence(normalizeWorldModel(next.worldModel), now);
 
@@ -1821,7 +1843,7 @@ export async function runMediumCycle(
   generate: GenerateFn,
   onLog: (msg: string) => void,
 ): Promise<SparkState> {
-  const next: SparkState = JSON.parse(JSON.stringify(state));
+  const next: SparkState = structuredClone(state);
   next.worldModel = normalizeWorldModel(next.worldModel);
   const now = Date.now();
   next.cycleCount++;

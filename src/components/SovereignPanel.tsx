@@ -3,9 +3,10 @@
 //  Full control. Your policy. Your evolution. Your AGI.
 // ═══════════════════════════════════════════════════════════════
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo, useCallback, memo } from 'react';
 import { useStore } from '../store';
 import type { AutonomyLevel } from '../prime/policy';
+import type { OrchestratorEvent, OrchestratorMissionSnapshot, OrchestratorProfile } from '../types';
 import HardeningPanel from './HardeningPanel';
 import { usePinnedAutoScroll } from '../hooks/usePinnedAutoScroll';
 
@@ -26,7 +27,30 @@ function msToDuration(ms: number): string {
   return `${s}s`;
 }
 
-export default function SovereignPanel() {
+function missionEventTone(type: string): 'good' | 'warn' | 'danger' | 'neutral' {
+  if (type === 'action_executed' || type === 'goal_completed' || type === 'heartbeat') return 'good';
+  if (type === 'action_blocked' || type === 'policy_updated') return 'warn';
+  if (type.includes('emergency') || type === 'error') return 'danger';
+  return 'neutral';
+}
+
+function missionEventLabel(type: string): string {
+  return type.replace(/_/g, ' ').toUpperCase();
+}
+
+type MissionFilter = 'all' | 'actions' | 'goals' | 'policy' | 'emergency' | 'errors';
+
+function missionEventMatchesFilter(type: string, filter: MissionFilter): boolean {
+  if (filter === 'all') return true;
+  if (filter === 'actions') return type === 'action_executed' || type === 'action_blocked';
+  if (filter === 'goals') return type === 'goal_submitted' || type === 'goal_completed';
+  if (filter === 'policy') return type === 'policy_updated' || type === 'profile_changed';
+  if (filter === 'emergency') return type.includes('emergency');
+  if (filter === 'errors') return type === 'error';
+  return true;
+}
+
+function SovereignPanel() {
   const sovereign = useStore((s) => s.sovereign);
   const policy = useStore((s) => s.sovereignPolicy);
   const updatePolicy = useStore((s) => s.updateSovereignPolicy);
@@ -43,8 +67,143 @@ export default function SovereignPanel() {
 
   const logScrollRef = useRef<HTMLDivElement>(null);
   const [showPolicy, setShowPolicy] = useState(false);
+  const [mission, setMission] = useState<OrchestratorMissionSnapshot | null>(null);
+  const [missionError, setMissionError] = useState<string>('');
+  const [recentEvents, setRecentEvents] = useState<OrchestratorEvent[]>([]);
+  const [goalDraft, setGoalDraft] = useState('');
+  const [timelineFilter, setTimelineFilter] = useState<MissionFilter>('all');
+  const [exportStatus, setExportStatus] = useState<string>('');
+  const [runbookOutput, setRunbookOutput] = useState<string>('');
+  const [runbookRole, setRunbookRole] = useState<'observer' | 'operator' | 'maintainer'>('observer');
+  const activeProfile = useMemo(() => String(mission?.status.profile || '').toLowerCase(), [mission?.status.profile]);
 
   const isRunning = sovereign.phase === 'evolving' || sovereign.phase === 'initializing';
+
+  const refreshSnapshot = useCallback(async () => {
+    if (!window.api?.orchestrator?.missionSnapshot) return;
+    const res = await window.api.orchestrator.missionSnapshot({ eventLimit: 120 });
+    if (res?.success && res.snapshot) {
+      setMission(res.snapshot);
+      setRecentEvents((res.snapshot.latestEvents || []).slice(-40).reverse());
+      const role = String(res.snapshot.status.runbookRole || 'observer');
+      if (role === 'maintainer' || role === 'operator' || role === 'observer') {
+        setRunbookRole(role);
+      }
+      setMissionError('');
+    } else {
+      setMissionError(res?.error || 'Mission snapshot unavailable');
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unsubscribe: (() => void) | null = null;
+
+    const loadSnapshot = async () => {
+      if (cancelled) return;
+      await refreshSnapshot();
+    };
+
+    void loadSnapshot();
+    const interval = window.setInterval(() => {
+      void loadSnapshot();
+    }, 12000);
+
+    if (window.api?.orchestrator?.onEvent) {
+      unsubscribe = window.api.orchestrator.onEvent((evt) => {
+        setRecentEvents((prev) => [evt, ...prev].slice(0, 50));
+      });
+    }
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      if (unsubscribe) unsubscribe();
+    };
+  }, [refreshSnapshot]);
+
+  const runOrchestratorCommand = useCallback(async (type: string, payload: Record<string, unknown> = {}) => {
+    if (!window.api?.orchestrator?.command) {
+      setMissionError('Orchestrator command API unavailable');
+      return;
+    }
+    const res = await window.api.orchestrator.command({ type, payload });
+    if (!res?.success) {
+      setMissionError(String(res?.error || `Command failed: ${type}`));
+    } else {
+      setMissionError('');
+      await refreshSnapshot();
+    }
+  }, [refreshSnapshot]);
+
+  const setProfile = useCallback(async (profile: OrchestratorProfile) => {
+    await runOrchestratorCommand('set_profile', { profile });
+  }, [runOrchestratorCommand]);
+
+  const filteredEvents = useMemo(
+    () => recentEvents.filter((evt) => missionEventMatchesFilter(evt.type, timelineFilter)),
+    [recentEvents, timelineFilter],
+  );
+
+  const exportTimeline = useCallback(async (format: 'json' | 'jsonl') => {
+    if (!window.api?.orchestrator?.exportEvents) {
+      setMissionError('Export API unavailable');
+      return;
+    }
+    const res = await window.api.orchestrator.exportEvents({ limit: 5000, format });
+    if (!res?.success) {
+      setMissionError(String(res?.error || 'Export failed'));
+      return;
+    }
+    setMissionError('');
+    setExportStatus(`Exported ${res.count || 0} events to ${res.path}`);
+  }, []);
+
+  const runRunbookAction = useCallback(async (actionId: string) => {
+    if (!window.api?.orchestrator?.runbookAction || !window.api?.orchestrator?.prepareRunbookAction) {
+      setMissionError('Runbook API unavailable');
+      return;
+    }
+    setRunbookOutput(`Running action: ${actionId} ...`);
+    const prep = await window.api.orchestrator.prepareRunbookAction(actionId);
+    if (!prep?.success) {
+      setMissionError(String(prep?.error || `Preparation failed: ${actionId}`));
+      setRunbookOutput(`[${actionId}] PREP FAILED`);
+      return;
+    }
+    if (prep.confirmationRequired && prep.token) {
+      setRunbookOutput(`Confirmed high-impact action: ${actionId}\nToken expires in ~30s`);
+    }
+
+    const res = await window.api.orchestrator.runbookAction(
+      actionId,
+      prep.confirmationRequired ? { confirmationToken: prep.token } : undefined,
+    );
+    if (!res?.success) {
+      setMissionError(String(res?.error || `Runbook action failed: ${actionId}`));
+      setRunbookOutput(`[${actionId}] FAILED\n${String(res?.stderr || res?.error || '')}`.slice(0, 12000));
+      return;
+    }
+    setMissionError('');
+    const output = String(res.stdout || res.stderr || 'Action completed (no output).');
+    setRunbookOutput(`[${actionId}] OK\n${output}`.slice(0, 16000));
+    await refreshSnapshot();
+  }, [refreshSnapshot]);
+
+  const updateRunbookRole = useCallback(async (role: 'observer' | 'operator' | 'maintainer') => {
+    if (!window.api?.orchestrator?.setRunbookRole) {
+      setMissionError('Runbook role API unavailable');
+      return;
+    }
+    const res = await window.api.orchestrator.setRunbookRole(role);
+    if (!res?.success) {
+      setMissionError(String(res?.error || 'Failed to set runbook role'));
+      return;
+    }
+    setMissionError('');
+    setRunbookRole(role);
+    await refreshSnapshot();
+  }, [refreshSnapshot]);
 
   // Auto-scroll log only while pinned to bottom.
   usePinnedAutoScroll(
@@ -365,6 +524,186 @@ export default function SovereignPanel() {
           </div>
         </div>
 
+        {/* ─── Mission Control (PrimeOS Orchestrator) ───── */}
+        <div className="sovereign-log mission-control-log">
+          <h3>Mission Control</h3>
+          <div className="mission-control-toolbar">
+            <button
+              className={`sovereign-btn ${activeProfile === 'manual-operator' ? 'mission-selected' : ''}`}
+              onClick={() => void setProfile('manual-operator')}
+            >
+              PROFILE: MANUAL
+            </button>
+            <button
+              className={`sovereign-btn primary ${activeProfile === 'autonomous-limited' ? 'mission-selected' : ''}`}
+              onClick={() => void setProfile('autonomous-limited')}
+            >
+              PROFILE: AUTONOMOUS-LIMITED
+            </button>
+            <button
+              className={`sovereign-btn ${activeProfile === 'sovereign-desktop' ? 'mission-selected' : ''}`}
+              onClick={() => void setProfile('sovereign-desktop')}
+            >
+              PROFILE: SOVEREIGN
+            </button>
+            <button
+              className={`sovereign-btn danger ${activeProfile === 'owner-direct' ? 'mission-selected' : ''}`}
+              onClick={() => void setProfile('owner-direct')}
+            >
+              PROFILE: OWNER-DIRECT
+            </button>
+            <button className="sovereign-btn danger" onClick={() => void runOrchestratorCommand('emergency_stop')}>
+              EMERGENCY STOP
+            </button>
+            <button className="sovereign-btn" onClick={() => void runOrchestratorCommand('clear_emergency_stop')}>
+              CLEAR STOP
+            </button>
+          </div>
+
+          <div className="mission-goal-row">
+            <input
+              type="text"
+              value={goalDraft}
+              onChange={(e) => setGoalDraft(e.target.value)}
+              placeholder="Submit high-level goal to orchestrator..."
+              style={{ flex: 1 }}
+            />
+            <button
+              className="sovereign-btn"
+              disabled={!goalDraft.trim()}
+              onClick={() => {
+                const text = goalDraft.trim();
+                if (!text) return;
+                void runOrchestratorCommand('submit_goal', { description: text, priority: 6 });
+                setGoalDraft('');
+              }}
+            >
+              SUBMIT GOAL
+            </button>
+          </div>
+
+          {mission && (
+            <div className="sovereign-telemetry mission-metrics">
+              <div className="sovereign-metric">
+                <span>Profile</span>
+                <strong>{String(mission.status.profile).toUpperCase()}</strong>
+              </div>
+              <div className="sovereign-metric">
+                <span>Mode</span>
+                <strong>{mission.status.mode.toUpperCase()}</strong>
+              </div>
+              <div className="sovereign-metric">
+                <span>Heartbeat</span>
+                <strong>{mission.status.heartbeatCount}</strong>
+              </div>
+              <div className="sovereign-metric">
+                <span>Uptime</span>
+                <strong>{msToDuration(mission.status.uptimeMs)}</strong>
+              </div>
+              <div className="sovereign-metric">
+                <span>Goals</span>
+                <strong>{mission.goals.active} active</strong>
+              </div>
+              <div className="sovereign-metric">
+                <span>Blocks</span>
+                <strong>{mission.audit.recentBlocks}</strong>
+              </div>
+            </div>
+          )}
+          {activeProfile === 'owner-direct' && (
+            <div className="mission-error">
+              Owner-Direct mode is active: actions execute immediately; keep Emergency Stop ready.
+            </div>
+          )}
+
+          {missionError && (
+            <div className="mission-error">
+              {missionError}
+            </div>
+          )}
+
+          <div className="sovereign-log-scroll mission-events-scroll">
+            <div className="mission-runbook-strip">
+              <button
+                className={`sovereign-btn mission-filter-btn ${runbookRole === 'observer' ? 'mission-selected' : ''}`}
+                onClick={() => void updateRunbookRole('observer')}
+              >
+                ROLE: OBSERVER
+              </button>
+              <button
+                className={`sovereign-btn mission-filter-btn ${runbookRole === 'operator' ? 'mission-selected' : ''}`}
+                onClick={() => void updateRunbookRole('operator')}
+              >
+                ROLE: OPERATOR
+              </button>
+              <button
+                className={`sovereign-btn mission-filter-btn ${runbookRole === 'maintainer' ? 'mission-selected' : ''}`}
+                onClick={() => void updateRunbookRole('maintainer')}
+              >
+                ROLE: MAINTAINER
+              </button>
+            </div>
+            <div className="mission-runbook-strip">
+              <button className="sovereign-btn mission-filter-btn" onClick={() => void runRunbookAction('service_status')}>
+                SERVICE STATUS
+              </button>
+              <button className="sovereign-btn mission-filter-btn danger" onClick={() => void runRunbookAction('service_restart')}>
+                RESTART SERVICE
+              </button>
+              <button className="sovereign-btn mission-filter-btn" onClick={() => void runRunbookAction('logs_tail')}>
+                TAIL LOGS
+              </button>
+              <button className="sovereign-btn mission-filter-btn danger" onClick={() => void runRunbookAction('apt_update')}>
+                APT UPDATE
+              </button>
+              <button className="sovereign-btn mission-filter-btn" onClick={() => void runRunbookAction('disk_health')}>
+                DISK HEALTH
+              </button>
+              <button className="sovereign-btn mission-filter-btn" onClick={() => void runRunbookAction('memory_health')}>
+                MEMORY HEALTH
+              </button>
+            </div>
+            {runbookOutput && (
+              <pre className="mission-runbook-output">{runbookOutput}</pre>
+            )}
+            <div className="mission-timeline-toolbar">
+              <div className="mission-filter-group">
+                {(['all', 'actions', 'goals', 'policy', 'emergency', 'errors'] as MissionFilter[]).map((f) => (
+                  <button
+                    key={f}
+                    className={`sovereign-btn mission-filter-btn ${timelineFilter === f ? 'mission-selected' : ''}`}
+                    onClick={() => setTimelineFilter(f)}
+                  >
+                    {f.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+              <div className="mission-export-group">
+                <button className="sovereign-btn mission-filter-btn" onClick={() => void exportTimeline('json')}>
+                  EXPORT JSON
+                </button>
+                <button className="sovereign-btn mission-filter-btn" onClick={() => void exportTimeline('jsonl')}>
+                  EXPORT JSONL
+                </button>
+              </div>
+            </div>
+            {exportStatus && <div className="mission-export-status">{exportStatus}</div>}
+            {filteredEvents.length === 0 ? (
+              <div className="sov-log-line">No orchestrator events yet.</div>
+            ) : (
+              filteredEvents.map((evt) => (
+                <div key={evt.id} className={`sov-log-line mission-event tone-${missionEventTone(evt.type)}`}>
+                  <span className="mission-event-time">
+                    {new Date(evt.emittedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                  </span>
+                  <span className="mission-event-type">{missionEventLabel(evt.type)}</span>
+                  <span className="mission-event-source">{String(evt.source).toUpperCase()}</span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
         {/* ─── Best Candidate Detail ──────────────────────── */}
         {sovereign.currentBest && (
           <div className="sovereign-candidate">
@@ -386,7 +725,7 @@ export default function SovereignPanel() {
         <HardeningPanel />
 
         {/* ─── Self-Mod Pipeline (Opt-in) ─────────────────── */}
-        <div className="sovereign-log" style={{ marginTop: 18 }}>
+        <div className="sovereign-log">
           <h3>Self-Mod Pipeline (Opt-in)</h3>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
             <button
@@ -475,3 +814,5 @@ export default function SovereignPanel() {
     </div>
   );
 }
+
+export default memo(SovereignPanel);

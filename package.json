@@ -7,10 +7,16 @@
     "dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && electron .\"",
     "build": "vite build",
     "start": "electron .",
+    "start:daemon": "electron . --daemon",
     "dist": "vite build && electron-builder",
+    "dist:win": "vite build && electron-builder --win",
+    "dist:linux": "vite build && electron-builder --linux",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "memory:compact:vectors": "node scripts/compact-vectors.js",
+    "memory:compact:exports": "node scripts/compact-memory-exports.js",
+    "memory:compact:exports:dry": "node scripts/compact-memory-exports.js --dry-run"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
@@ -26,6 +32,7 @@
     "@vitest/coverage-v8": "^4.0.18",
     "concurrently": "^9.1.0",
     "electron": "^33.2.1",
+    "electron-builder": "^26.8.1",
     "typescript": "^5.7.2",
     "vite": "^6.0.3",
     "vitest": "^4.0.18",
@@ -34,6 +41,7 @@
   "build": {
     "appId": "com.agiprime.app",
     "productName": "AGI PRIME",
+    "icon": "src/assets/app-icon.ico",
     "directories": {
       "output": "release"
     },
@@ -41,8 +49,37 @@
       "dist/**/*",
       "electron/**/*"
     ],
+    "extraResources": [
+      {
+        "from": "scripts/neuralcore",
+        "to": "scripts/neuralcore",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "electron/input-helper.ps1",
+        "to": "electron/input-helper.ps1"
+      },
+      {
+        "from": "Memory/latest.json",
+        "to": "memory-seed/latest.json"
+      }
+    ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "src/assets/app-icon.ico"
+    },
+    "nsis": {
+      "installerIcon": "src/assets/app-icon.ico",
+      "uninstallerIcon": "src/assets/app-icon.ico"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Utility"
     }
   }
 }

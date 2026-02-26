@@ -6,8 +6,15 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ─── Types ─────────────────────────────────────────────────────
+import { CircuitBreaker, withRetryBudget } from './circuit-breaker';
 
 export type MemoryType = 'episodic' | 'semantic' | 'procedural' | 'reflective' | 'autobiographical';
+
+const memoryStoreBreaker = new CircuitBreaker('memory.storeVector', {
+  failureThreshold: 4,
+  coolDownMs: 20_000,
+  halfOpenMaxCalls: 1,
+});
 
 export interface VectorMemory {
   id: string;
@@ -201,14 +208,19 @@ export async function storeMemory(
 ): Promise<void> {
   if (!window.api?.memory?.storeVector) return;
   try {
-    await window.api.memory.storeVector({
-      content,
-      type,
-      source: metadata.source,
-      importance: metadata.importance ?? 0.5,
-      emotion: metadata.emotion,
-      tags: metadata.tags ?? [],
-    });
+    await memoryStoreBreaker.execute(() =>
+      withRetryBudget(
+        () =>
+          window.api.memory.storeVector({
+            content,
+            type,
+            source: metadata.source,
+            importance: metadata.importance ?? 0.5,
+            emotion: metadata.emotion,
+            tags: metadata.tags ?? [],
+          }),
+        { maxAttempts: 2, initialDelayMs: 180, factor: 2 },
+      ));
   } catch (e) {
     console.warn('[Memory] Failed to store:', e);
   }
