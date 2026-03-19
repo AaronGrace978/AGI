@@ -4,6 +4,8 @@
 //  Every constraint here exists because YOU defined it.
 // ═══════════════════════════════════════════════════════════════
 
+import type { PolicySnapshot } from './gate';
+
 export type AutonomyLevel = 'manual' | 'supervised' | 'autonomous' | 'sovereign';
 
 export interface OwnerPolicy {
@@ -141,6 +143,21 @@ export function getEffectiveMaxGenerations(policy: OwnerPolicy): number {
 
 export function getEffectiveMaxRuntime(policy: OwnerPolicy): number {
   return policy.maxRuntimeMs === 0 ? Infinity : policy.maxRuntimeMs;
+}
+
+export function toPolicySnapshot(policy: OwnerPolicy): PolicySnapshot {
+  return {
+    conscienceEnabled: policy.conscienceEnabled,
+    requireConsentForRiskyActions: policy.requireConsentForRiskyActions,
+    ethicalOverrideAllowed: policy.ethicalOverrideAllowed,
+    allowNetworkCalls: policy.allowNetworkCalls,
+    allowFileSystemWrites: policy.allowFileSystemWrites,
+    allowProcessExecution: policy.allowProcessExecution,
+    allowScreenCapture: policy.allowScreenCapture,
+    allowInputSimulation: policy.allowInputSimulation,
+    allowToolCreation: policy.allowToolCreation,
+    allowLimitedExecOnly: policy.allowLimitedExecOnly,
+  };
 }
 
 export function policyToLog(policy: OwnerPolicy): string[] {

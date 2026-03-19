@@ -18,12 +18,14 @@ describe('orchestrator contracts', () => {
   it('validates command type guards', () => {
     expect(isOrchestratorCommandType('set_profile')).toBe(true);
     expect(isOrchestratorCommandType('submit_goal')).toBe(true);
+    expect(isOrchestratorCommandType('kernel_dispatch')).toBe(true);
     expect(isOrchestratorCommandType('unknown')).toBe(false);
   });
 
   it('validates event type guards', () => {
     expect(isOrchestratorEventType('heartbeat')).toBe(true);
     expect(isOrchestratorEventType('profile_changed')).toBe(true);
+    expect(isOrchestratorEventType('kernel_action_validated')).toBe(true);
     expect(isOrchestratorEventType('invalid')).toBe(false);
   });
 });

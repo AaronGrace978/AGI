@@ -37,6 +37,8 @@ export interface SystemAddendumInput {
   sparkContext?: SparkContextSnapshot | null;
   pieContext?: string;
   neuralContext?: NeuralContextSnapshot | null;
+  /** Pre-formatted Oracle astro-voice communication profile string. */
+  oracleVoiceContext?: string;
   /** Timestamp (ms since epoch) captured at request entry. If omitted, uses Date.now(). */
   requestTimestamp?: number;
 }
@@ -169,6 +171,10 @@ export function buildSystemAddendum(input: SystemAddendumInput): string {
     }
     neuralParts.push('=== END NEURALCORE ===');
     chunks.push(neuralParts.join('\n'));
+  }
+
+  if (input.oracleVoiceContext) {
+    chunks.push(input.oracleVoiceContext.trim());
   }
 
   return chunks.filter(Boolean).join('\n\n').trim();

@@ -5,7 +5,8 @@ export type OrchestratorCommandType =
   | 'resume_autonomy'
   | 'emergency_stop'
   | 'clear_emergency_stop'
-  | 'apply_runtime_patch';
+  | 'apply_runtime_patch'
+  | 'kernel_dispatch';
 
 export type OrchestratorEventType =
   | 'heartbeat'
@@ -14,6 +15,8 @@ export type OrchestratorEventType =
   | 'goal_completed'
   | 'action_blocked'
   | 'action_executed'
+  | 'kernel_action_validated'
+  | 'kernel_action_recovered'
   | 'policy_updated'
   | 'emergency_stop_enabled'
   | 'emergency_stop_cleared'
@@ -53,6 +56,7 @@ export function isOrchestratorCommandType(value: string): value is OrchestratorC
     'emergency_stop',
     'clear_emergency_stop',
     'apply_runtime_patch',
+    'kernel_dispatch',
   ].includes(value);
 }
 
@@ -64,6 +68,8 @@ export function isOrchestratorEventType(value: string): value is OrchestratorEve
     'goal_completed',
     'action_blocked',
     'action_executed',
+    'kernel_action_validated',
+    'kernel_action_recovered',
     'policy_updated',
     'emergency_stop_enabled',
     'emergency_stop_cleared',

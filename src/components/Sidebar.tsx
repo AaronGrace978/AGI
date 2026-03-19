@@ -26,6 +26,7 @@ const MODULES: SidebarItem[] = [
   { id: 'sovereign', icon: '◆', label: 'SOVEREIGN — Command', className: 'sovereign-btn' },
   { id: 'spark', icon: '⚡', label: 'SPARK — Cognitive Kernel', className: 'spark-btn' },
   { id: 'voice', icon: '◎', label: 'VOICE — Living Presence', className: 'voice-btn' },
+  { id: 'oracle', icon: '☿', label: 'ORACLE — Psychic Prime', className: 'mind-btn' },
 ];
 
 function getStatusClass(state: string): string {

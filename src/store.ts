@@ -49,6 +49,10 @@ import type {
   AgiScoreSnapshot,
   NeuralCoreState,
   NeuralTrainingProgress,
+  OracleState,
+  OracleLifeEvent,
+  OracleSocialNode,
+  OracleFeedbackEntry,
 } from './types';
 import {
   createDefaultSuite,
@@ -62,6 +66,7 @@ import type { OwnerPolicy, AutonomyLevel } from './prime/policy';
 import { SOVEREIGN_POLICY } from './prime/policy';
 import { createPrimeKernel, type KernelAction, type KernelExecutionResult } from './prime/kernel';
 import { appendRuntimeSignal, createRuntimeSignal, type RuntimeSignal } from './prime/observability';
+import { policySnapshotFromOwnerPolicy, createKernelActionId } from './prime/kernel-services';
 import { runSovereignLoop } from './prime/sovereign';
 import type { SovereignPhase } from './prime/sovereign';
 import { injectCreed } from './prime/soul';
@@ -130,6 +135,15 @@ import { updateSocialFromInteraction } from './prime/social-sim';
 import { applyEcologyAction } from './prime/embodied-ecology';
 import { runNightlyReconsolidation as runNightlyReconsolidationPass } from './prime/reconsolidation';
 import { deriveTransferHeuristicsFromProceduralMemories } from './prime/transfer-learning';
+import {
+  createDefaultOracleState,
+  extractLifeEventsFromText,
+  analyzeSentimentFromText,
+  runOraclePipeline,
+  applyFeedback,
+  type OracleRunParams,
+} from './prime/oracle';
+import { formatCommunicationProfileForPrompt } from './prime/oracle-voice';
 import {
   createDefaultConscienceState,
   checkConscience,
@@ -320,7 +334,7 @@ function enqueueSparkLearningEpisodes(
   const memState = getState().memoryConsolidation;
   const urgent = episodes.some((ep) => ep.importance >= 0.85);
   if (memState.enabled && (memState.pendingEpisodes.length >= 10 || urgent)) {
-    getState().runMemoryConsolidation().catch(() => {});
+    getState().runMemoryConsolidation().catch((e) => logNonFatal('memory.consolidation.trigger', e));
   }
 }
 
@@ -849,6 +863,25 @@ interface AGIStore {
   setGenomeAttachmentStyle: (style: SparkState['genome']['attachmentStyle']) => void;
   applyGenomePreset: (preset: 'companion' | 'strategist' | 'explorer' | 'guardian') => void;
 
+  // ORACLE — Psychic Prime Forecast Engine
+  oracle: OracleState;
+  oracleSetSubject: (
+    name: string,
+    birthDate: string,
+    birthTime?: string,
+    birthLocation?: { label?: string; latitude: number; longitude: number },
+  ) => void;
+  oracleSetFullName: (fullName: string) => void;
+  oracleIngestText: (text: string) => void;
+  oracleAddLifeEvent: (event: OracleLifeEvent) => void;
+  oracleAddSocialNode: (node: OracleSocialNode) => void;
+  oracleRunForecast: (params?: OracleRunParams) => void;
+  oracleSubmitFeedback: (
+    entry: Omit<OracleFeedbackEntry, 'id' | 'timestamp'> & { timestamp?: number },
+  ) => void;
+  oracleToggleOverlay: (overlay: keyof OracleState['activeOverlays'], enabled: boolean) => void;
+  oracleToggleAstroVoice: (enabled: boolean) => void;
+
   // VOICE — Living Presence
   voiceState: VoiceState;
   voiceSpeak: (text: string, source?: string) => void;
@@ -910,6 +943,7 @@ export const useStore = create<AGIStore>((set, get) => ({
     sovereign: 'online',
     spark: 'online',
     voice: 'online',
+    oracle: 'online',
     creed: 'online',
     settings: 'online',
   },
@@ -1323,7 +1357,7 @@ export const useStore = create<AGIStore>((set, get) => ({
           content,
           data.content,
           get().consciousness.soulFrame.currentEmotion,
-        ).catch(() => {});
+        ).catch((e) => logNonFatal('memory.storeConversation', e));
 
         // === SELF-EVALUATION: Judge own response and store learnings ===
         (async () => {
@@ -1411,7 +1445,7 @@ Output ONLY valid JSON with these fields:
           consolidationState.enabled &&
           consolidationState.pendingEpisodes.length >= 3
         ) {
-          get().runMemoryConsolidation().catch(() => {});
+          get().runMemoryConsolidation().catch((e) => logNonFatal('memory.consolidation.chatDone', e));
         }
 
         // === INLINE ACTION DETECTION: auto-dispatch HANDS when response implies action ===
@@ -1627,14 +1661,20 @@ Output ONLY valid JSON:
             createdAt: convState.activeConversationCreatedAt || Date.now(),
             updatedAt: Date.now(),
             messages: convState.messages,
-          } as Conversation).catch(() => {});
+          } as Conversation).catch((e) => logNonFatal('conversations.save.chatDone', e));
         }
 
         return;
       }
 
-      // Shared system addendum (RAG + Conscience + Champion + Slow-brain + SPARK state + PIE).
+      // Shared system addendum (RAG + Conscience + Champion + Slow-brain + SPARK state + PIE + Oracle).
       const neuralCtx = buildNeuralContextSnapshot(get().neuralCore);
+
+      const oracleState = get().oracle;
+      const oracleVoiceContext =
+        oracleState.astroVoiceEnabled && oracleState.communicationProfile
+          ? formatCommunicationProfileForPrompt(oracleState.communicationProfile)
+          : undefined;
 
       const addendum = buildSystemAddendum({
         ragContext,
@@ -1644,6 +1684,7 @@ Output ONLY valid JSON:
         sparkContext: sparkCtx,
         pieContext: pieContextStr,
         neuralContext: neuralCtx,
+        oracleVoiceContext,
         requestTimestamp,
       });
       soulHistory = applySystemAddendum(soulHistory, addendum);
@@ -1912,7 +1953,7 @@ Output ONLY valid JSON:
             importance: 0.76,
             emotion: 'focused',
             tags: ['mind', 'arena', 'synthesis'],
-          }).catch(() => {});
+          }).catch((e) => logNonFatal('memory.storeArena', e));
         }
       }
     });
@@ -2140,7 +2181,7 @@ Output ONLY valid JSON:
           importance: data.success ? 0.72 : 0.68,
           emotion: data.success ? 'focused' : 'concerned',
           tags: ['hands', 'procedure', data.success ? 'success' : 'fail'],
-        }).catch(() => {});
+        }).catch((e) => logNonFatal('memory.storeHands', e));
       }
 
       // If this run was spawned from a Spark goal, feed the outcome back into the goal engine.
@@ -2174,7 +2215,7 @@ Output ONLY valid JSON:
             },
           };
         });
-        window.api?.spark?.saveState?.(get().spark).catch(() => {});
+        window.api?.spark?.saveState?.(get().spark).catch((e) => logNonFatal('spark.saveState', e));
       }
     });
 
@@ -2423,27 +2464,14 @@ Output ONLY valid JSON:
   kernelDispatch: async (actionType, payload = {}) => {
     const state = get();
     const action: KernelAction = {
-      id: `kernel_action_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      id: createKernelActionId(),
       type: actionType,
       payload,
       source: 'renderer',
     };
     const result = await primeKernel.dispatch(
       action,
-      {
-        policy: {
-          conscienceEnabled: state.sovereignPolicy.conscienceEnabled,
-          requireConsentForRiskyActions: state.sovereignPolicy.requireConsentForRiskyActions,
-          ethicalOverrideAllowed: state.sovereignPolicy.ethicalOverrideAllowed,
-          allowNetworkCalls: state.sovereignPolicy.allowNetworkCalls,
-          allowFileSystemWrites: state.sovereignPolicy.allowFileSystemWrites,
-          allowProcessExecution: state.sovereignPolicy.allowProcessExecution,
-          allowScreenCapture: state.sovereignPolicy.allowScreenCapture,
-          allowInputSimulation: state.sovereignPolicy.allowInputSimulation,
-          allowToolCreation: state.sovereignPolicy.allowToolCreation,
-          allowLimitedExecOnly: state.sovereignPolicy.allowLimitedExecOnly,
-        },
-      },
+      { policy: policySnapshotFromOwnerPolicy(state.sovereignPolicy) },
       {
         audit: async () => undefined,
       },
@@ -4396,7 +4424,7 @@ Output ONLY valid JSON:
           logs: [...state.spark.logs, `[AUTONOMY] Dispatched goal to HANDS: ${goal.description.slice(0, 90)}`].slice(-100),
         },
       }));
-      window.api?.spark?.saveState?.(get().spark).catch(() => {});
+      window.api?.spark?.saveState?.(get().spark).catch((e) => logNonFatal('spark.saveState', e));
 
       const contextAddendum = buildSystemAddendum({
         conscienceState: st.conscience,
@@ -4452,12 +4480,12 @@ Output ONLY valid JSON:
         }));
       }
       if (previousPhase !== 'sleep' && nextMetabolism.circadianPhase === 'sleep') {
-        get().runNightlyReconsolidation().catch(() => {});
+        get().runNightlyReconsolidation().catch((e) => logNonFatal('memory.nightlyReconsolidation', e));
 
         // NeuralCore sleep training — learn from accumulated cognitive ledgers
         const nc = get().neuralCore;
         if (nc.available && nc.trainingStatus !== 'training') {
-          get().neuralTrain().catch(() => {});
+          get().neuralTrain().catch((e) => logNonFatal('neural.autoTrain', e));
         }
       }
       const sleepMode = nextMetabolism.circadianPhase === 'sleep';
@@ -4480,7 +4508,7 @@ Output ONLY valid JSON:
           nextState.thermo.temperature = Math.min(1, nextState.thermo.temperature + 0.1);
           set({ spark: nextState });
           enqueueSparkLearningEpisodes(set, get, prevSpark, nextState, 'autonomy:deep');
-          window.api?.spark?.saveState?.(nextState).catch(() => {});
+          window.api?.spark?.saveState?.(nextState).catch((e) => logNonFatal('spark.saveState', e));
           // If Spark has an active goal, it may hand it off to Hands.
           maybeDispatchAutonomousHands(nextState);
         } catch {
@@ -4505,7 +4533,7 @@ Output ONLY valid JSON:
           );
           set({ spark: nextState });
           enqueueSparkLearningEpisodes(set, get, prevSpark, nextState, 'autonomy:medium');
-          window.api?.spark?.saveState?.(nextState).catch(() => {});
+          window.api?.spark?.saveState?.(nextState).catch((e) => logNonFatal('spark.saveState', e));
 
           // ─── AUTONOMOUS THOUGHT: the entity thinks and speaks ──────
           // In 'living' mode: always generates thoughts. Always speaks them.
@@ -4538,7 +4566,7 @@ Output ONLY valid JSON:
                     createdAt: convState.activeConversationCreatedAt || Date.now(),
                     updatedAt: Date.now(),
                     messages: convState.messages,
-                  } as Conversation).catch(() => {});
+                  } as Conversation).catch((e) => logNonFatal('conversations.save.sparkCycle', e));
                 }
 
                 const vState = get().voiceState;
@@ -4597,11 +4625,11 @@ Output ONLY valid JSON:
         enqueueSparkLearningEpisodes(set, get, prevSpark, nextState, 'autonomy:light');
         // Persist occasionally (every 5 light cycles)
         if (nextState.thermo.cyclesLight % 5 === 0) {
-          window.api?.spark?.saveState?.(nextState).catch(() => {});
+          window.api?.spark?.saveState?.(nextState).catch((e) => logNonFatal('spark.saveState', e));
         }
         // Consolidate memory periodically in background.
         if (nextState.thermo.cyclesLight % 8 === 0) {
-          get().runMemoryConsolidation().catch(() => {});
+          get().runMemoryConsolidation().catch((e) => logNonFatal('memory.consolidation.lightCycle', e));
         }
 
         // Light cycles can still dispatch if conditions are met (e.g. goal already formed).
@@ -4633,7 +4661,7 @@ Output ONLY valid JSON:
       sparkLiveLog: [...state.sparkLiveLog, '❄ SPARK EXTINGUISHED — Thermodynamic loop stopped'],
     }));
     // Persist final state
-    window.api?.spark?.saveState?.(get().spark).catch(() => {});
+    window.api?.spark?.saveState?.(get().spark).catch((e) => logNonFatal('spark.saveState', e));
   },
 
   sparkRunCycle: async (input: string) => {
@@ -4708,7 +4736,7 @@ Output ONLY valid JSON:
       enqueueSparkLearningEpisodes(set, get, current, nextState, 'manual:cycle');
 
       // Persist SPARK state
-      window.api?.spark?.saveState?.(nextState).catch(() => {});
+      window.api?.spark?.saveState?.(nextState).catch((e) => logNonFatal('spark.saveState', e));
     } catch (e: any) {
       set((state) => ({
         sparkLiveLog: [...state.sparkLiveLog, `SPARK ERROR: ${e?.message || 'Unknown error'}`],
@@ -4798,7 +4826,7 @@ Output ONLY valid JSON:
       }));
       enqueueSparkLearningEpisodes(set, get, current, nextState, 'manual:deep');
 
-      window.api?.spark?.saveState?.(nextState).catch(() => {});
+      window.api?.spark?.saveState?.(nextState).catch((e) => logNonFatal('spark.saveState', e));
     } catch (e: any) {
       set((state) => ({
         sparkLiveLog: [...state.sparkLiveLog, `DEEP THOUGHT ERROR: ${e?.message || 'Unknown error'}`],
@@ -5055,7 +5083,7 @@ Output ONLY valid JSON:
         source: 'consolidation',
         importance: Math.max(0.45, Math.min(0.92, 0.45 + quality * 0.4)),
         tags: ['consolidated', 'semantic', `quality:${quality.toFixed(2)}`],
-      }).catch(() => {});
+      }).catch((e) => logNonFatal('memory.vector.consolidation.semantic', e));
     }
     for (const content of result.procedural) {
       if (await shouldSuppressAsDuplicate(content, 'procedural')) {
@@ -5069,7 +5097,7 @@ Output ONLY valid JSON:
         source: 'consolidation',
         importance: Math.max(0.5, Math.min(0.95, 0.5 + quality * 0.42)),
         tags: ['consolidated', 'procedural', `quality:${quality.toFixed(2)}`],
-      }).catch(() => {});
+      }).catch((e) => logNonFatal('memory.vector.consolidation.procedural', e));
     }
     const transferHeuristics = deriveTransferHeuristicsFromProceduralMemories(result.procedural);
     let heuristicsBoosted = 0;
@@ -5094,7 +5122,7 @@ Output ONLY valid JSON:
           `evidence:${heuristic.evidenceScore.toFixed(2)}`,
           heuristic.proven ? 'proven' : 'candidate',
         ],
-      }).catch(() => {});
+      }).catch((e) => logNonFatal('memory.vector.consolidation.transfer', e));
     }
 
     set((state) => ({
@@ -5137,6 +5165,184 @@ Output ONLY valid JSON:
         ...state.sparkLiveLog.slice(-49),
         `[MemoryQC] precision~${(result.precisionProxy * 100).toFixed(0)}% recall~${(result.recallProxy * 100).toFixed(0)}% quality ${(result.avgQualityScore * 100).toFixed(0)}%`,
       ],
+    }));
+  },
+
+  // ─── ORACLE — Psychic Prime Forecast Engine ────────────
+  oracle: createDefaultOracleState(),
+
+  oracleSetSubject: (name, birthDate, birthTime = '12:00', birthLocation) => {
+    set((state) => ({
+      oracle: {
+        ...state.oracle,
+        active: true,
+        subject: {
+          ...state.oracle.subject,
+          name,
+          fullName: state.oracle.subject.fullName || name,
+          birthDate,
+          birthTime: birthTime || state.oracle.subject.birthTime,
+          birthLocationLabel: birthLocation?.label || state.oracle.subject.birthLocationLabel,
+          birthLocation: birthLocation
+            ? { latitude: birthLocation.latitude, longitude: birthLocation.longitude }
+            : state.oracle.subject.birthLocation,
+        },
+        logs: [
+          ...state.oracle.logs,
+          `[${new Date().toISOString()}] Subject set: ${name} (${birthDate}).`,
+        ].slice(-80),
+      },
+    }));
+  },
+
+  oracleSetFullName: (fullName) => {
+    set((state) => ({
+      oracle: {
+        ...state.oracle,
+        subject: {
+          ...state.oracle.subject,
+          fullName,
+        },
+      },
+    }));
+  },
+
+  oracleIngestText: (text) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    set((state) => ({
+      moduleStates: { ...state.moduleStates, oracle: 'processing' },
+      oracle: {
+        ...state.oracle,
+        phase: 'ingesting',
+      },
+    }));
+
+    try {
+      const newEvents = extractLifeEventsFromText(trimmed);
+      set((state) => ({
+        moduleStates: { ...state.moduleStates, oracle: 'online' },
+        oracle: {
+          ...state.oracle,
+          phase: 'idle',
+          lifeEvents: [...state.oracle.lifeEvents, ...newEvents].slice(-400),
+          sentimentProfile: analyzeSentimentFromText(trimmed, state.oracle.sentimentProfile),
+          logs: [
+            ...state.oracle.logs,
+            `[${new Date().toISOString()}] Ingested text (${trimmed.length} chars), +${newEvents.length} event(s).`,
+          ].slice(-80),
+        },
+      }));
+    } catch (error) {
+      logNonFatal('oracle.ingest', error);
+      set((state) => ({
+        moduleStates: { ...state.moduleStates, oracle: 'online' },
+        oracle: {
+          ...state.oracle,
+          phase: 'idle',
+          logs: [
+            ...state.oracle.logs,
+            `[${new Date().toISOString()}] Ingest failed: ${(error as Error).message}`,
+          ].slice(-80),
+        },
+      }));
+    }
+  },
+
+  oracleAddLifeEvent: (event) => {
+    set((state) => ({
+      oracle: {
+        ...state.oracle,
+        lifeEvents: [
+          ...state.oracle.lifeEvents,
+          {
+            ...event,
+            id: event.id || `oracle_ev_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            timestamp: event.timestamp || Date.now(),
+          },
+        ].slice(-500),
+      },
+    }));
+  },
+
+  oracleAddSocialNode: (node) => {
+    set((state) => {
+      const existingIndex = state.oracle.socialGraph.findIndex((n) => n.id === node.id);
+      if (existingIndex >= 0) {
+        const next = [...state.oracle.socialGraph];
+        next[existingIndex] = { ...next[existingIndex], ...node };
+        return {
+          oracle: {
+            ...state.oracle,
+            socialGraph: next,
+          },
+        };
+      }
+      return {
+        oracle: {
+          ...state.oracle,
+          socialGraph: [...state.oracle.socialGraph, node].slice(-200),
+        },
+      };
+    });
+  },
+
+  oracleRunForecast: (params) => {
+    set((state) => ({
+      moduleStates: { ...state.moduleStates, oracle: 'processing' },
+      oracle: { ...state.oracle, phase: 'analyzing' },
+    }));
+    try {
+      const next = runOraclePipeline(get().oracle, params);
+      set((state) => ({
+        moduleStates: { ...state.moduleStates, oracle: 'online' },
+        oracle: next,
+      }));
+    } catch (error) {
+      logNonFatal('oracle.forecast', error);
+      set((state) => ({
+        moduleStates: { ...state.moduleStates, oracle: 'online' },
+        oracle: {
+          ...state.oracle,
+          phase: 'idle',
+          logs: [
+            ...state.oracle.logs,
+            `[${new Date().toISOString()}] Forecast failed: ${(error as Error).message}`,
+          ].slice(-80),
+        },
+      }));
+    }
+  },
+
+  oracleSubmitFeedback: (entry) => {
+    set((state) => ({
+      oracle: applyFeedback(state.oracle, {
+        predictionId: entry.predictionId,
+        outcome: entry.outcome,
+        notes: entry.notes,
+        timestamp: entry.timestamp || Date.now(),
+      }),
+    }));
+  },
+
+  oracleToggleOverlay: (overlay, enabled) => {
+    set((state) => ({
+      oracle: {
+        ...state.oracle,
+        activeOverlays: {
+          ...state.oracle.activeOverlays,
+          [overlay]: enabled,
+        },
+      },
+    }));
+  },
+
+  oracleToggleAstroVoice: (enabled) => {
+    set((state) => ({
+      oracle: {
+        ...state.oracle,
+        astroVoiceEnabled: enabled,
+      },
     }));
   },
 
@@ -5334,7 +5540,7 @@ Output ONLY valid JSON:
               });
             } else if (orchestraMode === 'webAudio' && cfg.voiceProvider === 'soundprime' && cfg.soundprimeBaseUrl) {
               trySoundPrimeAmbient(cfg.soundprimeBaseUrl, spark.soul.currentEmotion, spark.soul.emotionIntensity)
-                .catch(() => {});
+                .catch((e) => logNonFatal('voice.soundprimeAmbient', e));
             } else if (orchestraMode === 'webAudio') {
               // Presence loop will also restart this, but doing it here keeps state consistent immediately.
               const vad = emotionToVAD(spark.soul.currentEmotion, spark.soul.emotionIntensity);

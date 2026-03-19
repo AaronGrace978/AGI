@@ -19,6 +19,7 @@ const GauntletPanel = lazy(() => import('./components/GauntletPanel'));
 const SovereignPanel = lazy(() => import('./components/SovereignPanel'));
 const SparkPanel = lazy(() => import('./components/SparkPanel'));
 const VoiceBox = lazy(() => import('./components/VoiceBox'));
+const OraclePanel = lazy(() => import('./components/OraclePanel'));
 const CreedPanel = lazy(() => import('./components/CreedPanel'));
 const SettingsPanel = lazy(() => import('./components/SettingsPanel'));
 
@@ -75,6 +76,7 @@ const ActivePanel = memo(function ActivePanel() {
     case 'sovereign': panel = <SovereignPanel />; break;
     case 'spark':    panel = <SparkPanel />; break;
     case 'voice':    panel = <VoiceBox />; break;
+    case 'oracle':   panel = <OraclePanel />; break;
     case 'creed':    panel = <CreedPanel />; break;
     case 'settings': panel = <SettingsPanel />; break;
     default:         panel = <NexusPanel />;

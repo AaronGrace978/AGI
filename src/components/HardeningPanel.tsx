@@ -26,7 +26,9 @@ const STATUS_COLORS: Record<CheckStatus, string> = {
 export default function HardeningPanel() {
   const report = useStore((s) => s.hardening.report);
   const tests = useStore((s) => s.hardening.tests);
+  const runtimeHealth = useStore((s) => s.runtimeHealth);
   const hardeningRunCheck = useStore((s) => s.hardeningRunCheck);
+  const loadRuntimeHealth = useStore((s) => s.loadRuntimeHealth);
   const markTestsPassed = useStore((s) => s.hardeningMarkTestsPassed);
   const markTestsFailed = useStore((s) => s.hardeningMarkTestsFailed);
 
@@ -45,6 +47,9 @@ export default function HardeningPanel() {
         <button className="hardening-btn primary" onClick={runCheck}>
           RUN HEALTH CHECK
         </button>
+        <button className="hardening-btn" onClick={() => void loadRuntimeHealth()}>
+          REFRESH RUNTIME LOGS
+        </button>
         <button
           className="hardening-btn"
           onClick={() => markTestsPassed(tests.count || 105)}
@@ -60,6 +65,33 @@ export default function HardeningPanel() {
           TESTS FAILED
         </button>
       </div>
+
+      {runtimeHealth && runtimeHealth.issues.length > 0 && (
+        <div className="hardening-results">
+          <div className="hardening-timestamp">
+            Runtime issues from logs ({runtimeHealth.totalAuditEntries} audit / {runtimeHealth.totalOrchestratorEvents} orchestrator)
+          </div>
+          <div className="hardening-checklist">
+            {runtimeHealth.issues.slice(0, 4).map((issue) => (
+              <div
+                key={issue.key}
+                className={`hardening-item hardening-item-${
+                  issue.severity === 'error' || issue.severity === 'critical'
+                    ? 'fail'
+                    : issue.severity === 'warn'
+                      ? 'warn'
+                      : 'pass'
+                }`}
+              >
+                <div className="hardening-item-row">
+                  <span className="hardening-item-label">{issue.key}</span>
+                  <span className="hardening-item-status">{issue.count}x</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {report && (
         <div className="hardening-results">

@@ -133,6 +133,11 @@ contextBridge.exposeInMainWorld('api', {
     healthSummary: () => ipcRenderer.invoke('system:healthSummary'),
   },
 
+  update: {
+    check: () => ipcRenderer.invoke('update:check'),
+    openDownload: (url) => ipcRenderer.invoke('update:openDownload', url),
+  },
+
   // ─── NightMind ─────────────────────────────────────────
   nightmind: {
     onInsight: (callback) => {
@@ -269,6 +274,11 @@ contextBridge.exposeInMainWorld('api', {
   spark: {
     getState: () => ipcRenderer.invoke('spark:getState'),
     saveState: (state) => ipcRenderer.invoke('spark:saveState', state),
+    reason: (input) => ipcRenderer.invoke('spark:reason', input),
+  },
+
+  gate: {
+    evaluate: (action, gate) => ipcRenderer.invoke('gate:evaluate', action, gate),
   },
 
   // ─── Orchestrator (PrimeOS service spine) ─────────────

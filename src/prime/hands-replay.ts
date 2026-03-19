@@ -9,6 +9,16 @@ export interface HandsReplayMetrics {
   failedCount: number;
 }
 
+export interface OperationJournalEntry {
+  id: string;
+  runId: string;
+  stepIndex: number;
+  action: string;
+  success: boolean;
+  blocked: boolean;
+  timestamp: number;
+}
+
 export function buildReplaySignature(entries: HandsReplayEntry[]): string {
   return entries
     .map((entry) => {
@@ -33,4 +43,26 @@ export function summarizeReplayMetrics(entries: HandsReplayEntry[]): HandsReplay
   }
 
   return { actionCount, blockedCount, failedCount };
+}
+
+export function buildOperationJournal(runId: string, entries: HandsReplayEntry[]): OperationJournalEntry[] {
+  const journal: OperationJournalEntry[] = [];
+  let stepIndex = 0;
+  for (const entry of entries) {
+    if (entry.type !== 'hands_action' && entry.type !== 'cognitive_step') continue;
+    const action = String(entry.payload?.action ?? entry.payload?.actionType ?? entry.payload?.type ?? 'na');
+    const success = entry.payload?.success ?? entry.payload?.actionResult?.success;
+    const blocked = Boolean(entry.payload?.blocked);
+    journal.push({
+      id: `${runId}_${stepIndex}_${Date.now()}`,
+      runId,
+      stepIndex,
+      action,
+      success: success !== false,
+      blocked,
+      timestamp: Number(entry.payload?.timestamp || Date.now()),
+    });
+    stepIndex += 1;
+  }
+  return journal;
 }

@@ -221,7 +221,9 @@ async function generateOrchestraTrack(force: boolean = false): Promise<void> {
     audio.loop = true;
     audio.preload = 'auto';
     audio.volume = 0;
-    await audio.play().catch(() => {});
+    await audio.play().catch((e) => {
+      console.warn('[orchestra] audio.play failed:', e);
+    });
 
     crossfadeToNewAudio(audio, blobUrl, clampVolume(activeConfig.volume));
 
@@ -280,7 +282,9 @@ export function resumeOrchestraAfterForeground(): void {
   if (activeConfig?.mode !== 'elevenlabs_instrumental') return;
   if (orchestraAudio) {
     orchestraAudio.volume = clampVolume(activeConfig.volume);
-    orchestraAudio.play().catch(() => {});
+    orchestraAudio.play().catch((e) => {
+      console.warn('[orchestra] orchestraAudio.play failed:', e);
+    });
   } else {
     void generateOrchestraTrack(false);
   }

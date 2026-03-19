@@ -262,6 +262,19 @@ export function buildWorkingMemoryContext(
   return parts.join('\n');
 }
 
+export function createKernelActionEnvelope(
+  action: string,
+  params: Record<string, unknown>,
+  source: string = 'cognitive-agent',
+): { id: string; type: string; payload: Record<string, unknown>; source: string } {
+  return {
+    id: `kernel_action_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    type: action,
+    payload: params || {},
+    source,
+  };
+}
+
 export function parseThinkResponse(raw: string): {
   thought: string;
   action: string;

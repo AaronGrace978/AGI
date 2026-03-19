@@ -17,6 +17,7 @@ export type ModuleId =
   | 'sovereign'
   | 'spark'
   | 'voice'
+  | 'oracle'
   | 'creed'
   | 'settings';
 
@@ -895,6 +896,323 @@ export interface TemporalState {
   predictionAccuracy: number;
 }
 
+// ─── ORACLE: Psychic Prime — Life Trajectory Prediction Engine ──
+// Data + patterns + logic.
+// Core simulation + optional divination overlays (astrology, numerology, archetypes).
+
+export type OracleLifeDomain =
+  | 'career'
+  | 'relationships'
+  | 'health'
+  | 'creativity'
+  | 'growth'
+  | 'social'
+  | 'financial';
+
+export interface OracleLifeEvent {
+  id: string;
+  label: string;
+  domain: OracleLifeDomain;
+  timestamp: number;
+  age?: number;
+  sentiment: number; // -1 to 1
+  significance: number; // 0-1 how much this shaped trajectory
+  description: string;
+}
+
+export interface OracleSentimentProfile {
+  loneliness: number; // 0-1
+  creativity: number; // 0-1
+  fearOfFailure: number; // 0-1
+  ambition: number; // 0-1
+  hopefulness: number; // 0-1
+  resilience: number; // 0-1
+  socialEnergy: number; // 0-1
+  selfAwareness: number; // 0-1
+  lastUpdated: number;
+}
+
+export interface OracleSocialNode {
+  id: string;
+  label: string;
+  relationship:
+    | 'family'
+    | 'friend'
+    | 'colleague'
+    | 'mentor'
+    | 'romantic'
+    | 'acquaintance'
+    | 'rival';
+  influence: number; // -1 to 1 (negative = draining, positive = empowering)
+  sentimentMatch: number; // 0-1 compatibility score
+  lastInteraction: number;
+  notes: string;
+}
+
+export interface OracleTrajectoryBranch {
+  id: string;
+  label: string;
+  domain: OracleLifeDomain;
+  probability: number; // 0-1
+  horizonMonths: number;
+  description: string;
+  triggers: string[]; // actions/events that push toward this branch
+  sentiment: number; // -1 to 1 predicted emotional valence
+}
+
+export interface OracleSimulationRun {
+  id: string;
+  ranAt: number;
+  iterations: number;
+  horizonMonths: number;
+  branches: OracleTrajectoryBranch[];
+  dominantBranch: string; // id of highest-probability branch
+  confidenceScore: number; // 0-1 overall confidence
+  inputHash: string; // fingerprint of inputs used
+}
+
+export type OraclePhase =
+  | 'idle'
+  | 'ingesting'
+  | 'analyzing'
+  | 'simulating'
+  | 'forecasting'
+  | 'complete';
+
+export interface OracleFeedbackEntry {
+  id: string;
+  predictionId: string;
+  timestamp: number;
+  outcome: 'correct' | 'partial' | 'wrong' | 'pending';
+  notes: string;
+}
+
+export type OraclePlanetName =
+  | 'Sun'
+  | 'Moon'
+  | 'Mercury'
+  | 'Venus'
+  | 'Mars'
+  | 'Jupiter'
+  | 'Saturn'
+  | 'Uranus'
+  | 'Neptune'
+  | 'Pluto';
+
+export type OracleZodiacSign =
+  | 'Aries'
+  | 'Taurus'
+  | 'Gemini'
+  | 'Cancer'
+  | 'Leo'
+  | 'Virgo'
+  | 'Libra'
+  | 'Scorpio'
+  | 'Sagittarius'
+  | 'Capricorn'
+  | 'Aquarius'
+  | 'Pisces';
+
+export type OracleAspectType = 'conjunction' | 'sextile' | 'square' | 'trine' | 'opposition';
+
+export interface OraclePlanetPosition {
+  planet: OraclePlanetName;
+  longitude: number; // 0..360 ecliptic longitude
+  sign: OracleZodiacSign;
+  degreeInSign: number; // 0..30
+  house: number; // 1..12
+  speed?: number;
+}
+
+export interface OracleAspect {
+  type: OracleAspectType;
+  from: OraclePlanetName;
+  to: OraclePlanetName;
+  angle: number;
+  orb: number;
+}
+
+export interface OracleHouse {
+  number: number; // 1..12
+  cuspLongitude: number; // 0..360
+  sign: OracleZodiacSign;
+}
+
+export interface OracleBirthChart {
+  generatedAt: number;
+  birthDateIso: string;
+  latitude: number;
+  longitude: number;
+  ascendantLongitude: number;
+  midheavenLongitude: number;
+  planets: OraclePlanetPosition[];
+  houses: OracleHouse[];
+  aspects: OracleAspect[];
+  summary: string[];
+}
+
+export interface OracleTransitSignal {
+  id: string;
+  timestamp: number;
+  planet: OraclePlanetName;
+  target: OraclePlanetName;
+  type: OracleAspectType;
+  orb: number;
+  weight: number; // -1..1 directional influence
+  message: string;
+  domain: OracleLifeDomain;
+}
+
+export interface OracleTransitForecastMonth {
+  monthIso: string; // YYYY-MM
+  signals: OracleTransitSignal[];
+  summary: string;
+}
+
+export interface OracleTransitForecast {
+  generatedAt: number;
+  fromIso: string;
+  months: OracleTransitForecastMonth[];
+}
+
+export interface OracleNumerologyValue {
+  core: number;
+  compound?: number;
+  sequence?: number[];
+  label: string;
+  interpretation: {
+    love: string;
+    career: string;
+    life: string;
+  };
+}
+
+export interface OracleNumerologyProfile {
+  generatedAt: number;
+  fullName: string;
+  lifePath: OracleNumerologyValue;
+  expression: OracleNumerologyValue;
+  soulUrge: OracleNumerologyValue;
+  personality: OracleNumerologyValue;
+  birthday: OracleNumerologyValue;
+  maturity: OracleNumerologyValue;
+  personalYear: OracleNumerologyValue;
+  hiddenPassions: number[];
+  karmicLessons: number[];
+  balanceNumber: number;
+  synthesis: string[];
+}
+
+export type OracleArchetypeId =
+  | 'magician'
+  | 'high_priestess'
+  | 'empress'
+  | 'emperor'
+  | 'hierophant'
+  | 'lovers'
+  | 'chariot'
+  | 'strength'
+  | 'hermit'
+  | 'wheel_of_fortune'
+  | 'justice'
+  | 'hanged_man'
+  | 'death'
+  | 'temperance'
+  | 'devil'
+  | 'tower'
+  | 'star'
+  | 'moon'
+  | 'sun'
+  | 'judgement'
+  | 'world'
+  | 'five_of_pentacles'
+  | 'king_of_cups'
+  | 'seven_of_cups_reversed'
+  | 'three_of_pentacles_reversed'
+  | 'hierophant_reversed'
+  | 'emperor_reversed'
+  | 'six_of_wands_reversed'
+  | 'queen_of_pentacles'
+  | 'page_of_swords'
+  | 'temperance_card'
+  | 'ace_of_pentacles'
+  | 'two_of_wands'
+  | 'knight_of_pentacles'
+  | 'ten_of_wands';
+
+export interface OracleArchetypeSignal {
+  id: OracleArchetypeId;
+  label: string;
+  score: number; // 0..1
+  rationale: string;
+  domains: OracleLifeDomain[];
+}
+
+export interface OracleDivinationOverlays {
+  astrology: boolean;
+  numerology: boolean;
+  archetypes: boolean;
+}
+
+export interface OracleDestinyMatrixSection {
+  id: string;
+  title: string;
+  body: string;
+}
+
+export interface OracleDestinyMatrixReport {
+  generatedAt: number;
+  subjectName: string;
+  horizonMonths: number;
+  sections: OracleDestinyMatrixSection[];
+  narrative: string;
+}
+
+export interface OracleCommunicationProfile {
+  active: boolean;
+  sunSign: OracleZodiacSign | null;
+  moonSign: OracleZodiacSign | null;
+  mercurySign: OracleZodiacSign | null;
+  ascendantSign: OracleZodiacSign | null;
+  toneDirectives: string[];
+  emphasisAreas: string[];
+  avoidPatterns: string[];
+  pace: 'fast' | 'measured' | 'slow';
+  generatedAt: number;
+}
+
+export interface OracleState {
+  active: boolean;
+  phase: OraclePhase;
+  subject: {
+    name: string;
+    fullName: string;
+    birthDate: string; // YYYY-MM-DD
+    birthTime: string; // HH:mm
+    birthLocationLabel: string;
+    birthLocation: { latitude: number; longitude: number };
+    baselineDescription: string;
+  };
+  activeOverlays: OracleDivinationOverlays;
+  lifeEvents: OracleLifeEvent[];
+  sentimentProfile: OracleSentimentProfile;
+  socialGraph: OracleSocialNode[];
+  simulations: OracleSimulationRun[];
+  activeForecast: OracleSimulationRun | null;
+  birthChart: OracleBirthChart | null;
+  transits: OracleTransitForecast | null;
+  numerology: OracleNumerologyProfile | null;
+  activeArchetypes: OracleArchetypeSignal[];
+  destinyMatrixReport: OracleDestinyMatrixReport | null;
+  communicationProfile: OracleCommunicationProfile | null;
+  astroVoiceEnabled: boolean;
+  feedback: OracleFeedbackEntry[];
+  calibrationScore: number; // 0-1, improves with feedback
+  totalSimulations: number;
+  logs: string[];
+  lastRunAt: number | null;
+}
+
 export type SparkPhase = 'dormant' | 'booting' | 'running' | 'thinking' | 'exploring' | 'evolving';
 
 export interface SparkThermodynamics {
@@ -1511,6 +1829,20 @@ declare global {
         }>;
         healthSummary: () => Promise<RuntimeHealthSummary>;
       };
+      update?: {
+        check: () => Promise<{
+          configured: boolean;
+          currentVersion: string;
+          latestVersion?: string;
+          updateAvailable: boolean;
+          notes?: string;
+          downloadUrl?: string;
+          error?: string;
+          message?: string;
+          raw?: Record<string, unknown>;
+        }>;
+        openDownload: (url: string) => Promise<{ success: boolean; error?: string }>;
+      };
       nightmind?: {
         onInsight: (cb: (data: { insight: string; timestamp: number }) => void) => () => void;
       };
@@ -1618,6 +1950,20 @@ declare global {
       spark: {
         getState: () => Promise<SparkState | null>;
         saveState: (state: SparkState) => Promise<void>;
+        reason: (input: string) => Promise<{
+          engines?: Array<Record<string, unknown>>;
+          runCount?: number;
+          timestamp?: number;
+        } | null>;
+      };
+      gate?: {
+        evaluate: (action: unknown, gate?: string) => Promise<{
+          allowed?: boolean;
+          verdict?: string;
+          reason?: string;
+          policy?: string;
+          gateType?: string;
+        } | null>;
       };
       orchestrator?: {
         status: () => Promise<{ success: boolean; state?: OrchestratorStatus; error?: string }>;

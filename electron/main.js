@@ -34,6 +34,7 @@ const { makeActionContractRegistry, defaultRetryPolicy } = require('./hands/cont
 const { applyOwnerDirectProfile } = require('./hands/controller');
 const { appendActionLedger } = require('./hands/ledger');
 const { exportPrimeOSRuntimeBundle } = require('./hands/primeos-adapter');
+const osBridge = require('./os-bridge');
 
 const isDev = !app.isPackaged;
 
@@ -1050,6 +1051,24 @@ if (isAGIPrimeOS) {
     console.warn('[PrimeOS] Could not read providers.conf:', e?.message);
   }
 }
+const osBridgeEnabled = osBridge.shouldUsePrimeOSBridge({ isAGIPrimeOS, env: process.env });
+if (osBridgeEnabled) {
+  console.log('[PrimeOS] OS daemon bridge enabled (orchestrator/memory/spark/gate)');
+}
+const UPDATE_MANIFEST_URL = process.env.AGIPRIME_UPDATE_MANIFEST_URL || '';
+
+function compareSemverLoose(a, b) {
+  const av = String(a || '').split('.').map((v) => parseInt(v, 10) || 0);
+  const bv = String(b || '').split('.').map((v) => parseInt(v, 10) || 0);
+  const max = Math.max(av.length, bv.length);
+  for (let i = 0; i < max; i++) {
+    const ai = av[i] || 0;
+    const bi = bv[i] || 0;
+    if (ai > bi) return 1;
+    if (ai < bi) return -1;
+  }
+  return 0;
+}
 
 // Vision model — auto-configure from env or detect VL model on Ollama
 if (process.env.OLLAMA_VISION_MODEL) {
@@ -1338,8 +1357,29 @@ ipcMain.handle('agiScore:listSnapshots', (_, options) => {
 });
 
 // ─── Memory IPC ────────────────────────────────────────────────
-ipcMain.handle('memory:get', () => memory);
+ipcMain.handle('memory:get', async () => {
+  if (osBridgeEnabled) {
+    try {
+      return await osBridge.routeMemorySnapshot(12);
+    } catch (e) {
+      console.warn('[PrimeOS Bridge] memory:get fallback:', e?.message);
+    }
+  }
+  return memory;
+});
 ipcMain.handle('memory:getSummary', (_, options) => {
+  if (osBridgeEnabled) {
+    return osBridge.routeMemorySnapshot(options?.maxItems ?? 5).catch((e) => {
+      console.warn('[PrimeOS Bridge] memory:getSummary fallback:', e?.message);
+      return {
+        facts: [],
+        conversations: [],
+        soul: {},
+        consciousness: { insights: [] },
+        counts: { facts: 0, conversations: 0, insights: 0 },
+      };
+    });
+  }
   const maxItems = Math.max(1, Math.min(12, Number(options?.maxItems ?? 5)));
   const safeFacts = Array.isArray(memory?.facts) ? memory.facts : [];
   const safeConversations = Array.isArray(memory?.conversations) ? memory.conversations : [];
@@ -1361,11 +1401,27 @@ ipcMain.handle('memory:getSummary', (_, options) => {
   };
 });
 ipcMain.handle('memory:update', (_, updates) => {
+  if (osBridgeEnabled) {
+    return osBridge.routeMemoryStore({
+      content: `Legacy memory update snapshot: ${JSON.stringify(updates || {})}`,
+      type: 'semantic',
+      source: 'legacy-memory-update',
+      tags: ['legacy', 'snapshot'],
+    }).then(() => memory);
+  }
   memory = { ...memory, ...updates };
   saveJSON(memoryFile, memory);
   return memory;
 });
 ipcMain.handle('memory:addFact', (_, fact) => {
+  if (osBridgeEnabled) {
+    return osBridge.routeMemoryStore({
+      content: typeof fact === 'string' ? fact : JSON.stringify(fact || {}),
+      type: 'semantic',
+      source: 'memory:addFact',
+      tags: ['fact'],
+    });
+  }
   memory.facts.push({ ...fact, timestamp: Date.now() });
   if (memory.facts.length > 500) memory.facts = memory.facts.slice(-500);
   saveJSON(memoryFile, memory);
@@ -1403,6 +1459,26 @@ ipcMain.handle('spark:getState', () => {
 
 ipcMain.handle('spark:saveState', (_, state) => {
   saveJSON(sparkFile, state);
+});
+
+ipcMain.handle('spark:reason', async (_, input) => {
+  if (!osBridgeEnabled) return null;
+  try {
+    return await osBridge.routeSparkReason(String(input || ''));
+  } catch (e) {
+    console.warn('[PrimeOS Bridge] spark:reason failed:', e?.message);
+    return null;
+  }
+});
+
+ipcMain.handle('gate:evaluate', async (_, action, gate) => {
+  if (!osBridgeEnabled) return null;
+  try {
+    return await osBridge.routeGateEvaluate(action, gate);
+  } catch (e) {
+    console.warn('[PrimeOS Bridge] gate:evaluate failed:', e?.message);
+    return null;
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -1742,18 +1818,46 @@ function listVectorMemories(options = {}) {
 
 // ─── Vector Memory IPC ─────────────────────────────────────────
 ipcMain.handle('memory:storeVector', async (_, entry) => {
+  if (osBridgeEnabled) {
+    try {
+      return await osBridge.routeMemoryStore(entry);
+    } catch (e) {
+      console.warn('[PrimeOS Bridge] memory:storeVector fallback:', e?.message);
+    }
+  }
   return await storeVectorMemory(entry);
 });
 
 ipcMain.handle('memory:searchVector', async (_, query, topK, typeFilter) => {
+  if (osBridgeEnabled) {
+    try {
+      return await osBridge.routeMemorySearch(query, topK || 5, typeFilter || null);
+    } catch (e) {
+      console.warn('[PrimeOS Bridge] memory:searchVector fallback:', e?.message);
+    }
+  }
   return await searchVectorMemories(query, topK || 5, typeFilter || null);
 });
 
 ipcMain.handle('memory:vectorStats', async () => {
+  if (osBridgeEnabled) {
+    try {
+      return await osBridge.routeMemoryStats();
+    } catch (e) {
+      console.warn('[PrimeOS Bridge] memory:vectorStats fallback:', e?.message);
+    }
+  }
   return getVectorStats();
 });
 
 ipcMain.handle('memory:listVectors', async (_, options) => {
+  if (osBridgeEnabled) {
+    try {
+      return await osBridge.routeMemoryList(options || {});
+    } catch (e) {
+      console.warn('[PrimeOS Bridge] memory:listVectors fallback:', e?.message);
+    }
+  }
   return listVectorMemories(options);
 });
 
@@ -2285,6 +2389,14 @@ ipcMain.handle('chatHistory:load', async (_, filePath) => {
 // ═══════════════════════════════════════════════════════════════
 
 async function llmGenerate(messages, config = {}) {
+  if (osBridgeEnabled && !config?.disablePrimeOSBridge) {
+    try {
+      const bridged = await osBridge.routeChat(messages, config);
+      return bridged?.content || '';
+    } catch (e) {
+      console.warn('[PrimeOS Bridge] llm:generate fallback:', e?.message);
+    }
+  }
   const provider = config.provider || settings.provider;
   const model = config.model || settings.model;
   const temperature = config.temperature ?? 0.7;
@@ -2771,6 +2883,24 @@ ipcMain.on('chat:send', async (event, messages, config) => {
       : chatOnly;
 
     let fullText = '';
+
+    if (osBridgeEnabled) {
+      fullText = await llmGenerate(fullMessages, {
+        provider,
+        model,
+        temperature,
+        maxTokens,
+      });
+      if (fullText) {
+        mainWindow?.webContents.send('chat:chunk', { runId, chunk: fullText });
+      }
+      updateConsciousness(fullText, messages);
+      const lastUserMsg = messages[messages.length - 1];
+      if (lastUserMsg) addToConversationBuffer('user', lastUserMsg.content);
+      addToConversationBuffer('assistant', fullText);
+      mainWindow?.webContents.send('chat:done', { runId, content: fullText, model, provider });
+      return;
+    }
 
     if (provider === 'ollama') {
       fullText = await streamOllama(fullMessages, model, settings.ollamaUrl, temperature, runId);
@@ -3392,6 +3522,65 @@ ipcMain.handle('system:info', () => {
 
 ipcMain.handle('system:healthSummary', () => {
   return getRuntimeHealthSummary();
+});
+
+ipcMain.handle('update:check', async () => {
+  const currentVersion = app.getVersion();
+  if (!UPDATE_MANIFEST_URL) {
+    return {
+      configured: false,
+      currentVersion,
+      updateAvailable: false,
+      message: 'Set AGIPRIME_UPDATE_MANIFEST_URL to enable update checks.',
+    };
+  }
+
+  try {
+    const res = await fetch(UPDATE_MANIFEST_URL, {
+      method: 'GET',
+      headers: { 'Cache-Control': 'no-cache' },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) {
+      return {
+        configured: true,
+        currentVersion,
+        updateAvailable: false,
+        error: `Manifest request failed: ${res.status}`,
+      };
+    }
+
+    const manifest = await res.json();
+    const latestVersion = String(manifest.version || '');
+    const cmp = compareSemverLoose(latestVersion, currentVersion);
+    return {
+      configured: true,
+      currentVersion,
+      latestVersion,
+      updateAvailable: cmp > 0,
+      notes: manifest.notes || '',
+      downloadUrl: manifest.downloadUrl || '',
+      raw: manifest,
+    };
+  } catch (e) {
+    return {
+      configured: true,
+      currentVersion,
+      updateAvailable: false,
+      error: e?.message || 'Update check failed',
+    };
+  }
+});
+
+ipcMain.handle('update:openDownload', async (_, url) => {
+  const target = String(url || '').trim();
+  if (!target) return { success: false, error: 'Missing URL' };
+  try {
+    await shell.openExternal(target);
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e?.message || 'Failed to open URL' };
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════
