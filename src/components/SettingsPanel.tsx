@@ -716,7 +716,35 @@ export default function SettingsPanel() {
           SPEED CONTROLS
         </div>
         <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 8 }}>
-          Turn off heavy features to make Hands faster. Each toggle saves processing time per action.
+          Eliminate background LLM calls that compete with your conversation for API bandwidth.
+        </div>
+        <div className="settings-row">
+          <div className="settings-label">
+            Performance Mode
+            <small>
+              Skip self-eval, action extraction, and LLM title generation after each response — saves up to 3 LLM calls
+              per message
+            </small>
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={!!settings.performanceMode}
+              onChange={(e) => updateSettings({ performanceMode: e.target.checked })}
+            />
+            {settings.performanceMode ? 'ON — Fast' : 'OFF — Full'}
+          </label>
+        </div>
+        <div
+          style={{
+            fontSize: 10,
+            color: 'var(--text-dim)',
+            marginBottom: 8,
+            borderTop: '1px solid var(--border)',
+            paddingTop: 8,
+          }}
+        >
+          Hands-specific speed toggles. Each one saves processing time per action.
         </div>
         <div className="settings-row">
           <div className="settings-label">

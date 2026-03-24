@@ -1621,6 +1621,9 @@ export interface Settings {
   disableActionField?: boolean;
   /** Disable NeuralCore predictions during action execution. */
   disableNeuralCore?: boolean;
+  /** Performance mode: skip post-response LLM calls (self-eval, action extraction)
+   *  and delay title generation. Eliminates API contention for snappier chat. */
+  performanceMode?: boolean;
 }
 
 export type BrainRoute = 'fast' | 'slow';

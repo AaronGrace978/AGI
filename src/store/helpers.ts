@@ -302,6 +302,7 @@ export const DEFAULT_SETTINGS: Settings = {
   disableConscience: false,
   disableActionField: false,
   disableNeuralCore: false,
+  performanceMode: false,
 };
 
 export const DEFAULT_FORGE_CONFIG: ForgeRunConfig = {

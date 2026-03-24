@@ -19,6 +19,8 @@ function logNonFatal(scope: string, error: unknown): void {
   console.warn(`[${scope}] non-fatal:`, error);
 }
 
+const defer = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
 function genId(): string {
   return `msg_${Date.now()}_${++messageCounter}`;
 }
@@ -404,36 +406,45 @@ export function createChatSlice(set: StoreSet, get: StoreGet) {
             if (!s.activeConversationId || !window.api?.conversations?.rename) return;
             if (s.activeConversationTitle && s.activeConversationTitle !== 'New chat') return;
 
-            const firstTurns = s.messages
-              .filter((m: ChatMessage) => m.role === 'user' || m.role === 'assistant')
-              .slice(0, 4)
-              .map((m: ChatMessage) => `${m.role.toUpperCase()}: ${m.content}`)
-              .join('\n')
-              .slice(0, 900);
-
             let title = '';
-            try {
-              if (window.api?.llm?.generate) {
-                const raw = await window.api.llm.generate(
-                  [
-                    {
-                      role: 'system',
-                      content:
-                        'You generate short conversation titles. Output ONLY the title. 3-7 words. No quotes, no punctuation at the end.',
-                    },
-                    { role: 'user', content: `Conversation:\n${firstTurns}\n\nTitle:` },
-                  ],
-                  { provider: s.settings.provider, model: s.settings.model, temperature: 0.2, maxTokens: 24 },
-                );
-                title = String(raw || '').trim();
-              }
-            } catch {
-              // ignore title generation failures
-            }
-
-            if (!title) {
+            if (s.settings.performanceMode) {
+              // Fast path: derive title from user message without an LLM call
               const seed = String(content || '').trim();
               title = seed.split(/\s+/).slice(0, 7).join(' ');
+            } else {
+              // Delay so title gen doesn't compete with next user message
+              await defer(3000);
+
+              const firstTurns = s.messages
+                .filter((m: ChatMessage) => m.role === 'user' || m.role === 'assistant')
+                .slice(0, 4)
+                .map((m: ChatMessage) => `${m.role.toUpperCase()}: ${m.content}`)
+                .join('\n')
+                .slice(0, 900);
+
+              try {
+                if (window.api?.llm?.generate) {
+                  const raw = await window.api.llm.generate(
+                    [
+                      {
+                        role: 'system',
+                        content:
+                          'You generate short conversation titles. Output ONLY the title. 3-7 words. No quotes, no punctuation at the end.',
+                      },
+                      { role: 'user', content: `Conversation:\n${firstTurns}\n\nTitle:` },
+                    ],
+                    { provider: s.settings.provider, model: s.settings.model, temperature: 0.2, maxTokens: 24 },
+                  );
+                  title = String(raw || '').trim();
+                }
+              } catch {
+                // ignore title generation failures
+              }
+
+              if (!title) {
+                const seed = String(content || '').trim();
+                title = seed.split(/\s+/).slice(0, 7).join(' ');
+              }
             }
 
             title = title.replace(/^["'`]+|["'`]+$/g, '').trim();
@@ -451,9 +462,12 @@ export function createChatSlice(set: StoreSet, get: StoreGet) {
           );
 
           (async () => {
+            if (get().settings.performanceMode) return;
             if (!window.api?.llm?.generate) return;
             const assistantText = String(data?.content || '');
             if (assistantText.length < 100) return;
+
+            await defer(5000);
 
             try {
               const s = get();
@@ -538,6 +552,7 @@ Output ONLY valid JSON with these fields:
           }
 
           (async () => {
+            if (get().settings.performanceMode) return;
             if (!window.api?.llm?.generate) return;
             const assistantText = String(data?.content || '');
             if (assistantText.length < 150) return;
@@ -548,6 +563,8 @@ Output ONLY valid JSON with these fields:
             const actionSignals =
               /\b(let me (search|look|check|find|open|create|write|read|browse)|i('ll| will| can) (search|look up|check|find|open|fetch|create|write)|searching for|looking up|i should (search|check|verify))\b/i;
             if (!actionSignals.test(assistantText)) return;
+
+            await defer(5000);
 
             try {
               const raw = await window.api.llm.generate(
