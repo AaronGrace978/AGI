@@ -21,4 +21,3 @@ describe('PIE deterministic ARC bench', () => {
     expect(report.avgMs).toBeLessThan(1500);
   });
 });
-

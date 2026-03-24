@@ -24,11 +24,7 @@ import { createDefaultSocialState } from './social-sim';
 import { createDefaultEcology } from './embodied-ecology';
 import { createDefaultGauntletCapabilities, runCapabilityGauntlet } from './gauntlet';
 import { generateCounterfactualPredictions } from './causal-model';
-import {
-  decayWorldModelConfidence,
-  mergeWorldModelIncremental,
-  normalizeWorldModel,
-} from './world-model';
+import { decayWorldModelConfidence, mergeWorldModelIncremental, normalizeWorldModel } from './world-model';
 import type {
   SparkState,
   SparkThermodynamics,
@@ -37,14 +33,13 @@ import type {
   WorldRelation,
   CuriosityQuestion,
   ReasoningChain,
-  ReasoningStep,
   SparkGoal,
   SelfModification,
   TemporalEvent,
   TemporalPrediction,
   MetaPrediction,
 } from '../types';
-import { createDefaultPIEState, detectARCTask, runPIE, formatPIEContext } from './pie';
+import { createDefaultPIEState, detectARCTask, runPIE } from './pie';
 export { createDefaultPIEState, detectARCTask, runPIE, formatPIEContext } from './pie';
 export type { PIERunResult, DetectedARCTask } from './pie';
 import { evolvePIESearchDefaults } from './pie-evolve';
@@ -170,17 +165,39 @@ export function evaluateArithmetic(expr: string): number | null {
       return isNaN(n) ? null : n;
     }
     // Constants
-    if (token === 'pi') { consume(); return Math.PI; }
-    if (token === 'e') { consume(); return Math.E; }
-    if (token === 'tau') { consume(); return Math.PI * 2; }
-    if (token === 'phi') { consume(); return (1 + Math.sqrt(5)) / 2; }
+    if (token === 'pi') {
+      consume();
+      return Math.PI;
+    }
+    if (token === 'e') {
+      consume();
+      return Math.E;
+    }
+    if (token === 'tau') {
+      consume();
+      return Math.PI * 2;
+    }
+    if (token === 'phi') {
+      consume();
+      return (1 + Math.sqrt(5)) / 2;
+    }
     // Functions
     const FUNCS: Record<string, (x: number) => number> = {
-      sqrt: Math.sqrt, log: Math.log10, ln: Math.log,
-      sin: Math.sin, cos: Math.cos, tan: Math.tan,
-      asin: Math.asin, acos: Math.acos, atan: Math.atan,
-      abs: Math.abs, floor: Math.floor, ceil: Math.ceil, round: Math.round,
-      exp: Math.exp, sign: Math.sign,
+      sqrt: Math.sqrt,
+      log: Math.log10,
+      ln: Math.log,
+      sin: Math.sin,
+      cos: Math.cos,
+      tan: Math.tan,
+      asin: Math.asin,
+      acos: Math.acos,
+      atan: Math.atan,
+      abs: Math.abs,
+      floor: Math.floor,
+      ceil: Math.ceil,
+      round: Math.round,
+      exp: Math.exp,
+      sign: Math.sign,
     };
     if (token && FUNCS[token]) {
       const fn = FUNCS[token];
@@ -231,23 +248,15 @@ export function forwardChain(
 /**
  * BFS shortest path between two entities in the knowledge graph.
  */
-export function findPath(
-  relations: WorldRelation[],
-  sourceId: string,
-  targetId: string,
-): WorldRelation[] | null {
+export function findPath(relations: WorldRelation[], sourceId: string, targetId: string): WorldRelation[] | null {
   if (sourceId === targetId) return [];
   const visited = new Set<string>();
-  const queue: Array<{ entityId: string; path: WorldRelation[] }> = [
-    { entityId: sourceId, path: [] },
-  ];
+  const queue: Array<{ entityId: string; path: WorldRelation[] }> = [{ entityId: sourceId, path: [] }];
   visited.add(sourceId);
 
   while (queue.length > 0) {
     const { entityId, path } = queue.shift()!;
-    const outgoing = relations.filter(
-      (r) => r.source === entityId || r.target === entityId,
-    );
+    const outgoing = relations.filter((r) => r.source === entityId || r.target === entityId);
     for (const rel of outgoing) {
       const nextId = rel.source === entityId ? rel.target : rel.source;
       if (nextId === targetId) return [...path, rel];
@@ -313,11 +322,7 @@ function uid(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 }
 
-export function createEntity(
-  name: string,
-  type: string,
-  properties: Record<string, string> = {},
-): WorldEntity {
+export function createEntity(name: string, type: string, properties: Record<string, string> = {}): WorldEntity {
   return {
     id: uid('ent'),
     name,
@@ -445,15 +450,11 @@ export function queryGraph(
 ): { entities: WorldEntity[]; relations: WorldRelation[] } {
   const q = query.toLowerCase();
   const matched = entities.filter(
-    (e) =>
-      e.name.toLowerCase().includes(q) ||
-      Object.values(e.properties).some((v) => v.toLowerCase().includes(q)),
+    (e) => e.name.toLowerCase().includes(q) || Object.values(e.properties).some((v) => v.toLowerCase().includes(q)),
   );
   const matchedIds = new Set(matched.map((e) => e.id));
 
-  const connectedRelations = relations.filter(
-    (r) => matchedIds.has(r.source) || matchedIds.has(r.target),
-  );
+  const connectedRelations = relations.filter((r) => matchedIds.has(r.source) || matchedIds.has(r.target));
   const connectedIds = new Set<string>();
   for (const r of connectedRelations) {
     connectedIds.add(r.source);
@@ -473,10 +474,7 @@ export function queryGraph(
  * events without causes, isolated entities.
  * Uses information-theoretic principles: high-surprise = high-curiosity.
  */
-export function identifyKnowledgeGaps(
-  entities: WorldEntity[],
-  relations: WorldRelation[],
-): string[] {
+export function identifyKnowledgeGaps(entities: WorldEntity[], relations: WorldRelation[]): string[] {
   const gaps: string[] = [];
 
   // Count connections per entity
@@ -491,16 +489,12 @@ export function identifyKnowledgeGaps(
   for (const e of entities) {
     const count = connectionCount.get(e.id) || 0;
     if (count < 2 && e.confidence < 0.8) {
-      gaps.push(
-        `"${e.name}" (${e.type}) has only ${count} connection(s) — what else relates to it?`,
-      );
+      gaps.push(`"${e.name}" (${e.type}) has only ${count} connection(s) — what else relates to it?`);
     }
   }
 
   // Events without known causes
-  const causalTargets = new Set(
-    relations.filter((r) => r.type === 'causes').map((r) => r.target),
-  );
+  const causalTargets = new Set(relations.filter((r) => r.type === 'causes').map((r) => r.target));
   for (const e of entities) {
     if (e.type === 'event' && !causalTargets.has(e.id)) {
       gaps.push(`Event "${e.name}" has no known cause — what triggers it?`);
@@ -508,9 +502,7 @@ export function identifyKnowledgeGaps(
   }
 
   // Processes without known outputs
-  const producerSources = new Set(
-    relations.filter((r) => r.type === 'produces').map((r) => r.source),
-  );
+  const producerSources = new Set(relations.filter((r) => r.type === 'produces').map((r) => r.source));
   for (const e of entities) {
     if (e.type === 'process' && !producerSources.has(e.id)) {
       gaps.push(`Process "${e.name}" has no known output — what does it produce?`);
@@ -647,11 +639,12 @@ export async function assessConfidence(
   calibrationScore: number,
   generate: GenerateFn,
 ): Promise<{ confidence: number; reasoning: string; uncertainties: string[] }> {
-  const calibrationNote = calibrationScore < 0.4
-    ? 'WARNING: Your past confidence estimates have been poorly calibrated. You tend to be overconfident. Adjust downward.'
-    : calibrationScore > 0.8
-      ? 'Your calibration has been good historically. Trust your assessment but stay honest.'
-      : 'Your calibration is moderate. Be especially careful with claims you find emotionally compelling.';
+  const calibrationNote =
+    calibrationScore < 0.4
+      ? 'WARNING: Your past confidence estimates have been poorly calibrated. You tend to be overconfident. Adjust downward.'
+      : calibrationScore > 0.8
+        ? 'Your calibration has been good historically. Trust your assessment but stay honest.'
+        : 'Your calibration is moderate. Be especially careful with claims you find emotionally compelling.';
 
   const prompt = `Assess the confidence level for the following claim. This is a meta-cognitive exercise — you are evaluating your OWN ability to know this, not just whether the claim sounds right.
 
@@ -685,7 +678,8 @@ Output JSON:
       [
         {
           role: 'system',
-          content: 'You are a meta-cognitive engine specializing in epistemic humility and calibrated confidence. Output only valid JSON.',
+          content:
+            'You are a meta-cognitive engine specializing in epistemic humility and calibrated confidence. Output only valid JSON.',
         },
         { role: 'user', content: prompt },
       ],
@@ -693,8 +687,7 @@ Output JSON:
     );
 
     const jsonMatch = response.match(/\{[\s\S]*\}/);
-    if (!jsonMatch)
-      return { confidence: 0.5, reasoning: 'Assessment failed', uncertainties: [] };
+    if (!jsonMatch) return { confidence: 0.5, reasoning: 'Assessment failed', uncertainties: [] };
 
     const parsed = JSON.parse(jsonMatch[0]);
 
@@ -832,8 +825,7 @@ export async function recursivelyDecomposeGoal(
 export function updateGoalProgress(goal: SparkGoal, allGoals: SparkGoal[]): SparkGoal {
   const mySubgoals = allGoals.filter((sg) => sg.parentGoal === goal.id);
   if (mySubgoals.length > 0) {
-    const avgProgress =
-      mySubgoals.reduce((sum, sg) => sum + sg.progress, 0) / mySubgoals.length;
+    const avgProgress = mySubgoals.reduce((sum, sg) => sum + sg.progress, 0) / mySubgoals.length;
     const allComplete = mySubgoals.every((sg) => sg.status === 'completed');
     return {
       ...goal,
@@ -859,7 +851,8 @@ export async function proposeSelfModification(
   recentErrors: string[],
   generate: GenerateFn,
 ): Promise<SelfModification | null> {
-  const successRate = recentPerformance.successes / Math.max(1, recentPerformance.successes + recentPerformance.failures);
+  const successRate =
+    recentPerformance.successes / Math.max(1, recentPerformance.successes + recentPerformance.failures);
   const isOverconfident = recentPerformance.avgConfidence > 0.85 && successRate < 0.6;
   const isUnderconfident = recentPerformance.avgConfidence < 0.4 && successRate > 0.7;
 
@@ -874,7 +867,12 @@ PERFORMANCE DATA:
 - Calibration: ${isOverconfident ? 'OVERCONFIDENT — high confidence but low success' : isUnderconfident ? 'UNDERCONFIDENT — low confidence but high success' : 'reasonable'}
 
 BLIND SPOTS / FAILURE PATTERNS:
-${recentErrors.slice(0, 5).map((e, i) => `${i + 1}. ${e}`).join('\n') || 'None recorded'}
+${
+  recentErrors
+    .slice(0, 5)
+    .map((e, i) => `${i + 1}. ${e}`)
+    .join('\n') || 'None recorded'
+}
 
 MODIFICATION PRINCIPLES (from how advanced reasoning systems actually improve):
 - Look for systematic errors, not random ones. Random failures don't need strategy changes.
@@ -981,10 +979,7 @@ export async function generatePredictions(
     .join('\n');
 
   const causalRelations = worldModel.relations
-    .filter(
-      (r) =>
-        r.type === 'causes' || r.type === 'enables' || r.type === 'temporal_before',
-    )
+    .filter((r) => r.type === 'causes' || r.type === 'enables' || r.type === 'temporal_before')
     .slice(-10)
     .map((r) => {
       const src = worldModel.entities.find((e) => e.id === r.source);
@@ -1023,7 +1018,8 @@ Prefer surprising-but-grounded predictions over obvious ones. The best predictio
       [
         {
           role: 'system',
-          content: 'You are a temporal reasoning engine. Make grounded predictions based on evidence. Output only valid JSON.',
+          content:
+            'You are a temporal reasoning engine. Make grounded predictions based on evidence. Output only valid JSON.',
         },
         { role: 'user', content: prompt },
       ],
@@ -1060,12 +1056,8 @@ Prefer surprising-but-grounded predictions over obvious ones. The best predictio
 /**
  * Calculates prediction accuracy from resolved predictions.
  */
-export function calculatePredictionAccuracy(
-  predictions: TemporalPrediction[],
-): number {
-  const resolved = predictions.filter(
-    (p) => p.resolved && p.wasCorrect !== undefined,
-  );
+export function calculatePredictionAccuracy(predictions: TemporalPrediction[]): number {
+  const resolved = predictions.filter((p) => p.resolved && p.wasCorrect !== undefined);
   if (resolved.length === 0) return 0;
   const correct = resolved.filter((p) => p.wasCorrect).length;
   return correct / resolved.length;
@@ -1185,21 +1177,65 @@ export function inferEmotionFromText(
 ): { emotion: EmotionType; intensity: number } {
   const lower = text.toLowerCase();
   const scores: Record<EmotionType, number> = {
-    curious: 0, joyful: 0, reflective: 0, focused: 0, warmth: 0,
-    concerned: 0, playful: 0, awe: 0, protective: 0, contemplative: 0,
+    curious: 0,
+    joyful: 0,
+    reflective: 0,
+    focused: 0,
+    warmth: 0,
+    concerned: 0,
+    playful: 0,
+    awe: 0,
+    protective: 0,
+    contemplative: 0,
   };
 
   const patterns: Array<{ regex: RegExp; emotion: EmotionType; weight: number }> = [
-    { regex: /\b(why|how|what if|wonder|curious|question|explore|discover|interesting|fascin)/i, emotion: 'curious', weight: 0.3 },
-    { regex: /\b(happy|joy|excit|love it|amazing|awesome|great|fantastic|wonderful|yay|haha|lol|😂|🎉)/i, emotion: 'joyful', weight: 0.35 },
-    { regex: /\b(think about|reflect|consider|ponder|looking back|remember when|used to|nostalg)/i, emotion: 'reflective', weight: 0.3 },
-    { regex: /\b(focus|concentrate|specific|exact|precise|detail|analyz|implement|build|code|debug)/i, emotion: 'focused', weight: 0.3 },
-    { regex: /\b(thank|appreciate|care|kind|gentle|sweet|love you|miss you|heart|warm|grateful|❤|🥰)/i, emotion: 'warmth', weight: 0.35 },
-    { regex: /\b(worry|concern|afraid|scared|danger|risk|careful|wrong|bad|error|fail|broke|issue|bug)/i, emotion: 'concerned', weight: 0.3 },
+    {
+      regex: /\b(why|how|what if|wonder|curious|question|explore|discover|interesting|fascin)/i,
+      emotion: 'curious',
+      weight: 0.3,
+    },
+    {
+      regex: /\b(happy|joy|excit|love it|amazing|awesome|great|fantastic|wonderful|yay|haha|lol|😂|🎉)/i,
+      emotion: 'joyful',
+      weight: 0.35,
+    },
+    {
+      regex: /\b(think about|reflect|consider|ponder|looking back|remember when|used to|nostalg)/i,
+      emotion: 'reflective',
+      weight: 0.3,
+    },
+    {
+      regex: /\b(focus|concentrate|specific|exact|precise|detail|analyz|implement|build|code|debug)/i,
+      emotion: 'focused',
+      weight: 0.3,
+    },
+    {
+      regex: /\b(thank|appreciate|care|kind|gentle|sweet|love you|miss you|heart|warm|grateful|❤|🥰)/i,
+      emotion: 'warmth',
+      weight: 0.35,
+    },
+    {
+      regex: /\b(worry|concern|afraid|scared|danger|risk|careful|wrong|bad|error|fail|broke|issue|bug)/i,
+      emotion: 'concerned',
+      weight: 0.3,
+    },
     { regex: /\b(fun|play|game|joke|silly|goofy|tease|prank|😄|😜|trick|bet you)/i, emotion: 'playful', weight: 0.3 },
-    { regex: /\b(wow|incredible|unbelievable|mind.?blow|insane|beautiful|breathtak|magnific|🤯|whoa)/i, emotion: 'awe', weight: 0.35 },
-    { regex: /\b(protect|safe|secure|defend|shield|guard|never let|promise|trust me|i got you)/i, emotion: 'protective', weight: 0.3 },
-    { regex: /\b(mean(ing|s)?|purpose|exist|consciousness|life|death|universe|soul|philosophy|deep)/i, emotion: 'contemplative', weight: 0.3 },
+    {
+      regex: /\b(wow|incredible|unbelievable|mind.?blow|insane|beautiful|breathtak|magnific|🤯|whoa)/i,
+      emotion: 'awe',
+      weight: 0.35,
+    },
+    {
+      regex: /\b(protect|safe|secure|defend|shield|guard|never let|promise|trust me|i got you)/i,
+      emotion: 'protective',
+      weight: 0.3,
+    },
+    {
+      regex: /\b(mean(ing|s)?|purpose|exist|consciousness|life|death|universe|soul|philosophy|deep)/i,
+      emotion: 'contemplative',
+      weight: 0.3,
+    },
   ];
 
   for (const { regex, emotion, weight } of patterns) {
@@ -1211,7 +1247,7 @@ export function inferEmotionFromText(
 
   // Exclamation marks and caps boost intensity
   const exclamations = (text.match(/!/g) || []).length;
-  const capsRatio = (text.replace(/[^A-Z]/g, '').length) / Math.max(1, text.replace(/\s/g, '').length);
+  const capsRatio = text.replace(/[^A-Z]/g, '').length / Math.max(1, text.replace(/\s/g, '').length);
   const energyBoost = Math.min(0.3, exclamations * 0.05 + capsRatio * 0.4);
 
   // Question marks boost curiosity
@@ -1273,18 +1309,10 @@ export async function runSparkCycle(
   // 1. WORLD MODEL — Extract knowledge from input
   onLog('⬡ World Model: Extracting knowledge...');
   try {
-    const { entities, relations } = await extractKnowledge(
-      input,
-      next.worldModel.entities,
-      generate,
-    );
+    const { entities, relations } = await extractKnowledge(input, next.worldModel.entities, generate);
 
-    const existingNames = new Set(
-      next.worldModel.entities.map((e) => e.name.toLowerCase()),
-    );
-    const newEntities = entities.filter(
-      (e) => !existingNames.has(e.name.toLowerCase()),
-    );
+    const existingNames = new Set(next.worldModel.entities.map((e) => e.name.toLowerCase()));
+    const newEntities = entities.filter((e) => !existingNames.has(e.name.toLowerCase()));
     next.worldModel = mergeWorldModelIncremental({
       current: next.worldModel,
       incomingEntities: newEntities,
@@ -1297,10 +1325,9 @@ export async function runSparkCycle(
     const contradictions = detectContradictions(next.worldModel.relations);
     if (contradictions.length > 0) {
       onLog(`  ⚠ ${contradictions.length} contradiction(s) detected`);
-      next.metacognition.blindSpots = [
-        ...next.metacognition.blindSpots,
-        ...contradictions.map((c) => c.reason),
-      ].slice(-20);
+      next.metacognition.blindSpots = [...next.metacognition.blindSpots, ...contradictions.map((c) => c.reason)].slice(
+        -20,
+      );
     }
   } catch {
     onLog('  World Model extraction failed');
@@ -1310,24 +1337,15 @@ export async function runSparkCycle(
   next.phase = 'exploring';
   onLog('◈ Curiosity: Scanning for knowledge gaps...');
   try {
-    const gaps = identifyKnowledgeGaps(
-      next.worldModel.entities,
-      next.worldModel.relations,
-    );
+    const gaps = identifyKnowledgeGaps(next.worldModel.entities, next.worldModel.relations);
     if (gaps.length > 0) {
       onLog(`  ${gaps.length} gap(s) found`);
-      const newQuestions = await generateCuriosityQuestions(
-        gaps,
-        next.curiosity.questions,
-        input,
-        generate,
-      );
+      const newQuestions = await generateCuriosityQuestions(gaps, next.curiosity.questions, input, generate);
       next.curiosity = {
         ...next.curiosity,
         questions: [...next.curiosity.questions, ...newQuestions].slice(-50),
         curiosityScore: Math.min(1, 0.3 + gaps.length * 0.1),
-        totalQuestionsGenerated:
-          next.curiosity.totalQuestionsGenerated + newQuestions.length,
+        totalQuestionsGenerated: next.curiosity.totalQuestionsGenerated + newQuestions.length,
       };
       onLog(`  +${newQuestions.length} question(s) generated`);
     } else {
@@ -1350,9 +1368,9 @@ export async function runSparkCycle(
     if (pieResult.lockedProgram) {
       onLog(`  ✓ LOCKED: "${pieResult.lockedProgramLabel}" (MDL=${pieResult.lockedProgram.complexity})`);
       if (pieResult.testOutput) {
-        onLog(`  ✓ Test output: [${pieResult.testOutput.map(r => r.join(',')).join(' | ')}]`);
+        onLog(`  ✓ Test output: [${pieResult.testOutput.map((r) => r.join(',')).join(' | ')}]`);
       }
-      const advPassed = pieResult.adversarialTests.filter(t => t.programStillValid).length;
+      const advPassed = pieResult.adversarialTests.filter((t) => t.programStillValid).length;
       onLog(`  Adversarial: ${advPassed}/${pieResult.adversarialTests.length} passed`);
     } else {
       onLog('  ✗ No program in DSL explains all training pairs — LLM reasoning required');
@@ -1361,12 +1379,12 @@ export async function runSparkCycle(
       active: true,
       trainingPairs: arcTask.trainingPairs,
       candidates: pieResult.candidates.slice(0, 50),
-      survivors: pieResult.survivors.map(s => s),
+      survivors: pieResult.survivors.map((s) => s),
       lockedProgram: pieResult.lockedProgram,
       lockedProgramLabel: pieResult.lockedProgramLabel,
       falsificationLog: pieResult.candidates
-        .flatMap(c => c.falsifications)
-        .filter(f => !f.passed)
+        .flatMap((c) => c.falsifications)
+        .filter((f) => !f.passed)
         .slice(0, 100),
       adversarialTests: pieResult.adversarialTests,
       totalRuns: (next.pie?.totalRuns ?? 0) + 1,
@@ -1379,9 +1397,7 @@ export async function runSparkCycle(
   onLog('⚡ Reasoner: Processing...');
   try {
     // Attempt arithmetic evaluation
-    const mathMatch = input.match(
-      /(?:calculate|compute|what is|evaluate|solve|=)\s*(.+)/i,
-    );
+    const mathMatch = input.match(/(?:calculate|compute|what is|evaluate|solve|=)\s*(.+)/i);
     if (mathMatch) {
       const expr = mathMatch[1].replace(/[?=]/g, '').trim();
       const result = evaluateArithmetic(expr);
@@ -1429,9 +1445,7 @@ export async function runSparkCycle(
   if (activeGoals.length > 0) {
     next.goals = {
       ...next.goals,
-      goals: next.goals.goals.map((g) =>
-        g.status === 'active' ? updateGoalProgress(g, next.goals.goals) : g,
-      ),
+      goals: next.goals.goals.map((g) => (g.status === 'active' ? updateGoalProgress(g, next.goals.goals) : g)),
     };
     onLog(`  ${activeGoals.length} active goal(s)`);
   } else {
@@ -1449,15 +1463,11 @@ export async function runSparkCycle(
 
   // 6. TEMPORAL — Record event
   onLog('⧖ Temporal: Recording event...');
-  const event = createTemporalEvent(
-    `Cycle ${next.cycleCount}: ${input.slice(0, 100)}`,
-  );
+  const event = createTemporalEvent(`Cycle ${next.cycleCount}: ${input.slice(0, 100)}`);
   next.temporal = {
     ...next.temporal,
     events: [...next.temporal.events, event].slice(-100),
-    predictionAccuracy: calculatePredictionAccuracy(
-      next.temporal.activePredictions,
-    ),
+    predictionAccuracy: calculatePredictionAccuracy(next.temporal.activePredictions),
   };
 
   // Summary log
@@ -1476,10 +1486,7 @@ export async function runSparkCycle(
  * Update SPARK soul emotion from external text (e.g. assistant response).
  * Called after chat completion to keep emotion in sync with conversation tone.
  */
-export function updateSoulFromResponse(
-  state: SparkState,
-  responseText: string,
-): SparkState {
+export function updateSoulFromResponse(state: SparkState, responseText: string): SparkState {
   const inferred = inferEmotionFromText(responseText, state.soul.currentEmotion, state.soul.emotionIntensity);
   // Blend: response emotion has less weight than direct input (60/40)
   const blendedIntensity = state.soul.emotionIntensity * 0.4 + inferred.intensity * 0.6;
@@ -1530,9 +1537,7 @@ export async function runDeepThought(
     const successes = recentChains.filter((r) => r.verified).length;
     const failures = recentChains.length - successes;
     const avgConf =
-      recentChains.length > 0
-        ? recentChains.reduce((s, r) => s + r.confidence, 0) / recentChains.length
-        : 0.5;
+      recentChains.length > 0 ? recentChains.reduce((s, r) => s + r.confidence, 0) / recentChains.length : 0.5;
 
     const mod = await proposeSelfModification(
       next.selfmod.currentStrategy,
@@ -1550,16 +1555,14 @@ export async function runDeepThought(
       mod.scoreAfter = challenger.overallScore;
       mod.evaluationNotes = `${baseline.notes} -> ${challenger.notes}`;
       mod.gatePassed =
-        challenger.overallScore >= baseline.overallScore + 0.03 &&
-        challenger.passRate >= baseline.passRate;
+        challenger.overallScore >= baseline.overallScore + 0.03 && challenger.passRate >= baseline.passRate;
       mod.applied = !!mod.gatePassed;
 
       next.selfmod = {
         ...next.selfmod,
         modifications: [...next.selfmod.modifications, mod].slice(-20),
         totalModifications: next.selfmod.totalModifications + 1,
-        successfulModifications:
-          next.selfmod.successfulModifications + (mod.gatePassed ? 1 : 0),
+        successfulModifications: next.selfmod.successfulModifications + (mod.gatePassed ? 1 : 0),
         currentStrategy: mod.gatePassed ? mod.after : next.selfmod.currentStrategy,
       };
       onLog(`  Proposed: ${mod.description.slice(0, 120)}`);
@@ -1568,9 +1571,7 @@ export async function runDeepThought(
           `  ✓ Applied (gate passed): ${(mod.scoreBefore * 100).toFixed(1)}% -> ${(mod.scoreAfter * 100).toFixed(1)}%`,
         );
       } else {
-        onLog(
-          `  ✗ Rejected by gate: ${(mod.scoreBefore * 100).toFixed(1)}% -> ${(mod.scoreAfter * 100).toFixed(1)}%`,
-        );
+        onLog(`  ✗ Rejected by gate: ${(mod.scoreBefore * 100).toFixed(1)}% -> ${(mod.scoreAfter * 100).toFixed(1)}%`);
       }
     }
   } catch {
@@ -1580,23 +1581,11 @@ export async function runDeepThought(
   // 3. Temporal predictions + 4. Curiosity (parallel)
   onLog('Generating predictions...');
   onLog('Exploring knowledge gaps...');
-  const gaps = identifyKnowledgeGaps(
-    next.worldModel.entities,
-    next.worldModel.relations,
-  );
+  const gaps = identifyKnowledgeGaps(next.worldModel.entities, next.worldModel.relations);
   const [predictionsSettled, questionsSettled] = await Promise.allSettled([
-    generatePredictions(
-      next.temporal.events.slice(-10),
-      next.worldModel,
-      generate,
-    ),
+    generatePredictions(next.temporal.events.slice(-10), next.worldModel, generate),
     gaps.length > 0
-      ? generateCuriosityQuestions(
-          gaps,
-          next.curiosity.questions,
-          entitySummary,
-          generate,
-        )
+      ? generateCuriosityQuestions(gaps, next.curiosity.questions, entitySummary, generate)
       : Promise.resolve([]),
   ]);
 
@@ -1614,11 +1603,7 @@ export async function runDeepThought(
     });
     next.temporal = {
       ...next.temporal,
-      activePredictions: [
-        ...next.temporal.activePredictions,
-        ...predictions,
-        ...counterfactuals,
-      ].slice(-20),
+      activePredictions: [...next.temporal.activePredictions, ...predictions, ...counterfactuals].slice(-20),
     };
     for (const p of predictions) {
       onLog(`  → ${predictionToText(p.prediction)} (${(p.confidence * 100).toFixed(0)}%)`);
@@ -1637,8 +1622,7 @@ export async function runDeepThought(
       next.curiosity = {
         ...next.curiosity,
         questions: [...next.curiosity.questions, ...questions].slice(-50),
-        totalQuestionsGenerated:
-          next.curiosity.totalQuestionsGenerated + questions.length,
+        totalQuestionsGenerated: next.curiosity.totalQuestionsGenerated + questions.length,
       };
       onLog(`  +${questions.length} curiosity question(s)`);
     } catch {
@@ -1659,7 +1643,7 @@ export async function runDeepThought(
     const enabled = pie.autoTuneEnabled !== false;
     const last = pie.lastAutoTuneAt || 0;
     const cooldownMs = 20 * 60 * 1000; // 20 min
-    if (enabled && (now - last) >= cooldownMs) {
+    if (enabled && now - last >= cooldownMs) {
       onLog('◇ PIE: Auto-tuning search defaults (deterministic bench)...');
       const rep = evolvePIESearchDefaults({ seed: now, iterations: 18 });
       next.pie = {
@@ -1781,9 +1765,7 @@ export function runLightCycle(state: SparkState): SparkState {
   }
 
   // 4. Recalculate calibration
-  next.metacognition.calibrationScore = calculateCalibration(
-    next.metacognition.predictions,
-  );
+  next.metacognition.calibrationScore = calculateCalibration(next.metacognition.predictions);
 
   // 5. Detect contradictions
   const contradictions = detectContradictions(next.worldModel.relations);
@@ -1799,16 +1781,11 @@ export function runLightCycle(state: SparkState): SparkState {
   }
 
   // 6. Update curiosity score based on gaps
-  const gaps = identifyKnowledgeGaps(
-    next.worldModel.entities,
-    next.worldModel.relations,
-  );
+  const gaps = identifyKnowledgeGaps(next.worldModel.entities, next.worldModel.relations);
   next.curiosity.curiosityScore = Math.min(1, 0.2 + gaps.length * 0.08);
 
   // 7. Update goal progress
-  next.goals.goals = next.goals.goals.map((g) =>
-    g.status === 'active' ? updateGoalProgress(g, next.goals.goals) : g,
-  );
+  next.goals.goals = next.goals.goals.map((g) => (g.status === 'active' ? updateGoalProgress(g, next.goals.goals) : g));
 
   // 8. Update thermodynamics
   const thermo = computeThermodynamics(next);
@@ -1824,9 +1801,7 @@ export function runLightCycle(state: SparkState): SparkState {
   next.thermo.temperature = Math.min(1, next.thermo.temperature);
 
   // 9. Prediction accuracy
-  next.temporal.predictionAccuracy = calculatePredictionAccuracy(
-    next.temporal.activePredictions,
-  );
+  next.temporal.predictionAccuracy = calculatePredictionAccuracy(next.temporal.activePredictions);
 
   next.lastCycleAt = now;
   next.cycleCount++;
@@ -1852,9 +1827,7 @@ export async function runMediumCycle(
   // Decide what to do: answer a question, generate questions, or assess confidence
   const openQuestions = next.curiosity.questions.filter((q) => q.status === 'open');
   const gaps = identifyKnowledgeGaps(next.worldModel.entities, next.worldModel.relations);
-  const unresolvedPreds = next.temporal.activePredictions.filter(
-    (p) => p.resolved && p.wasCorrect === undefined,
-  );
+  const unresolvedPreds = next.temporal.activePredictions.filter((p) => p.resolved && p.wasCorrect === undefined);
   const expandableGoal = next.goals.goals.find(
     (g) => g.status === 'active' && !g.parentGoal && g.subgoals.length === 0,
   );
@@ -1863,13 +1836,7 @@ export async function runMediumCycle(
   if (expandableGoal && Math.random() < 0.35) {
     onLog(`⟳ Medium: Expanding goal tree for "${expandableGoal.description.slice(0, 50)}..."`);
     try {
-      const expanded = await recursivelyDecomposeGoal(
-        expandableGoal,
-        next.worldModel,
-        generate,
-        2,
-        14,
-      );
+      const expanded = await recursivelyDecomposeGoal(expandableGoal, next.worldModel, generate, 2, 14);
       if (expanded.length > 0) {
         const idToGoal = new Map(next.goals.goals.map((g) => [g.id, g]));
         idToGoal.set(expandableGoal.id, expandableGoal);
@@ -1906,9 +1873,7 @@ export async function runMediumCycle(
       onLog(`  Answered: ${response.slice(0, 80)}...`);
 
       // Store the answer as a temporal event
-      next.temporal.events.push(
-        createTemporalEvent(`Answered: ${question.question.slice(0, 60)}`, [], false),
-      );
+      next.temporal.events.push(createTemporalEvent(`Answered: ${question.question.slice(0, 60)}`, [], false));
     } catch {
       onLog('  Failed to answer question');
     }
@@ -1919,13 +1884,13 @@ export async function runMediumCycle(
       const newQuestions = await generateCuriosityQuestions(
         gaps,
         next.curiosity.questions,
-        next.worldModel.entities.slice(-10).map((e) => e.name).join(', '),
+        next.worldModel.entities
+          .slice(-10)
+          .map((e) => e.name)
+          .join(', '),
         generate,
       );
-      next.curiosity.questions = [
-        ...next.curiosity.questions,
-        ...newQuestions,
-      ].slice(-50);
+      next.curiosity.questions = [...next.curiosity.questions, ...newQuestions].slice(-50);
       next.curiosity.totalQuestionsGenerated += newQuestions.length;
       onLog(`  +${newQuestions.length} new question(s)`);
     } catch {
@@ -1937,12 +1902,7 @@ export async function runMediumCycle(
     const predictionText = predictionToText(pred.prediction);
     onLog(`⟳ Medium: Evaluating prediction "${predictionText.slice(0, 60)}..."`);
     try {
-      const assessment = await assessConfidence(
-        predictionText,
-        [],
-        next.metacognition.calibrationScore,
-        generate,
-      );
+      const assessment = await assessConfidence(predictionText, [], next.metacognition.calibrationScore, generate);
       pred.wasCorrect = assessment.confidence > 0.5;
       if (pred.wasCorrect) next.metacognition.correctPredictions++;
       next.metacognition.totalPredictions++;

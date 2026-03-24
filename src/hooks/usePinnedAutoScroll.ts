@@ -41,11 +41,7 @@ export function usePinnedAutoScroll<T extends HTMLElement>(
   deps: DependencyList,
   options: Options = {},
 ): { isPinnedToBottomRef: MutableRefObject<boolean>; scrollToBottomNow: () => void } {
-  const {
-    bottomThresholdPx = 48,
-    behavior = 'auto',
-    enabled = true,
-  } = options;
+  const { bottomThresholdPx = 48, behavior = 'auto', enabled = true } = options;
 
   const isPinnedToBottomRef = useRef(true);
 
@@ -108,4 +104,3 @@ export function usePinnedAutoScroll<T extends HTMLElement>(
 
   return { isPinnedToBottomRef, scrollToBottomNow };
 }
-

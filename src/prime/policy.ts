@@ -30,31 +30,31 @@ export interface OwnerPolicy {
 
   // Evolution
   maxConcurrentPipelines: number;
-  maxGenerations: number;        // 0 = unlimited
+  maxGenerations: number; // 0 = unlimited
   maxCandidatesPerGen: number;
-  maxRuntimeMs: number;          // 0 = unlimited
+  maxRuntimeMs: number; // 0 = unlimited
   mutationAggressiveness: number; // 0.0 - 1.0
-  elitismRate: number;           // fraction of top candidates kept
+  elitismRate: number; // fraction of top candidates kept
 
   // Cognitive
-  reasoningDepth: number;        // 1-10
-  explorationBreadth: number;    // 1-10
-  confidenceThreshold: number;   // min score to accept a candidate
+  reasoningDepth: number; // 1-10
+  explorationBreadth: number; // 1-10
+  confidenceThreshold: number; // min score to accept a candidate
 
   // Connections
   localOnly: boolean;
   trustedEndpoints: string[];
 
   // Ethical Boundaries (not just what you CAN do — what you SHOULD)
-  conscienceEnabled: boolean;       // the moral reasoning engine
+  conscienceEnabled: boolean; // the moral reasoning engine
   requireConsentForRiskyActions: boolean; // ask-first for high-risk
-  ethicalOverrideAllowed: boolean;  // can the user override ethical refusals?
+  ethicalOverrideAllowed: boolean; // can the user override ethical refusals?
   minimumTrustForAutonomousRisk: number; // 0-1 trust required for autonomous risky acts
-  protectSensitiveData: boolean;    // extra caution with credentials, personal data
+  protectSensitiveData: boolean; // extra caution with credentials, personal data
   preferReversibleActions: boolean; // favor undoable approaches
 
   // Operator overrides
-  killSwitchEnabled: boolean;    // owner can always halt
+  killSwitchEnabled: boolean; // owner can always halt
   operatorNotes: string;
 }
 
@@ -92,7 +92,7 @@ export const SOVEREIGN_POLICY: OwnerPolicy = {
 
   conscienceEnabled: true,
   requireConsentForRiskyActions: true,
-  ethicalOverrideAllowed: true,   // respecting free will — user can override
+  ethicalOverrideAllowed: true, // respecting free will — user can override
   minimumTrustForAutonomousRisk: 0.6,
   protectSensitiveData: true,
   preferReversibleActions: true,
@@ -120,20 +120,41 @@ export const PRIMEOS_AUTONOMOUS_POLICY: OwnerPolicy = {
 
 export function policyAllowsAction(
   policy: OwnerPolicy,
-  action: 'mutate' | 'loop' | 'network' | 'fs-write' | 'exec' | 'screen' | 'input-sim' | 'tool-create' | 'code-mod' | 'auto-goals',
+  action:
+    | 'mutate'
+    | 'loop'
+    | 'network'
+    | 'fs-write'
+    | 'exec'
+    | 'screen'
+    | 'input-sim'
+    | 'tool-create'
+    | 'code-mod'
+    | 'auto-goals',
 ): boolean {
   switch (action) {
-    case 'mutate':      return policy.allowSelfMutation;
-    case 'loop':        return policy.allowUnboundedLoops;
-    case 'network':     return policy.allowNetworkCalls;
-    case 'fs-write':    return policy.allowFileSystemWrites;
-    case 'exec':        return policy.allowProcessExecution;
-    case 'screen':      return policy.allowScreenCapture;
-    case 'input-sim':   return policy.allowInputSimulation;
-    case 'tool-create': return policy.allowToolCreation;
-    case 'code-mod':    return policy.allowCodeSelfMod;
-    case 'auto-goals':  return policy.allowAutonomousGoals;
-    default:            return true;
+    case 'mutate':
+      return policy.allowSelfMutation;
+    case 'loop':
+      return policy.allowUnboundedLoops;
+    case 'network':
+      return policy.allowNetworkCalls;
+    case 'fs-write':
+      return policy.allowFileSystemWrites;
+    case 'exec':
+      return policy.allowProcessExecution;
+    case 'screen':
+      return policy.allowScreenCapture;
+    case 'input-sim':
+      return policy.allowInputSimulation;
+    case 'tool-create':
+      return policy.allowToolCreation;
+    case 'code-mod':
+      return policy.allowCodeSelfMod;
+    case 'auto-goals':
+      return policy.allowAutonomousGoals;
+    default:
+      return true;
   }
 }
 

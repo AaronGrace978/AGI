@@ -7,6 +7,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useStore } from '../store';
+import { Button, Card } from './ui';
 
 const AGENT_INFO: Record<string, { description: string }> = {
   analyst: { description: 'Precise, logical, evidence-based reasoning' },
@@ -21,9 +22,8 @@ function ArenaIdle() {
       <div className="arena-idle-icon">◈</div>
       <h3>MULTI-AGENT ARENA</h3>
       <p>
-        Pose a question and watch multiple AI agents debate it from different
-        perspectives — analytical, creative, critical — then synthesize their
-        insights into a unified answer.
+        Pose a question and watch multiple AI agents debate it from different perspectives — analytical, creative,
+        critical — then synthesize their insights into a unified answer.
       </p>
       <p style={{ fontSize: 10, color: 'var(--text-ghost)', marginTop: 8 }}>
         General intelligence means examining every question from every angle.
@@ -110,9 +110,15 @@ export default function MindPanel() {
             {/* Scroll controls */}
             {arena.phase !== 'idle' && (
               <>
-                <button className="mind-ctrl-btn" onClick={scrollToTop} title="Scroll to top">↑</button>
-                <button className="mind-ctrl-btn" onClick={scrollToBottom} title="Scroll to bottom">↓</button>
-                <button className="mind-ctrl-btn reset" onClick={resetArena}>RESET</button>
+                <Button size="sm" onClick={scrollToTop} title="Scroll to top">
+                  ↑
+                </Button>
+                <Button size="sm" onClick={scrollToBottom} title="Scroll to bottom">
+                  ↓
+                </Button>
+                <Button size="sm" variant="danger" onClick={resetArena}>
+                  RESET
+                </Button>
               </>
             )}
           </div>
@@ -130,20 +136,18 @@ export default function MindPanel() {
             rows={2}
             disabled={isRunning}
           />
-          <button
-            className="arena-start-btn"
-            onClick={handleStart}
-            disabled={!prompt.trim() || isRunning}
-          >
+          <Button variant="primary" size="lg" onClick={handleStart} disabled={!prompt.trim() || isRunning}>
             {isRunning ? 'DEBATING...' : 'ENGAGE'}
-          </button>
+          </Button>
         </div>
-        <div style={{
-          padding: '6px 4px 0',
-          fontSize: 10,
-          color: 'var(--text-ghost)',
-          fontFamily: 'var(--font-mono)',
-        }}>
+        <div
+          style={{
+            padding: '6px 4px 0',
+            fontSize: 10,
+            color: 'var(--text-ghost)',
+            fontFamily: 'var(--font-mono)',
+          }}
+        >
           Using {settings.provider.toUpperCase()} / {settings.model} · 4 agents will analyze your question
         </div>
       </div>
@@ -189,12 +193,8 @@ export default function MindPanel() {
           {/* Synthesis */}
           {(arena.synthesis || arena.phase === 'synthesizing' || arena.phase === 'complete') && (
             <div className="arena-synthesis" ref={synthRef}>
-              <div className="arena-synthesis-title">
-                ◆ UNIFIED SYNTHESIS
-              </div>
-              <div className="arena-synthesis-content">
-                {arena.synthesis || 'Synthesizing all perspectives...'}
-              </div>
+              <div className="arena-synthesis-title">◆ UNIFIED SYNTHESIS</div>
+              <div className="arena-synthesis-content">{arena.synthesis || 'Synthesizing all perspectives...'}</div>
             </div>
           )}
 
@@ -202,13 +202,11 @@ export default function MindPanel() {
             <div className="arena-blueprint">
               <div className="arena-synthesis-title">◆ AGI BLUEPRINT</div>
               <div className="arena-blueprint-grid">
-                <div className="arena-blueprint-card">
-                  <h4>NORTH STAR</h4>
+                <Card compact className="arena-blueprint-card" title="NORTH STAR">
                   <p>{blueprint.northStar}</p>
-                </div>
+                </Card>
 
-                <div className="arena-blueprint-card">
-                  <h4>ARCHITECTURE</h4>
+                <Card compact className="arena-blueprint-card" title="ARCHITECTURE">
                   <ul>
                     {blueprint.architecture.map((item, idx) => (
                       <li key={`${item.module}-${idx}`}>
@@ -216,28 +214,25 @@ export default function MindPanel() {
                       </li>
                     ))}
                   </ul>
-                </div>
+                </Card>
 
-                <div className="arena-blueprint-card">
-                  <h4>LEARNING LOOP</h4>
+                <Card compact className="arena-blueprint-card" title="LEARNING LOOP">
                   <ul>
                     {blueprint.learningLoop.map((item, idx) => (
                       <li key={`${item}-${idx}`}>{item}</li>
                     ))}
                   </ul>
-                </div>
+                </Card>
 
-                <div className="arena-blueprint-card">
-                  <h4>SAFETY GATES</h4>
+                <Card compact className="arena-blueprint-card" title="SAFETY GATES">
                   <ul>
                     {blueprint.safetyGates.map((item, idx) => (
                       <li key={`${item}-${idx}`}>{item}</li>
                     ))}
                   </ul>
-                </div>
+                </Card>
 
-                <div className="arena-blueprint-card">
-                  <h4>NEXT MILESTONES</h4>
+                <Card compact className="arena-blueprint-card" title="NEXT MILESTONES">
                   <ul>
                     {blueprint.nextMilestones.map((item, idx) => (
                       <li key={`${item.name}-${idx}`}>
@@ -245,7 +240,7 @@ export default function MindPanel() {
                       </li>
                     ))}
                   </ul>
-                </div>
+                </Card>
               </div>
             </div>
           )}

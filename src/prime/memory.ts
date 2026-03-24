@@ -21,16 +21,16 @@ export interface VectorMemory {
   content: string;
   type: MemoryType;
   timestamp: number;
-  importance: number;       // 0-1
-  source: string;           // module that created this (nexus, hands, forge, nightmind)
+  importance: number; // 0-1
+  source: string; // module that created this (nexus, hands, forge, nightmind)
   emotion?: string;
   tags: string[];
   // Hierarchical memory enhancements
-  accessCount?: number;     // How many times this memory has been retrieved
-  lastAccessed?: number;    // Timestamp of last retrieval
-  decayRate?: number;       // How fast this memory fades (0=permanent, 1=fast decay)
-  associations?: string[];  // IDs of related memories
-  layer?: 'working' | 'short-term' | 'long-term' | 'core';  // Memory hierarchy layer
+  accessCount?: number; // How many times this memory has been retrieved
+  lastAccessed?: number; // Timestamp of last retrieval
+  decayRate?: number; // How fast this memory fades (0=permanent, 1=fast decay)
+  associations?: string[]; // IDs of related memories
+  layer?: 'working' | 'short-term' | 'long-term' | 'core'; // Memory hierarchy layer
 }
 
 export interface MemorySearchResult {
@@ -89,7 +89,7 @@ export function calculateEffectiveImportance(memory: VectorMemory): number {
   const decay = memory.decayRate ?? (1 - memory.importance) * 0.1;
 
   // Forgetting curve: retention decreases exponentially
-  const retention = Math.exp(-decay * ageHours / (strength * 100 + 1));
+  const retention = Math.exp((-decay * ageHours) / (strength * 100 + 1));
 
   return Math.max(0.01, memory.importance * retention);
 }
@@ -127,14 +127,26 @@ export function findAssociations(
 
   for (const mem of existingMemories) {
     // Tag overlap scoring
-    const tagOverlap = newMemory.tags.filter(t => mem.tags.includes(t)).length;
+    const tagOverlap = newMemory.tags.filter((t) => mem.tags.includes(t)).length;
     const tagScore = tagOverlap / Math.max(1, Math.max(newMemory.tags.length, mem.tags.length));
 
     // Simple content word overlap
-    const newWords = new Set(newMemory.content.toLowerCase().split(/\s+/).filter(w => w.length > 3));
-    const memWords = new Set(mem.content.toLowerCase().split(/\s+/).filter(w => w.length > 3));
+    const newWords = new Set(
+      newMemory.content
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((w) => w.length > 3),
+    );
+    const memWords = new Set(
+      mem.content
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((w) => w.length > 3),
+    );
     let overlap = 0;
-    for (const w of newWords) { if (memWords.has(w)) overlap++; }
+    for (const w of newWords) {
+      if (memWords.has(w)) overlap++;
+    }
     const wordScore = overlap / Math.max(1, Math.max(newWords.size, memWords.size));
 
     const totalScore = tagScore * 0.4 + wordScore * 0.6;
@@ -146,7 +158,7 @@ export function findAssociations(
   return candidates
     .sort((a, b) => b.score - a.score)
     .slice(0, maxAssociations)
-    .map(c => c.id);
+    .map((c) => c.id);
 }
 
 // ─── RAG Context Builder ───────────────────────────────────────
@@ -155,9 +167,7 @@ export function findAssociations(
 export function buildRAGContext(memories: MemorySearchResult[], maxChars: number = 6000): string {
   if (memories.length === 0) return '';
 
-  const lines: string[] = [
-    '=== RECALLED MEMORIES (retrieved by semantic similarity) ===',
-  ];
+  const lines: string[] = ['=== RECALLED MEMORIES (retrieved by semantic similarity) ==='];
 
   let charCount = 0;
 
@@ -220,7 +230,8 @@ export async function storeMemory(
             tags: metadata.tags ?? [],
           }),
         { maxAttempts: 2, initialDelayMs: 180, factor: 2 },
-      ));
+      ),
+    );
   } catch (e) {
     console.warn('[Memory] Failed to store:', e);
   }
@@ -295,9 +306,12 @@ export async function getLegacyMemorySnapshot(): Promise<LegacyMemorySnapshot | 
   }
 }
 
-export async function getLegacyMemorySummary(maxItems: number = 5): Promise<(LegacyMemorySnapshot & {
-  counts?: { facts: number; conversations: number; insights: number };
-}) | null> {
+export async function getLegacyMemorySummary(maxItems: number = 5): Promise<
+  | (LegacyMemorySnapshot & {
+      counts?: { facts: number; conversations: number; insights: number };
+    })
+  | null
+> {
   const capped = Math.max(1, Math.min(12, Number(maxItems) || 5));
   // Prefer lightweight summary IPC when available (prevents loading huge conversation logs).
   if (window.api?.memory?.getSummary) {
@@ -393,10 +407,7 @@ export async function storeTaskExperience(
   });
 }
 
-export async function storeInsight(
-  insight: string,
-  source: string = 'nightmind',
-): Promise<void> {
+export async function storeInsight(insight: string, source: string = 'nightmind'): Promise<void> {
   await storeMemory(insight, 'reflective', {
     source,
     importance: 0.7,
@@ -404,10 +415,7 @@ export async function storeInsight(
   });
 }
 
-export async function storeSkill(
-  skillDescription: string,
-  domain: string,
-): Promise<void> {
+export async function storeSkill(skillDescription: string, domain: string): Promise<void> {
   await storeMemory(skillDescription, 'semantic', {
     source: 'nightmind',
     importance: 0.8,
@@ -420,10 +428,7 @@ export async function storeSkill(
  * that define who AGI PRIME is and what it has experienced.
  * These have the highest retention and never decay.
  */
-export async function storeAutobiographicalMemory(
-  content: string,
-  source: string = 'self',
-): Promise<void> {
+export async function storeAutobiographicalMemory(content: string, source: string = 'self'): Promise<void> {
   await storeMemory(content, 'autobiographical', {
     source,
     importance: 0.95,
@@ -441,7 +446,10 @@ export async function storeStrategy(
   outcome: 'success' | 'failure',
   lessonLearned: string,
 ): Promise<void> {
-  const stepsText = steps.slice(0, 8).map((s, i) => `${i + 1}. ${s}`).join('; ');
+  const stepsText = steps
+    .slice(0, 8)
+    .map((s, i) => `${i + 1}. ${s}`)
+    .join('; ');
   const content = `Strategy for "${goal.slice(0, 80)}": ${stepsText}. Outcome: ${outcome}. Lesson: ${lessonLearned}`;
   await storeMemory(content, 'procedural', {
     source: 'cognitive-loop',

@@ -3,12 +3,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { describe, it, expect } from 'vitest';
-import {
-  createAuditLog,
-  appendAuditEntry,
-  filterAuditLog,
-  auditSummary,
-} from './audit';
+import { createAuditLog, appendAuditEntry, filterAuditLog, auditSummary } from './audit';
 
 describe('createAuditLog', () => {
   it('creates an empty log', () => {

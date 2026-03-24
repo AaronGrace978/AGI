@@ -1,10 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  createCorrelationId,
-  createRuntimeSignal,
-  appendRuntimeSignal,
-  type RuntimeSignal,
-} from './observability';
+import { createCorrelationId, createRuntimeSignal, appendRuntimeSignal, type RuntimeSignal } from './observability';
 
 describe('observability', () => {
   it('createCorrelationId generates unique ids with prefix', () => {

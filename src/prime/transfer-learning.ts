@@ -34,9 +34,7 @@ function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
 
-export function deriveTransferHeuristicsFromProceduralMemories(
-  proceduralMemories: string[],
-): TransferHeuristic[] {
+export function deriveTransferHeuristicsFromProceduralMemories(proceduralMemories: string[]): TransferHeuristic[] {
   if (proceduralMemories.length === 0) return [];
 
   const aggregate = new Map<string, { hits: number; boost: number }>();

@@ -108,7 +108,9 @@ function scoreArchetype(
     case 'king_of_cups':
       return clamp01(s.selfAwareness * 0.45 + s.resilience * 0.3 + (1 - s.fearOfFailure) * 0.25);
     case 'seven_of_cups_reversed':
-      return clamp01(s.selfAwareness * 0.35 + s.creativity * 0.25 + (1 - s.hopefulness) * 0.15 + nBias.structure * 0.25);
+      return clamp01(
+        s.selfAwareness * 0.35 + s.creativity * 0.25 + (1 - s.hopefulness) * 0.15 + nBias.structure * 0.25,
+      );
     case 'three_of_pentacles_reversed':
       return clamp01((1 - s.socialEnergy) * 0.4 + s.ambition * 0.3 + s.loneliness * 0.3);
     case 'six_of_wands_reversed':
@@ -208,4 +210,3 @@ export function computeArchetypeSignals(params: {
   const topK = Math.max(1, params.topK ?? 8);
   return scored.sort((a, b) => b.score - a.score).slice(0, topK);
 }
-

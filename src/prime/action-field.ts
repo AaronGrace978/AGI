@@ -94,25 +94,24 @@ function actionSignature(action: string, params: Record<string, unknown>): strin
   return `${action}[${keys}]`;
 }
 
-export function recordAction(
-  state: ActionFieldState,
-  trace: ActionTrace,
-): ActionFieldState {
+export function recordAction(state: ActionFieldState, trace: ActionTrace): ActionFieldState {
   const sig = actionSignature(trace.action, trace.params);
-  const existing = state.patterns.find(p => p.signature === sig);
+  const existing = state.patterns.find((p) => p.signature === sig);
   const dur = trace.duration ?? 0;
 
   let patterns: ActionPattern[];
   if (existing) {
-    patterns = state.patterns.map(p =>
-      p.signature !== sig ? p : {
-        ...p,
-        attempts: p.attempts + 1,
-        successes: p.successes + (trace.success ? 1 : 0),
-        failures: p.failures + (trace.success ? 0 : 1),
-        avgDuration: (p.avgDuration * p.attempts + dur) / (p.attempts + 1),
-        lastUsed: trace.timestamp,
-      }
+    patterns = state.patterns.map((p) =>
+      p.signature !== sig
+        ? p
+        : {
+            ...p,
+            attempts: p.attempts + 1,
+            successes: p.successes + (trace.success ? 1 : 0),
+            failures: p.failures + (trace.success ? 0 : 1),
+            avgDuration: (p.avgDuration * p.attempts + dur) / (p.attempts + 1),
+            lastUsed: trace.timestamp,
+          },
     );
   } else {
     patterns = [
@@ -147,42 +146,32 @@ function computeForces(
   state: ActionFieldState,
   recentSteps: Array<{ type: string; actionType?: string; actionResult?: { success: boolean } }>,
 ): FieldForces {
-  const total = state.totalActions || 1;
-  const recentActions = recentSteps.filter(s => s.type === 'act');
+  const recentActions = recentSteps.filter((s) => s.type === 'act');
   const recentCount = recentActions.length || 1;
 
   // EXPLORATION: High when few patterns, low diversity, or stuck.
-  const uniqueActions = new Set(recentActions.map(s => s.actionType || 'unknown')).size;
+  const uniqueActions = new Set(recentActions.map((s) => s.actionType || 'unknown')).size;
   const diversity = uniqueActions / recentCount;
   const novelty = 1 - Math.min(state.patterns.length / PATTERN_MEMORY_SIZE, 1);
   const stuckPressure = Math.min(state.stuckCount / STUCK_THRESHOLD, 1);
   const exploration = (1 - diversity) * 0.3 + novelty * 0.3 + stuckPressure * 0.4;
 
   // EXPLOITATION: High when patterns have good success rates.
-  const successRates = state.patterns
-    .filter(p => p.attempts >= 2)
-    .map(p => p.successes / p.attempts);
-  const avgSuccess = successRates.length > 0
-    ? successRates.reduce((a, b) => a + b, 0) / successRates.length
-    : 0.5;
-  const recentSuccessRate = recentActions.length > 0
-    ? recentActions.filter(s => s.actionResult?.success).length / recentActions.length
-    : 0.5;
+  const successRates = state.patterns.filter((p) => p.attempts >= 2).map((p) => p.successes / p.attempts);
+  const avgSuccess = successRates.length > 0 ? successRates.reduce((a, b) => a + b, 0) / successRates.length : 0.5;
+  const recentSuccessRate =
+    recentActions.length > 0 ? recentActions.filter((s) => s.actionResult?.success).length / recentActions.length : 0.5;
   const exploitation = avgSuccess * 0.4 + recentSuccessRate * 0.6;
 
   // METACOGNITION: High when repeated failures or strategy isn't changing.
-  const repeatedFailures = recentActions
-    .slice(-4)
-    .filter(s => !s.actionResult?.success).length;
-  const sameAction = recentActions.length >= 3 &&
-    new Set(recentActions.slice(-3).map(s => s.actionType)).size === 1;
+  const repeatedFailures = recentActions.slice(-4).filter((s) => !s.actionResult?.success).length;
+  const sameAction = recentActions.length >= 3 && new Set(recentActions.slice(-3).map((s) => s.actionType)).size === 1;
   const metacognition = (repeatedFailures / 4) * 0.5 + (sameAction ? 0.5 : 0);
 
   // INCOMPLETENESS: High when at the boundary — actions that can't be modeled.
   const failStreak = state.stuckCount;
   const unknownTerritory = state.patterns.length < 3 && state.totalActions > 5;
-  const incompleteness = Math.min(failStreak / 5, 1) * 0.6 +
-    (unknownTerritory ? 0.4 : 0);
+  const incompleteness = Math.min(failStreak / 5, 1) * 0.6 + (unknownTerritory ? 0.4 : 0);
 
   return {
     exploration: clamp(exploration),
@@ -225,7 +214,10 @@ const CREED_ACTION_CONSTRAINTS: Array<{
   },
 ];
 
-function creedCheck(action: string, params: Record<string, unknown>): {
+function creedCheck(
+  action: string,
+  params: Record<string, unknown>,
+): {
   pass: boolean;
   warning: string;
   law?: CreedLaw;
@@ -249,10 +241,7 @@ function creedCheck(action: string, params: Record<string, unknown>): {
 //  Self-adjusts based on the four forces.
 // ═══════════════════════════════════════════════════════════════
 
-function adjustTemperature(
-  current: number,
-  forces: FieldForces,
-): number {
+function adjustTemperature(current: number, forces: FieldForces): number {
   let beta = current;
 
   // High exploration force → lower β (more exploratory)
@@ -329,10 +318,12 @@ export function computeActionField(
 
     case 'metacognition':
       strategy = 'reflect';
-      reasoning = 'Metacognition force is dominant. The system should examine its own action patterns before continuing.';
-      suggestion = state.stuckCount >= STUCK_THRESHOLD
-        ? 'Stuck loop detected — try a fundamentally different approach, not a variation of the same one.'
-        : 'Review the last 3-4 actions. Are they converging on the goal or drifting?';
+      reasoning =
+        'Metacognition force is dominant. The system should examine its own action patterns before continuing.';
+      suggestion =
+        state.stuckCount >= STUCK_THRESHOLD
+          ? 'Stuck loop detected — try a fundamentally different approach, not a variation of the same one.'
+          : 'Review the last 3-4 actions. Are they converging on the goal or drifting?';
       break;
 
     case 'exploration':
@@ -403,17 +394,13 @@ export function buildActionFieldDirective(verdict: ActionFieldVerdict): string {
 //  After a verdict is computed, update the field state.
 // ═══════════════════════════════════════════════════════════════
 
-export function applyVerdict(
-  state: ActionFieldState,
-  verdict: ActionFieldVerdict,
-): ActionFieldState {
+export function applyVerdict(state: ActionFieldState, verdict: ActionFieldVerdict): ActionFieldState {
   return {
     ...state,
     temperature: verdict.temperature,
     lastStrategy: verdict.strategy,
     metacogChecks: state.metacogChecks + (verdict.strategy === 'reflect' ? 1 : 0),
-    creedViolationCount: state.creedViolationCount +
-      (verdict.creedCheck.startsWith('Clear') ? 0 : 1),
+    creedViolationCount: state.creedViolationCount + (verdict.creedCheck.startsWith('Clear') ? 0 : 1),
   };
 }
 
@@ -438,11 +425,9 @@ function buildExplorationSuggestion(
   state: ActionFieldState,
   recentSteps: Array<{ type: string; actionType?: string }>,
 ): string {
-  const recentTypes = new Set(
-    recentSteps.filter(s => s.type === 'act').map(s => s.actionType)
-  );
+  const recentTypes = new Set(recentSteps.filter((s) => s.type === 'act').map((s) => s.actionType));
   const unusedPatterns = state.patterns
-    .filter(p => p.successes > 0 && !recentTypes.has(p.signature.split('[')[0]))
+    .filter((p) => p.successes > 0 && !recentTypes.has(p.signature.split('[')[0]))
     .sort((a, b) => b.successes / b.attempts - a.successes / a.attempts);
 
   if (unusedPatterns.length > 0) {
@@ -453,8 +438,8 @@ function buildExplorationSuggestion(
 
 function buildExploitationSuggestion(state: ActionFieldState): string {
   const best = state.patterns
-    .filter(p => p.attempts >= 2)
-    .sort((a, b) => (b.successes / b.attempts) - (a.successes / a.attempts));
+    .filter((p) => p.attempts >= 2)
+    .sort((a, b) => b.successes / b.attempts - a.successes / a.attempts);
 
   if (best.length > 0) {
     const top = best[0];

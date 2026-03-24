@@ -55,4 +55,3 @@ describe('oracle astro engine', () => {
     expect(forecast.months[0].monthIso).toBe('2026-02');
   });
 });
-

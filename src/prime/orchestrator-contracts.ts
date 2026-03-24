@@ -76,4 +76,3 @@ export function isOrchestratorEventType(value: string): value is OrchestratorEve
     'error',
   ].includes(value);
 }
-

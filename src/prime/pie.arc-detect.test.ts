@@ -82,4 +82,3 @@ describe('detectARCTask (UI formats)', () => {
     ]);
   });
 });
-

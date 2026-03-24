@@ -68,7 +68,10 @@ export function validateSandboxedPath(
   });
 
   if (!inRoot) {
-    return { allowed: false, reason: `Path "${inputPath}" is outside the allowed sandbox roots: ${allowedRoots.join(', ')}` };
+    return {
+      allowed: false,
+      reason: `Path "${inputPath}" is outside the allowed sandbox roots: ${allowedRoots.join(', ')}`,
+    };
   }
 
   return { allowed: true, reason: 'Path is within allowed sandbox.' };

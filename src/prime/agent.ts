@@ -24,7 +24,7 @@ export interface CognitiveStep {
   actionType?: string;
   actionParams?: Record<string, unknown>;
   actionResult?: { success: boolean; output?: string; error?: string };
-  goalProgress?: number;     // 0-1 estimated progress
+  goalProgress?: number; // 0-1 estimated progress
 }
 
 export interface CognitiveGoal {
@@ -226,11 +226,7 @@ export function buildWorkingMemoryContext(
   workingMemory: string[],
   iteration: number,
 ): string {
-  const parts: string[] = [
-    `GOAL: ${goal}`,
-    `ITERATION: ${iteration}`,
-    '',
-  ];
+  const parts: string[] = [`GOAL: ${goal}`, `ITERATION: ${iteration}`, ''];
 
   if (workingMemory.length > 0) {
     parts.push('WORKING MEMORY:');
@@ -249,7 +245,9 @@ export function buildWorkingMemoryContext(
         parts.push(`  [THINK] ${step.content.slice(0, 200)}`);
       } else if (step.type === 'act') {
         const result = step.actionResult?.success ? 'OK' : 'FAIL';
-        parts.push(`  [ACT:${step.actionType}] ${result} — ${(step.actionResult?.output || step.actionResult?.error || '').slice(0, 150)}`);
+        parts.push(
+          `  [ACT:${step.actionType}] ${result} — ${(step.actionResult?.output || step.actionResult?.error || '').slice(0, 150)}`,
+        );
       } else if (step.type === 'reflect') {
         parts.push(`  [REFLECT] ${step.content.slice(0, 200)}`);
       } else if (step.type === 'observe') {

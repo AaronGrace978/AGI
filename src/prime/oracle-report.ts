@@ -56,9 +56,7 @@ function topArchetypes(
   count = 3,
 ): OracleArchetypeSignal[] {
   const pool = archetypes || [];
-  const filtered = domain
-    ? pool.filter((a) => a.domains.includes(domain))
-    : pool;
+  const filtered = domain ? pool.filter((a) => a.domains.includes(domain)) : pool;
   return filtered.slice(0, count);
 }
 
@@ -67,9 +65,7 @@ function branchForDomain(
   domain: OracleLifeDomain,
 ): OracleTrajectoryBranch | null {
   if (!forecast) return null;
-  const branches = forecast.branches
-    .filter((b) => b.domain === domain)
-    .sort((a, b) => b.probability - a.probability);
+  const branches = forecast.branches.filter((b) => b.domain === domain).sort((a, b) => b.probability - a.probability);
   return branches[0] ?? null;
 }
 
@@ -225,9 +221,7 @@ function buildLoveSection(params: {
 
   const arcs = topArchetypes(params.archetypes, 'relationships', 2);
   if (arcs.length) {
-    lines.push(
-      `Archetype overlay: ${arcs.map((a) => `${a.label} ${pct(a.score)}`).join(' | ')}.`,
-    );
+    lines.push(`Archetype overlay: ${arcs.map((a) => `${a.label} ${pct(a.score)}`).join(' | ')}.`);
   }
 
   if (!lines.length) {
@@ -287,9 +281,7 @@ function buildCareerSection(params: {
 
   const arcs = topArchetypes(params.archetypes, 'career', 3);
   if (arcs.length) {
-    lines.push(
-      `Career archetypes in play: ${arcs.map((a) => `${a.label} (${pct(a.score)})`).join(', ')}.`,
-    );
+    lines.push(`Career archetypes in play: ${arcs.map((a) => `${a.label} (${pct(a.score)})`).join(', ')}.`);
   }
 
   if (!lines.length) {
@@ -330,9 +322,7 @@ function buildLifeSection(params: {
     lines.push(
       `Life-cycle trajectory currently leans toward ${
         growthTop ? `"${growthTop.label}" (${pct(growthTop.probability)})` : 'growth-neutral movement'
-      } and ${
-        healthTop ? `"${healthTop.label}" (${pct(healthTop.probability)})` : 'health-neutral movement'
-      }.`,
+      } and ${healthTop ? `"${healthTop.label}" (${pct(healthTop.probability)})` : 'health-neutral movement'}.`,
     );
   }
 
@@ -376,14 +366,10 @@ function buildTrajectorySection(params: {
   for (const domain of DOMAIN_ORDER) {
     const top = branchForDomain(params.forecast, domain);
     if (!top) continue;
-    lines.push(
-      `${DOMAIN_LABEL[domain]}: ${top.label} (${pct(top.probability)}) over ${params.horizonMonths} months.`,
-    );
+    lines.push(`${DOMAIN_LABEL[domain]}: ${top.label} (${pct(top.probability)}) over ${params.horizonMonths} months.`);
   }
 
-  const dominant = params.forecast.branches
-    .slice()
-    .sort((a, b) => b.probability - a.probability)[0];
+  const dominant = params.forecast.branches.slice().sort((a, b) => b.probability - a.probability)[0];
   if (dominant) {
     lines.push(
       `Dominant branch execution checklist: ${dominant.triggers.join(
@@ -440,9 +426,7 @@ export function generateDestinyMatrixReport(params: {
     }),
   ];
 
-  const narrative = sections
-    .map((s) => `## ${s.title}\n${s.body}`)
-    .join('\n\n');
+  const narrative = sections.map((s) => `## ${s.title}\n${s.body}`).join('\n\n');
 
   return {
     generatedAt: Date.now(),
@@ -452,4 +436,3 @@ export function generateDestinyMatrixReport(params: {
     narrative,
   };
 }
-

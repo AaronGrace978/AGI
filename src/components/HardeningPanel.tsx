@@ -8,6 +8,7 @@
 import { useCallback, useState } from 'react';
 import { useStore } from '../store';
 import type { CheckStatus, HealthCheckItem } from '../prime/hardening';
+import { Button } from './ui';
 
 const STATUS_ICONS: Record<CheckStatus, string> = {
   pass: '●',
@@ -44,32 +45,26 @@ export default function HardeningPanel() {
       </div>
 
       <div className="hardening-controls">
-        <button className="hardening-btn primary" onClick={runCheck}>
+        <Button variant="primary" onClick={runCheck}>
           RUN HEALTH CHECK
-        </button>
-        <button className="hardening-btn" onClick={() => void loadRuntimeHealth()}>
-          REFRESH RUNTIME LOGS
-        </button>
-        <button
-          className="hardening-btn"
+        </Button>
+        <Button onClick={() => void loadRuntimeHealth()}>REFRESH RUNTIME LOGS</Button>
+        <Button
           onClick={() => markTestsPassed(tests.count || 105)}
           title="Mark tests as passed (after running npm test externally)"
         >
           TESTS PASSED
-        </button>
-        <button
-          className="hardening-btn danger"
-          onClick={() => markTestsFailed(tests.count || 105)}
-          title="Mark tests as failed"
-        >
+        </Button>
+        <Button variant="danger" onClick={() => markTestsFailed(tests.count || 105)} title="Mark tests as failed">
           TESTS FAILED
-        </button>
+        </Button>
       </div>
 
       {runtimeHealth && runtimeHealth.issues.length > 0 && (
         <div className="hardening-results">
           <div className="hardening-timestamp">
-            Runtime issues from logs ({runtimeHealth.totalAuditEntries} audit / {runtimeHealth.totalOrchestratorEvents} orchestrator)
+            Runtime issues from logs ({runtimeHealth.totalAuditEntries} audit / {runtimeHealth.totalOrchestratorEvents}{' '}
+            orchestrator)
           </div>
           <div className="hardening-checklist">
             {runtimeHealth.issues.slice(0, 4).map((issue) => (
@@ -101,8 +96,11 @@ export default function HardeningPanel() {
             <div className="hardening-score-label">
               <span>/ 100 HEALTH SCORE</span>
               <span className="hardening-score-status">
-                {report.overallStatus === 'pass' ? 'ALL CLEAR' :
-                 report.overallStatus === 'warn' ? 'WARNINGS' : 'ISSUES FOUND'}
+                {report.overallStatus === 'pass'
+                  ? 'ALL CLEAR'
+                  : report.overallStatus === 'warn'
+                    ? 'WARNINGS'
+                    : 'ISSUES FOUND'}
               </span>
             </div>
           </div>
@@ -114,17 +112,11 @@ export default function HardeningPanel() {
             ))}
           </div>
 
-          <div className="hardening-timestamp">
-            Checked at {new Date(report.checkedAt).toLocaleTimeString()}
-          </div>
+          <div className="hardening-timestamp">Checked at {new Date(report.checkedAt).toLocaleTimeString()}</div>
         </div>
       )}
 
-      {!report && (
-        <div className="hardening-empty">
-          Run a health check to see the safety posture checklist.
-        </div>
-      )}
+      {!report && <div className="hardening-empty">Run a health check to see the safety posture checklist.</div>}
     </div>
   );
 }
@@ -133,22 +125,13 @@ function ChecklistItem({ item }: { item: HealthCheckItem }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div
-      className={`hardening-item hardening-item-${item.status}`}
-      onClick={() => setExpanded(!expanded)}
-    >
+    <div className={`hardening-item hardening-item-${item.status}`} onClick={() => setExpanded(!expanded)}>
       <div className="hardening-item-row">
-        <span
-          className="hardening-item-icon"
-          style={{ color: STATUS_COLORS[item.status] }}
-        >
+        <span className="hardening-item-icon" style={{ color: STATUS_COLORS[item.status] }}>
           {STATUS_ICONS[item.status]}
         </span>
         <span className="hardening-item-label">{item.label}</span>
-        <span
-          className="hardening-item-status"
-          style={{ color: STATUS_COLORS[item.status] }}
-        >
+        <span className="hardening-item-status" style={{ color: STATUS_COLORS[item.status] }}>
           {item.status.toUpperCase()}
         </span>
       </div>

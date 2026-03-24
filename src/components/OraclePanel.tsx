@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useStore } from '../store';
+import { Button, Card, StatusDot } from './ui';
 
 const SENTIMENT_KEYS = [
   'loneliness',
@@ -12,7 +13,7 @@ const SENTIMENT_KEYS = [
   'selfAwareness',
 ] as const;
 
-function metricLabel(key: typeof SENTIMENT_KEYS[number]): string {
+function metricLabel(key: (typeof SENTIMENT_KEYS)[number]): string {
   switch (key) {
     case 'fearOfFailure':
       return 'fear';
@@ -25,9 +26,13 @@ function metricLabel(key: typeof SENTIMENT_KEYS[number]): string {
   }
 }
 
-const ZODIAC_GLYPHS = ['♈','♉','♊','♋','♌','♍','♎','♏','♐','♑','♒','♓'];
+const ZODIAC_GLYPHS = ['♈', '♉', '♊', '♋', '♌', '♍', '♎', '♏', '♐', '♑', '♒', '♓'];
 
-function BirthChartWheel({ chart }: { chart: NonNullable<ReturnType<typeof useStore.getState>['oracle']['birthChart']> }) {
+function BirthChartWheel({
+  chart,
+}: {
+  chart: NonNullable<ReturnType<typeof useStore.getState>['oracle']['birthChart']>;
+}) {
   const size = 320;
   const center = size / 2;
   const rOuter = 140;
@@ -76,21 +81,44 @@ function BirthChartWheel({ chart }: { chart: NonNullable<ReturnType<typeof useSt
 
         <g className="oracle-chart-ring">
           <circle cx={center} cy={center} r={rOuter} fill="none" stroke="rgba(167,139,250,0.25)" strokeWidth={1} />
-          <circle cx={center} cy={center} r={rMid} fill="none" stroke="rgba(167,139,250,0.12)" strokeWidth={0.5} strokeDasharray="2 4" />
+          <circle
+            cx={center}
+            cy={center}
+            r={rMid}
+            fill="none"
+            stroke="rgba(167,139,250,0.12)"
+            strokeWidth={0.5}
+            strokeDasharray="2 4"
+          />
           <circle cx={center} cy={center} r={rInner} fill="none" stroke="rgba(167,139,250,0.2)" strokeWidth={1} />
         </g>
 
         {signLines.map((ln, idx) => (
           <g key={idx}>
             <line x1={ln.x1} y1={ln.y1} x2={ln.x2} y2={ln.y2} stroke="rgba(167,139,250,0.15)" strokeWidth={0.8} />
-            <text x={ln.gx} y={ln.gy} fill="rgba(167,139,250,0.5)" fontSize="11" textAnchor="middle" dominantBaseline="central">
+            <text
+              x={ln.gx}
+              y={ln.gy}
+              fill="rgba(167,139,250,0.5)"
+              fontSize="11"
+              textAnchor="middle"
+              dominantBaseline="central"
+            >
               {ln.glyph}
             </text>
           </g>
         ))}
 
         {[0.33, 0.66, 1].map((s) => (
-          <circle key={s} cx={center} cy={center} r={rPlanet * s} fill="none" stroke="rgba(167,139,250,0.06)" strokeWidth={0.5} />
+          <circle
+            key={s}
+            cx={center}
+            cy={center}
+            r={rPlanet * s}
+            fill="none"
+            stroke="rgba(167,139,250,0.06)"
+            strokeWidth={0.5}
+          />
         ))}
 
         {chart.planets.map((planet) => {
@@ -121,11 +149,7 @@ function BirthChartWheel({ chart }: { chart: NonNullable<ReturnType<typeof useSt
   );
 }
 
-function SentimentRadar({
-  profile,
-}: {
-  profile: ReturnType<typeof useStore.getState>['oracle']['sentimentProfile'];
-}) {
+function SentimentRadar({ profile }: { profile: ReturnType<typeof useStore.getState>['oracle']['sentimentProfile'] }) {
   const size = 280;
   const center = size / 2;
   const r = 100;
@@ -186,12 +210,10 @@ function SentimentRadar({
 
         {axisPoints.map((pt) => (
           <g key={pt.key}>
-            <line
-              x1={center} y1={center} x2={pt.x} y2={pt.y}
-              stroke="rgba(167,139,250,0.1)" strokeWidth={0.5}
-            />
+            <line x1={center} y1={center} x2={pt.x} y2={pt.y} stroke="rgba(167,139,250,0.1)" strokeWidth={0.5} />
             <text
-              x={pt.lx} y={pt.ly}
+              x={pt.lx}
+              y={pt.ly}
               fill="rgba(167,139,250,0.55)"
               fontSize="9"
               fontFamily="var(--font-mono)"
@@ -289,48 +311,101 @@ export default function OraclePanel() {
 
       <div className="oracle-body">
         {/* Subject Setup */}
-        <section className="oracle-card">
-          <h3>Subject Configuration</h3>
+        <Card title="Subject Configuration" glow="purple" className="oracle-card">
           <div className="oracle-input-grid">
-            <input className="oracle-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Display name" />
-            <input className="oracle-input" value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Full legal name" />
-            <input className="oracle-input" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} placeholder="YYYY-MM-DD" />
-            <input className="oracle-input" value={birthTime} onChange={(e) => setBirthTime(e.target.value)} placeholder="HH:mm" />
-            <input className="oracle-input" value={locationLabel} onChange={(e) => setLocationLabel(e.target.value)} placeholder="Location label" />
+            <input
+              className="oracle-input"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Display name"
+            />
+            <input
+              className="oracle-input"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              placeholder="Full legal name"
+            />
+            <input
+              className="oracle-input"
+              value={birthDate}
+              onChange={(e) => setBirthDate(e.target.value)}
+              placeholder="YYYY-MM-DD"
+            />
+            <input
+              className="oracle-input"
+              value={birthTime}
+              onChange={(e) => setBirthTime(e.target.value)}
+              placeholder="HH:mm"
+            />
+            <input
+              className="oracle-input"
+              value={locationLabel}
+              onChange={(e) => setLocationLabel(e.target.value)}
+              placeholder="Location label"
+            />
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-              <input className="oracle-input" value={latitude} onChange={(e) => setLatitude(e.target.value)} placeholder="lat" />
-              <input className="oracle-input" value={longitude} onChange={(e) => setLongitude(e.target.value)} placeholder="lon" />
+              <input
+                className="oracle-input"
+                value={latitude}
+                onChange={(e) => setLatitude(e.target.value)}
+                placeholder="lat"
+              />
+              <input
+                className="oracle-input"
+                value={longitude}
+                onChange={(e) => setLongitude(e.target.value)}
+                placeholder="lon"
+              />
             </div>
           </div>
           <div className="oracle-controls">
-            <button className="oracle-btn" onClick={handleSetSubject}>Set Subject</button>
-            <button className="oracle-btn primary" onClick={() => oracleRunForecast()}>Run Forecast</button>
+            <Button className="oracle-btn" onClick={handleSetSubject}>
+              Set Subject
+            </Button>
+            <Button variant="primary" className="oracle-btn primary" onClick={() => oracleRunForecast()}>
+              Run Forecast
+            </Button>
             <label className="oracle-toggle">
-              <input type="checkbox" checked={oracle.activeOverlays.astrology} onChange={(e) => oracleToggleOverlay('astrology', e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={oracle.activeOverlays.astrology}
+                onChange={(e) => oracleToggleOverlay('astrology', e.target.checked)}
+              />
               astrology
             </label>
             <label className="oracle-toggle">
-              <input type="checkbox" checked={oracle.activeOverlays.numerology} onChange={(e) => oracleToggleOverlay('numerology', e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={oracle.activeOverlays.numerology}
+                onChange={(e) => oracleToggleOverlay('numerology', e.target.checked)}
+              />
               numerology
             </label>
             <label className="oracle-toggle">
-              <input type="checkbox" checked={oracle.activeOverlays.archetypes} onChange={(e) => oracleToggleOverlay('archetypes', e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={oracle.activeOverlays.archetypes}
+                onChange={(e) => oracleToggleOverlay('archetypes', e.target.checked)}
+              />
               archetypes
             </label>
             <label className="oracle-toggle oracle-toggle-voice">
-              <input type="checkbox" checked={oracle.astroVoiceEnabled} onChange={(e) => oracleToggleAstroVoice(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={oracle.astroVoiceEnabled}
+                onChange={(e) => oracleToggleAstroVoice(e.target.checked)}
+              />
               astro voice
             </label>
             <span className="oracle-status">
-              <span className="oracle-status-dot" />
+              <StatusDot status="online" size={6} />
               {oracle.phase} · calibration {(oracle.calibrationScore * 100).toFixed(0)}%
             </span>
           </div>
-        </section>
+        </Card>
 
         {/* Signal Ingestion */}
-        <section className="oracle-card">
-          <h3>Signal Ingestion</h3>
+        <Card title="Signal Ingestion" glow="purple" className="oracle-card">
           <textarea
             className="oracle-textarea"
             value={ingestText}
@@ -339,7 +414,7 @@ export default function OraclePanel() {
             rows={4}
           />
           <div className="oracle-ingest-footer">
-            <button
+            <Button
               className="oracle-btn"
               onClick={() => {
                 oracleIngestText(ingestText);
@@ -347,34 +422,33 @@ export default function OraclePanel() {
               }}
             >
               Ingest Signal
-            </button>
+            </Button>
             <span className="oracle-ingest-stats">
               {oracle.lifeEvents.length} events · {oracle.socialGraph.length} social nodes
             </span>
           </div>
-        </section>
+        </Card>
 
         {/* Birth Chart + Sentiment Radar */}
         <div className="oracle-grid-2">
-          <section className="oracle-card">
-            <h3>Birth Chart</h3>
+          <Card title="Birth Chart" glow="purple" className="oracle-card">
             {oracle.birthChart ? (
               <BirthChartWheel chart={oracle.birthChart} />
             ) : (
               <div className="oracle-empty">
-                No chart generated yet.<br />Set a subject and run forecast.
+                No chart generated yet.
+                <br />
+                Set a subject and run forecast.
               </div>
             )}
-          </section>
-          <section className="oracle-card">
-            <h3>Sentiment Radar</h3>
+          </Card>
+          <Card title="Sentiment Radar" glow="purple" className="oracle-card">
             <SentimentRadar profile={oracle.sentimentProfile} />
-          </section>
+          </Card>
         </div>
 
         {/* Numerology */}
-        <section className="oracle-card">
-          <h3>Numerology Profile</h3>
+        <Card title="Numerology Profile" glow="purple" className="oracle-card">
           {oracle.numerology ? (
             <div className="oracle-num-grid">
               {[
@@ -396,14 +470,15 @@ export default function OraclePanel() {
           ) : (
             <div className="oracle-empty">No numerology output yet.</div>
           )}
-        </section>
+        </Card>
 
         {/* Destiny Matrix Report */}
-        <section className="oracle-card">
-          <h3>Destiny Matrix Report</h3>
+        <Card title="Destiny Matrix Report" glow="purple" className="oracle-card">
           {!oracle.destinyMatrixReport ? (
             <div className="oracle-empty">
-              No long-form report yet.<br />Run forecast to generate destiny matrix narrative output.
+              No long-form report yet.
+              <br />
+              Run forecast to generate destiny matrix narrative output.
             </div>
           ) : (
             <div className="oracle-report">
@@ -423,28 +498,33 @@ export default function OraclePanel() {
               ))}
             </div>
           )}
-        </section>
+        </Card>
 
         {/* Astro Voice Profile */}
         {oracle.astroVoiceEnabled && oracle.communicationProfile && (
-          <section className="oracle-card oracle-voice-card">
-            <h3>Astro Voice Profile</h3>
+          <Card title="Astro Voice Profile" glow="cyan" className="oracle-card oracle-voice-card">
             <div className="oracle-voice-badge">
               {[
                 oracle.communicationProfile.sunSign ? `☉ ${oracle.communicationProfile.sunSign}` : null,
                 oracle.communicationProfile.moonSign ? `☽ ${oracle.communicationProfile.moonSign}` : null,
                 oracle.communicationProfile.mercurySign ? `☿ ${oracle.communicationProfile.mercurySign}` : null,
                 oracle.communicationProfile.ascendantSign ? `ASC ${oracle.communicationProfile.ascendantSign}` : null,
-              ].filter(Boolean).map((sig) => (
-                <span key={sig} className="oracle-voice-sig">{sig}</span>
-              ))}
+              ]
+                .filter(Boolean)
+                .map((sig) => (
+                  <span key={sig} className="oracle-voice-sig">
+                    {sig}
+                  </span>
+                ))}
               <span className="oracle-voice-pace">pace: {oracle.communicationProfile.pace}</span>
             </div>
             {oracle.communicationProfile.toneDirectives.length > 0 && (
               <div className="oracle-voice-section">
                 <div className="oracle-voice-label">Tone Directives</div>
                 {oracle.communicationProfile.toneDirectives.map((d, i) => (
-                  <div key={i} className="oracle-voice-directive">{d}</div>
+                  <div key={i} className="oracle-voice-directive">
+                    {d}
+                  </div>
                 ))}
               </div>
             )}
@@ -452,16 +532,17 @@ export default function OraclePanel() {
               <div className="oracle-voice-section">
                 <div className="oracle-voice-label">Avoid</div>
                 {oracle.communicationProfile.avoidPatterns.map((a, i) => (
-                  <div key={i} className="oracle-voice-directive oracle-voice-avoid">{a}</div>
+                  <div key={i} className="oracle-voice-directive oracle-voice-avoid">
+                    {a}
+                  </div>
                 ))}
               </div>
             )}
-          </section>
+          </Card>
         )}
 
         {/* Trajectory Forecast */}
-        <section className="oracle-card">
-          <h3>Trajectory Forecast</h3>
+        <Card title="Trajectory Forecast" glow="purple" className="oracle-card">
           {!oracle.activeForecast ? (
             <div className="oracle-empty">Run forecast to generate probabilistic branch trajectories.</div>
           ) : (
@@ -490,12 +571,11 @@ export default function OraclePanel() {
               ))}
             </div>
           )}
-        </section>
+        </Card>
 
         {/* Archetypes + Transits */}
         <div className="oracle-grid-2">
-          <section className="oracle-card">
-            <h3>Active Archetypes</h3>
+          <Card title="Active Archetypes" glow="purple" className="oracle-card">
             {oracle.activeArchetypes.length === 0 ? (
               <div className="oracle-empty">No archetype mapping yet.</div>
             ) : (
@@ -509,9 +589,8 @@ export default function OraclePanel() {
                 </div>
               ))
             )}
-          </section>
-          <section className="oracle-card">
-            <h3>Transit Calendar</h3>
+          </Card>
+          <Card title="Transit Calendar" glow="purple" className="oracle-card">
             {!oracle.transits ? (
               <div className="oracle-empty">No transit forecast yet.</div>
             ) : (
@@ -522,28 +601,30 @@ export default function OraclePanel() {
                 </div>
               ))
             )}
-          </section>
+          </Card>
         </div>
 
         {/* Life Events Timeline */}
-        <section className="oracle-card">
-          <h3>Life Events Timeline</h3>
+        <Card title="Life Events Timeline" glow="purple" className="oracle-card">
           {oracle.lifeEvents.length === 0 ? (
             <div className="oracle-empty">No life events ingested yet.</div>
           ) : (
-            oracle.lifeEvents.slice(-15).reverse().map((ev) => (
-              <div key={ev.id} className="oracle-event-row">
-                <div className="oracle-event-header">
-                  <span className="oracle-event-label">{ev.label}</span>
-                  <span className="oracle-event-domain">{ev.domain}</span>
+            oracle.lifeEvents
+              .slice(-15)
+              .reverse()
+              .map((ev) => (
+                <div key={ev.id} className="oracle-event-row">
+                  <div className="oracle-event-header">
+                    <span className="oracle-event-label">{ev.label}</span>
+                    <span className="oracle-event-domain">{ev.domain}</span>
+                  </div>
+                  <div className="oracle-event-meta">
+                    sentiment {(ev.sentiment * 100).toFixed(0)} · significance {(ev.significance * 100).toFixed(0)}%
+                  </div>
                 </div>
-                <div className="oracle-event-meta">
-                  sentiment {(ev.sentiment * 100).toFixed(0)} · significance {(ev.significance * 100).toFixed(0)}%
-                </div>
-              </div>
-            ))
+              ))
           )}
-        </section>
+        </Card>
       </div>
     </div>
   );

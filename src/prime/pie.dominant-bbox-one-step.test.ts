@@ -70,4 +70,3 @@ describe('PIE ARC: dominant bbox one-step right extension', () => {
     expect(r.testOutput).toEqual(expected);
   });
 });
-

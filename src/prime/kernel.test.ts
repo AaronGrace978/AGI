@@ -64,10 +64,7 @@ describe('prime kernel', () => {
 
   it('rejects invalid action envelope (missing id or type)', async () => {
     const kernel = new PrimeKernel();
-    const result = await kernel.dispatch(
-      { id: '', type: 'read_file', payload: {} } as any,
-      { policy: OPEN_POLICY },
-    );
+    const result = await kernel.dispatch({ id: '', type: 'read_file', payload: {} } as any, { policy: OPEN_POLICY });
     expect(result.ok).toBe(false);
     expect(result.stage).toBe('validate');
     expect(result.error).toContain('Invalid kernel action');
@@ -76,14 +73,8 @@ describe('prime kernel', () => {
   it('handles concurrent dispatches with unique correlation ids', async () => {
     const kernel = new PrimeKernel();
     const [a, b] = await Promise.all([
-      kernel.dispatch(
-        { id: 'act_4', type: 'read_file', payload: { path: 'a' } },
-        { policy: OPEN_POLICY },
-      ),
-      kernel.dispatch(
-        { id: 'act_5', type: 'read_file', payload: { path: 'b' } },
-        { policy: OPEN_POLICY },
-      ),
+      kernel.dispatch({ id: 'act_4', type: 'read_file', payload: { path: 'a' } }, { policy: OPEN_POLICY }),
+      kernel.dispatch({ id: 'act_5', type: 'read_file', payload: { path: 'b' } }, { policy: OPEN_POLICY }),
     ]);
     expect(a.ok).toBe(true);
     expect(b.ok).toBe(true);
@@ -120,17 +111,11 @@ describe('prime kernel', () => {
 
   it('rejects malformed action envelopes', async () => {
     const kernel = new PrimeKernel();
-    const noId = await kernel.dispatch(
-      { id: '', type: 'read_file', payload: {} },
-      { policy: OPEN_POLICY },
-    );
+    const noId = await kernel.dispatch({ id: '', type: 'read_file', payload: {} }, { policy: OPEN_POLICY });
     expect(noId.ok).toBe(false);
     expect(noId.stage).toBe('validate');
 
-    const noType = await kernel.dispatch(
-      { id: 'x', type: '', payload: {} },
-      { policy: OPEN_POLICY },
-    );
+    const noType = await kernel.dispatch({ id: 'x', type: '', payload: {} }, { policy: OPEN_POLICY });
     expect(noType.ok).toBe(false);
     expect(noType.stage).toBe('validate');
   });
@@ -144,8 +129,12 @@ describe('prime kernel', () => {
           { id: `race_${i}`, type: 'read_file', payload: { idx: i } },
           { policy: OPEN_POLICY },
           {
-            execute: async () => { throw new Error(`fail_${i}`); },
-            recover: async (r) => { recoveries.push(r.correlationId); },
+            execute: async () => {
+              throw new Error(`fail_${i}`);
+            },
+            recover: async (r) => {
+              recoveries.push(r.correlationId);
+            },
           },
         ),
       ),
@@ -163,7 +152,9 @@ describe('prime kernel', () => {
       { policy: OPEN_POLICY },
       {
         execute: async () => ({ data: 'test_output' }),
-        audit: async (r) => { auditedResult = r; },
+        audit: async (r) => {
+          auditedResult = r;
+        },
       },
     );
     expect(auditedResult).not.toBeNull();

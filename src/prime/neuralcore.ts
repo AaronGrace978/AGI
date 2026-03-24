@@ -19,12 +19,7 @@
 //    - UI Physics:   Clicks must land within valid element bounds
 // ═══════════════════════════════════════════════════════════════
 
-import type {
-  NeuralCoreState,
-  NeuralPrediction,
-  NeuralActionStep,
-  NeuralTrainingProgress,
-} from '../types';
+import type { NeuralCoreState, NeuralPrediction, NeuralActionStep, NeuralTrainingProgress } from '../types';
 
 // ─── Internal tracking (not persisted, lives in-process) ────────
 
@@ -178,7 +173,9 @@ export function buildNeuralContextString(snap: NeuralContextSnapshot | null): st
   if (snap.modelsLoaded) {
     parts.push('Neural action prediction available — can generate physics-informed UI action plans');
   } else {
-    parts.push('Neural engine ready but untrained — record demonstrations then train to enable learned action policies');
+    parts.push(
+      'Neural engine ready but untrained — record demonstrations then train to enable learned action policies',
+    );
   }
 
   parts.push('=== END NEURALCORE ===');

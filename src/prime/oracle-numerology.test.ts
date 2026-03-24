@@ -65,4 +65,3 @@ describe('oracle numerology engine', () => {
     expect(profile.synthesis.length).toBeGreaterThan(0);
   });
 });
-

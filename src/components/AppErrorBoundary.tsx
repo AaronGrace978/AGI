@@ -31,9 +31,7 @@ export class AppErrorBoundary extends React.Component<React.PropsWithChildren, A
     return (
       <div className="boot-screen">
         <div className="boot-text">RECOVERY MODE</div>
-        <div className="boot-status">
-          A renderer component failed. You can retry without restarting the app.
-        </div>
+        <div className="boot-status">A renderer component failed. You can retry without restarting the app.</div>
         <div className="boot-status">{this.state.error || 'Unknown error'}</div>
         <button className="hardening-btn primary" onClick={this.retry}>
           RETRY PANEL

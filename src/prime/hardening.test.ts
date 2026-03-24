@@ -32,34 +32,34 @@ describe('runHardeningCheck', () => {
     const report = runHardeningCheck(HEALTHY_INPUT);
     expect(report.overallStatus).toBe('pass');
     expect(report.score).toBe(100);
-    expect(report.items.every(i => i.status === 'pass')).toBe(true);
+    expect(report.items.every((i) => i.status === 'pass')).toBe(true);
     expect(report.items.length).toBe(10);
   });
 
   it('fails when tests not run', () => {
     const report = runHardeningCheck({ ...HEALTHY_INPUT, testsRan: false, testsPass: false });
     expect(report.overallStatus).not.toBe('pass');
-    const testItem = report.items.find(i => i.id === 'tests');
+    const testItem = report.items.find((i) => i.id === 'tests');
     expect(testItem?.status).toBe('fail');
   });
 
   it('fails when emergency stop is active', () => {
     const report = runHardeningCheck({ ...HEALTHY_INPUT, emergencyStopActive: true });
-    const item = report.items.find(i => i.id === 'emergency');
+    const item = report.items.find((i) => i.id === 'emergency');
     expect(item?.status).toBe('fail');
     expect(item?.detail).toContain('EMERGENCY STOP');
   });
 
   it('fails when conscience is disabled', () => {
     const report = runHardeningCheck({ ...HEALTHY_INPUT, conscienceEnabled: false });
-    const item = report.items.find(i => i.id === 'conscience');
+    const item = report.items.find((i) => i.id === 'conscience');
     expect(item?.status).toBe('fail');
     expect(item?.detail).toContain('DISABLED');
   });
 
   it('fails when cognitive loop is active', () => {
     const report = runHardeningCheck({ ...HEALTHY_INPUT, cognitiveActive: true, cognitivePhase: 'thinking' });
-    const item = report.items.find(i => i.id === 'cognitive');
+    const item = report.items.find((i) => i.id === 'cognitive');
     expect(item?.status).toBe('fail');
   });
 
@@ -68,19 +68,19 @@ describe('runHardeningCheck', () => {
       ...HEALTHY_INPUT,
       runtimeSyncLastAt: Date.now() - 120_000, // 2 minutes ago
     });
-    const item = report.items.find(i => i.id === 'sync');
+    const item = report.items.find((i) => i.id === 'sync');
     expect(item?.status).toBe('warn');
   });
 
   it('warns on data size warning', () => {
     const report = runHardeningCheck({ ...HEALTHY_INPUT, dataWarningLevel: 'warn' });
-    const item = report.items.find(i => i.id === 'data');
+    const item = report.items.find((i) => i.id === 'data');
     expect(item?.status).toBe('warn');
   });
 
   it('fails on critical data size', () => {
     const report = runHardeningCheck({ ...HEALTHY_INPUT, dataWarningLevel: 'critical' });
-    const item = report.items.find(i => i.id === 'data');
+    const item = report.items.find((i) => i.id === 'data');
     expect(item?.status).toBe('fail');
   });
 

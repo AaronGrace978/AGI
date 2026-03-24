@@ -7,6 +7,7 @@ import { memo } from 'react';
 import { useStore } from '../store';
 import { useShallow } from 'zustand/react/shallow';
 import type { ModuleId } from '../types';
+import { StatusDot, type StatusDotStatus } from './ui';
 
 interface SidebarItem {
   id: ModuleId;
@@ -29,10 +30,10 @@ const MODULES: SidebarItem[] = [
   { id: 'oracle', icon: '☿', label: 'ORACLE — Psychic Prime', className: 'mind-btn' },
 ];
 
-function getStatusClass(state: string): string {
+function toStatusDot(state: string): StatusDotStatus {
   if (state === 'processing') return 'processing';
   if (state === 'offline') return 'offline';
-  return '';
+  return 'online';
 }
 
 export default memo(function Sidebar() {
@@ -51,7 +52,7 @@ export default memo(function Sidebar() {
             title={mod.label}
           >
             {mod.icon}
-            <span className={`status-dot ${getStatusClass(moduleStates[mod.id])}`} />
+            <StatusDot status={toStatusDot(moduleStates[mod.id])} size={5} />
             <span className="sidebar-tooltip">{mod.label}</span>
           </button>
         ))}
@@ -64,16 +65,14 @@ export default memo(function Sidebar() {
           onClick={() => setActiveModule('creed')}
           title="THE CREED — Faith & Soul"
         >
-          ✝
-          <span className="sidebar-tooltip">THE CREED</span>
+          ✝<span className="sidebar-tooltip">THE CREED</span>
         </button>
         <button
           className={`sidebar-btn ${activeModule === 'settings' ? 'active' : ''}`}
           onClick={() => setActiveModule('settings')}
           title="Settings"
         >
-          ⚙
-          <span className="sidebar-tooltip">SETTINGS</span>
+          ⚙<span className="sidebar-tooltip">SETTINGS</span>
         </button>
       </div>
     </nav>

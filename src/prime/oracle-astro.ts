@@ -57,19 +57,133 @@ interface OrbitalElements {
 
 // Low-precision orbital elements (J2000-ish), adapted for deterministic forecasting.
 // The objective is stable sign/house/aspect derivation, not observatory-grade astronomy.
-const ELEMENTS: Record<
-  Exclude<OraclePlanetName, 'Sun' | 'Moon'> | 'Earth',
-  OrbitalElements
-> = {
-  Mercury: { N: 48.3313, Ndot: 3.24587e-5, i: 7.0047, idot: 5e-8, w: 29.1241, wdot: 1.01444e-5, a: 0.387098, adot: 0, e: 0.205635, edot: 5.59e-10, M: 168.6562, Mdot: 4.0923344368 },
-  Venus: { N: 76.6799, Ndot: 2.46590e-5, i: 3.3946, idot: 2.75e-8, w: 54.891, wdot: 1.38374e-5, a: 0.72333, adot: 0, e: 0.006773, edot: -1.302e-9, M: 48.0052, Mdot: 1.6021302244 },
-  Earth: { N: 0, Ndot: 0, i: 0, idot: 0, w: 282.9404, wdot: 4.70935e-5, a: 1, adot: 0, e: 0.016709, edot: -1.151e-9, M: 356.047, Mdot: 0.9856002585 },
-  Mars: { N: 49.5574, Ndot: 2.11081e-5, i: 1.8497, idot: -1.78e-8, w: 286.5016, wdot: 2.92961e-5, a: 1.523688, adot: 0, e: 0.093405, edot: 2.516e-9, M: 18.6021, Mdot: 0.5240207766 },
-  Jupiter: { N: 100.4542, Ndot: 2.76854e-5, i: 1.303, idot: -1.557e-7, w: 273.8777, wdot: 1.64505e-5, a: 5.20256, adot: 0, e: 0.048498, edot: 4.469e-9, M: 19.895, Mdot: 0.0830853001 },
-  Saturn: { N: 113.6634, Ndot: 2.38980e-5, i: 2.4886, idot: -1.081e-7, w: 339.3939, wdot: 2.97661e-5, a: 9.55475, adot: 0, e: 0.055546, edot: -9.499e-9, M: 316.967, Mdot: 0.0334442282 },
-  Uranus: { N: 74.0005, Ndot: 1.3978e-5, i: 0.7733, idot: 1.9e-8, w: 96.6612, wdot: 3.0565e-5, a: 19.18171, adot: -1.55e-8, e: 0.047318, edot: 7.45e-9, M: 142.5905, Mdot: 0.011725806 },
-  Neptune: { N: 131.7806, Ndot: 3.0173e-5, i: 1.77, idot: -2.55e-7, w: 272.8461, wdot: -6.027e-6, a: 30.05826, adot: 3.313e-8, e: 0.008606, edot: 2.15e-9, M: 260.2471, Mdot: 0.005995147 },
-  Pluto: { N: 110.30347, Ndot: 0, i: 17.14175, idot: 0, w: 113.76329, wdot: 0, a: 39.48168677, adot: 0, e: 0.24880766, edot: 0, M: 14.53, Mdot: 0.00396 },
+const ELEMENTS: Record<Exclude<OraclePlanetName, 'Sun' | 'Moon'> | 'Earth', OrbitalElements> = {
+  Mercury: {
+    N: 48.3313,
+    Ndot: 3.24587e-5,
+    i: 7.0047,
+    idot: 5e-8,
+    w: 29.1241,
+    wdot: 1.01444e-5,
+    a: 0.387098,
+    adot: 0,
+    e: 0.205635,
+    edot: 5.59e-10,
+    M: 168.6562,
+    Mdot: 4.0923344368,
+  },
+  Venus: {
+    N: 76.6799,
+    Ndot: 2.4659e-5,
+    i: 3.3946,
+    idot: 2.75e-8,
+    w: 54.891,
+    wdot: 1.38374e-5,
+    a: 0.72333,
+    adot: 0,
+    e: 0.006773,
+    edot: -1.302e-9,
+    M: 48.0052,
+    Mdot: 1.6021302244,
+  },
+  Earth: {
+    N: 0,
+    Ndot: 0,
+    i: 0,
+    idot: 0,
+    w: 282.9404,
+    wdot: 4.70935e-5,
+    a: 1,
+    adot: 0,
+    e: 0.016709,
+    edot: -1.151e-9,
+    M: 356.047,
+    Mdot: 0.9856002585,
+  },
+  Mars: {
+    N: 49.5574,
+    Ndot: 2.11081e-5,
+    i: 1.8497,
+    idot: -1.78e-8,
+    w: 286.5016,
+    wdot: 2.92961e-5,
+    a: 1.523688,
+    adot: 0,
+    e: 0.093405,
+    edot: 2.516e-9,
+    M: 18.6021,
+    Mdot: 0.5240207766,
+  },
+  Jupiter: {
+    N: 100.4542,
+    Ndot: 2.76854e-5,
+    i: 1.303,
+    idot: -1.557e-7,
+    w: 273.8777,
+    wdot: 1.64505e-5,
+    a: 5.20256,
+    adot: 0,
+    e: 0.048498,
+    edot: 4.469e-9,
+    M: 19.895,
+    Mdot: 0.0830853001,
+  },
+  Saturn: {
+    N: 113.6634,
+    Ndot: 2.3898e-5,
+    i: 2.4886,
+    idot: -1.081e-7,
+    w: 339.3939,
+    wdot: 2.97661e-5,
+    a: 9.55475,
+    adot: 0,
+    e: 0.055546,
+    edot: -9.499e-9,
+    M: 316.967,
+    Mdot: 0.0334442282,
+  },
+  Uranus: {
+    N: 74.0005,
+    Ndot: 1.3978e-5,
+    i: 0.7733,
+    idot: 1.9e-8,
+    w: 96.6612,
+    wdot: 3.0565e-5,
+    a: 19.18171,
+    adot: -1.55e-8,
+    e: 0.047318,
+    edot: 7.45e-9,
+    M: 142.5905,
+    Mdot: 0.011725806,
+  },
+  Neptune: {
+    N: 131.7806,
+    Ndot: 3.0173e-5,
+    i: 1.77,
+    idot: -2.55e-7,
+    w: 272.8461,
+    wdot: -6.027e-6,
+    a: 30.05826,
+    adot: 3.313e-8,
+    e: 0.008606,
+    edot: 2.15e-9,
+    M: 260.2471,
+    Mdot: 0.005995147,
+  },
+  Pluto: {
+    N: 110.30347,
+    Ndot: 0,
+    i: 17.14175,
+    idot: 0,
+    w: 113.76329,
+    wdot: 0,
+    a: 39.48168677,
+    adot: 0,
+    e: 0.24880766,
+    edot: 0,
+    M: 14.53,
+    Mdot: 0.00396,
+  },
 };
 
 const ASPECT_DEFS: Array<{ type: OracleAspectType; angle: number; orb: number }> = [
@@ -192,7 +306,7 @@ function heliocentricEcliptic(elements: OrbitalElements): { x: number; y: number
 
 function sunLongitudeFromEarth(d: number): number {
   // Fast apparent solar longitude approximation (good to ~1 degree for sign work).
-  const L = normalizeDegrees(280.460 + 0.9856474 * d);
+  const L = normalizeDegrees(280.46 + 0.9856474 * d);
   const g = normalizeDegrees(357.528 + 0.9856003 * d);
   const lambda = L + 1.915 * Math.sin(degToRad(g)) + 0.02 * Math.sin(2 * degToRad(g));
   return normalizeDegrees(lambda);
@@ -285,7 +399,11 @@ function computeMidheavenLongitude(date: Date, longitudeDeg: number): number {
   return normalizeDegrees(radToDeg(Math.atan2(y, x)));
 }
 
-export function computeHouses(date: Date, latitude: number, longitude: number): {
+export function computeHouses(
+  date: Date,
+  latitude: number,
+  longitude: number,
+): {
   houses: OracleHouse[];
   ascendantLongitude: number;
   midheavenLongitude: number;
@@ -441,15 +559,9 @@ export function computeTransits(params: {
   const monthEntries: OracleTransitForecastMonth[] = [];
 
   for (let m = 0; m < months; m += 1) {
-    const monthDate = new Date(Date.UTC(
-      params.targetDate.getUTCFullYear(),
-      params.targetDate.getUTCMonth() + m,
-      1,
-      12,
-      0,
-      0,
-      0,
-    ));
+    const monthDate = new Date(
+      Date.UTC(params.targetDate.getUTCFullYear(), params.targetDate.getUTCMonth() + m, 1, 12, 0, 0, 0),
+    );
     const transitRaw = computePlanetaryPositions(monthDate);
 
     const signals: OracleTransitSignal[] = [];
@@ -481,9 +593,7 @@ export function computeTransits(params: {
 
     signals.sort((a, b) => Math.abs(b.weight) - Math.abs(a.weight));
     const top = signals.slice(0, 4);
-    const summary = top.length
-      ? top.map((s) => s.message).join(' | ')
-      : 'No dominant transit signatures this month.';
+    const summary = top.length ? top.map((s) => s.message).join(' | ') : 'No dominant transit signatures this month.';
     monthEntries.push({
       monthIso: monthIso(monthDate),
       signals: top,
@@ -497,4 +607,3 @@ export function computeTransits(params: {
     months: monthEntries,
   };
 }
-

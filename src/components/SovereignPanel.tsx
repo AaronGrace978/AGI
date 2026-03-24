@@ -8,13 +8,14 @@ import { useStore } from '../store';
 import type { AutonomyLevel } from '../prime/policy';
 import type { OrchestratorEvent, OrchestratorMissionSnapshot, OrchestratorProfile } from '../types';
 import HardeningPanel from './HardeningPanel';
+import { Button, Card } from './ui';
 import { usePinnedAutoScroll } from '../hooks/usePinnedAutoScroll';
 
 const AUTONOMY_LEVELS: { id: AutonomyLevel; label: string; desc: string }[] = [
-  { id: 'manual',      label: 'MANUAL',      desc: 'Every action requires approval' },
-  { id: 'supervised',  label: 'SUPERVISED',   desc: 'Runs freely, logs everything, can be paused' },
-  { id: 'autonomous',  label: 'AUTONOMOUS',   desc: 'Full autonomy within policy bounds' },
-  { id: 'sovereign',   label: 'SOVEREIGN',    desc: 'Unrestricted. Owner-controlled only.' },
+  { id: 'manual', label: 'MANUAL', desc: 'Every action requires approval' },
+  { id: 'supervised', label: 'SUPERVISED', desc: 'Runs freely, logs everything, can be paused' },
+  { id: 'autonomous', label: 'AUTONOMOUS', desc: 'Full autonomy within policy bounds' },
+  { id: 'sovereign', label: 'SOVEREIGN', desc: 'Unrestricted. Owner-controlled only.' },
 ];
 
 function msToDuration(ms: number): string {
@@ -122,23 +123,29 @@ function SovereignPanel() {
     };
   }, [refreshSnapshot]);
 
-  const runOrchestratorCommand = useCallback(async (type: string, payload: Record<string, unknown> = {}) => {
-    if (!window.api?.orchestrator?.command) {
-      setMissionError('Orchestrator command API unavailable');
-      return;
-    }
-    const res = await window.api.orchestrator.command({ type, payload });
-    if (!res?.success) {
-      setMissionError(String(res?.error || `Command failed: ${type}`));
-    } else {
-      setMissionError('');
-      await refreshSnapshot();
-    }
-  }, [refreshSnapshot]);
+  const runOrchestratorCommand = useCallback(
+    async (type: string, payload: Record<string, unknown> = {}) => {
+      if (!window.api?.orchestrator?.command) {
+        setMissionError('Orchestrator command API unavailable');
+        return;
+      }
+      const res = await window.api.orchestrator.command({ type, payload });
+      if (!res?.success) {
+        setMissionError(String(res?.error || `Command failed: ${type}`));
+      } else {
+        setMissionError('');
+        await refreshSnapshot();
+      }
+    },
+    [refreshSnapshot],
+  );
 
-  const setProfile = useCallback(async (profile: OrchestratorProfile) => {
-    await runOrchestratorCommand('set_profile', { profile });
-  }, [runOrchestratorCommand]);
+  const setProfile = useCallback(
+    async (profile: OrchestratorProfile) => {
+      await runOrchestratorCommand('set_profile', { profile });
+    },
+    [runOrchestratorCommand],
+  );
 
   const filteredEvents = useMemo(
     () => recentEvents.filter((evt) => missionEventMatchesFilter(evt.type, timelineFilter)),
@@ -159,58 +166,60 @@ function SovereignPanel() {
     setExportStatus(`Exported ${res.count || 0} events to ${res.path}`);
   }, []);
 
-  const runRunbookAction = useCallback(async (actionId: string) => {
-    if (!window.api?.orchestrator?.runbookAction || !window.api?.orchestrator?.prepareRunbookAction) {
-      setMissionError('Runbook API unavailable');
-      return;
-    }
-    setRunbookOutput(`Running action: ${actionId} ...`);
-    const prep = await window.api.orchestrator.prepareRunbookAction(actionId);
-    if (!prep?.success) {
-      setMissionError(String(prep?.error || `Preparation failed: ${actionId}`));
-      setRunbookOutput(`[${actionId}] PREP FAILED`);
-      return;
-    }
-    if (prep.confirmationRequired && prep.token) {
-      setRunbookOutput(`Confirmed high-impact action: ${actionId}\nToken expires in ~30s`);
-    }
+  const runRunbookAction = useCallback(
+    async (actionId: string) => {
+      if (!window.api?.orchestrator?.runbookAction || !window.api?.orchestrator?.prepareRunbookAction) {
+        setMissionError('Runbook API unavailable');
+        return;
+      }
+      setRunbookOutput(`Running action: ${actionId} ...`);
+      const prep = await window.api.orchestrator.prepareRunbookAction(actionId);
+      if (!prep?.success) {
+        setMissionError(String(prep?.error || `Preparation failed: ${actionId}`));
+        setRunbookOutput(`[${actionId}] PREP FAILED`);
+        return;
+      }
+      if (prep.confirmationRequired && prep.token) {
+        setRunbookOutput(`Confirmed high-impact action: ${actionId}\nToken expires in ~30s`);
+      }
 
-    const res = await window.api.orchestrator.runbookAction(
-      actionId,
-      prep.confirmationRequired ? { confirmationToken: prep.token } : undefined,
-    );
-    if (!res?.success) {
-      setMissionError(String(res?.error || `Runbook action failed: ${actionId}`));
-      setRunbookOutput(`[${actionId}] FAILED\n${String(res?.stderr || res?.error || '')}`.slice(0, 12000));
-      return;
-    }
-    setMissionError('');
-    const output = String(res.stdout || res.stderr || 'Action completed (no output).');
-    setRunbookOutput(`[${actionId}] OK\n${output}`.slice(0, 16000));
-    await refreshSnapshot();
-  }, [refreshSnapshot]);
+      const res = await window.api.orchestrator.runbookAction(
+        actionId,
+        prep.confirmationRequired ? { confirmationToken: prep.token } : undefined,
+      );
+      if (!res?.success) {
+        setMissionError(String(res?.error || `Runbook action failed: ${actionId}`));
+        setRunbookOutput(`[${actionId}] FAILED\n${String(res?.stderr || res?.error || '')}`.slice(0, 12000));
+        return;
+      }
+      setMissionError('');
+      const output = String(res.stdout || res.stderr || 'Action completed (no output).');
+      setRunbookOutput(`[${actionId}] OK\n${output}`.slice(0, 16000));
+      await refreshSnapshot();
+    },
+    [refreshSnapshot],
+  );
 
-  const updateRunbookRole = useCallback(async (role: 'observer' | 'operator' | 'maintainer') => {
-    if (!window.api?.orchestrator?.setRunbookRole) {
-      setMissionError('Runbook role API unavailable');
-      return;
-    }
-    const res = await window.api.orchestrator.setRunbookRole(role);
-    if (!res?.success) {
-      setMissionError(String(res?.error || 'Failed to set runbook role'));
-      return;
-    }
-    setMissionError('');
-    setRunbookRole(role);
-    await refreshSnapshot();
-  }, [refreshSnapshot]);
+  const updateRunbookRole = useCallback(
+    async (role: 'observer' | 'operator' | 'maintainer') => {
+      if (!window.api?.orchestrator?.setRunbookRole) {
+        setMissionError('Runbook role API unavailable');
+        return;
+      }
+      const res = await window.api.orchestrator.setRunbookRole(role);
+      if (!res?.success) {
+        setMissionError(String(res?.error || 'Failed to set runbook role'));
+        return;
+      }
+      setMissionError('');
+      setRunbookRole(role);
+      await refreshSnapshot();
+    },
+    [refreshSnapshot],
+  );
 
   // Auto-scroll log only while pinned to bottom.
-  usePinnedAutoScroll(
-    logScrollRef,
-    [sovereign.logs.length],
-    { behavior: 'auto', bottomThresholdPx: 64 },
-  );
+  usePinnedAutoScroll(logScrollRef, [sovereign.logs.length], { behavior: 'auto', bottomThresholdPx: 64 });
 
   return (
     <div className="sovereign-panel">
@@ -231,33 +240,23 @@ function SovereignPanel() {
       <div className="sovereign-body">
         {/* ─── Controls ───────────────────────────────────── */}
         <div className="sovereign-controls">
-          <button
+          <Button
+            variant="primary"
             className="sovereign-btn primary"
             onClick={() => startSovereign()}
             disabled={isRunning}
           >
             IGNITE
-          </button>
-          <button
-            className="sovereign-btn danger"
-            onClick={killSovereign}
-            disabled={!isRunning}
-          >
+          </Button>
+          <Button variant="danger" className="sovereign-btn danger" onClick={killSovereign} disabled={!isRunning}>
             KILL
-          </button>
-          <button
-            className="sovereign-btn"
-            onClick={resetSovereign}
-            disabled={isRunning}
-          >
+          </Button>
+          <Button className="sovereign-btn" onClick={resetSovereign} disabled={isRunning}>
             RESET
-          </button>
-          <button
-            className="sovereign-btn"
-            onClick={() => setShowPolicy((p) => !p)}
-          >
+          </Button>
+          <Button className="sovereign-btn" onClick={() => setShowPolicy((p) => !p)}>
             {showPolicy ? 'HIDE POLICY' : 'POLICY'}
-          </button>
+          </Button>
         </div>
 
         {/* ─── Policy Editor (collapsible) ────────────────── */}
@@ -270,15 +269,16 @@ function SovereignPanel() {
                 <label>Autonomy Level</label>
                 <div className="autonomy-selector">
                   {AUTONOMY_LEVELS.map((level) => (
-                    <button
+                    <Button
                       key={level.id}
+                      size="sm"
                       className={`autonomy-btn ${policy.autonomyLevel === level.id ? 'active' : ''}`}
                       onClick={() => updatePolicy({ autonomyLevel: level.id })}
                       disabled={isRunning}
                       title={level.desc}
                     >
                       {level.label}
-                    </button>
+                    </Button>
                   ))}
                 </div>
               </div>
@@ -286,60 +286,67 @@ function SovereignPanel() {
               {/* Toggles */}
               <div className="policy-field">
                 <label>Self-mutation</label>
-                <button
+                <Button
+                  size="sm"
                   className={`policy-toggle ${policy.allowSelfMutation ? 'on' : ''}`}
                   onClick={() => updatePolicy({ allowSelfMutation: !policy.allowSelfMutation })}
                   disabled={isRunning}
                 >
                   {policy.allowSelfMutation ? 'ENABLED' : 'OFF'}
-                </button>
+                </Button>
               </div>
               <div className="policy-field">
                 <label>Unbounded loops</label>
-                <button
+                <Button
+                  size="sm"
                   className={`policy-toggle ${policy.allowUnboundedLoops ? 'on' : ''}`}
                   onClick={() => updatePolicy({ allowUnboundedLoops: !policy.allowUnboundedLoops })}
                   disabled={isRunning}
                 >
                   {policy.allowUnboundedLoops ? 'ENABLED' : 'OFF'}
-                </button>
+                </Button>
               </div>
               <div className="policy-field">
                 <label>Network calls</label>
-                <button
+                <Button
+                  size="sm"
                   className={`policy-toggle ${policy.allowNetworkCalls ? 'on' : ''}`}
                   onClick={() => updatePolicy({ allowNetworkCalls: !policy.allowNetworkCalls })}
                   disabled={isRunning}
                 >
                   {policy.allowNetworkCalls ? 'ENABLED' : 'OFF'}
-                </button>
+                </Button>
               </div>
               <div className="policy-field">
                 <label>FS writes</label>
-                <button
+                <Button
+                  size="sm"
                   className={`policy-toggle ${policy.allowFileSystemWrites ? 'on' : ''}`}
                   onClick={() => updatePolicy({ allowFileSystemWrites: !policy.allowFileSystemWrites })}
                   disabled={isRunning}
                 >
                   {policy.allowFileSystemWrites ? 'ENABLED' : 'OFF'}
-                </button>
+                </Button>
               </div>
               <div className="policy-field">
                 <label>Process execution</label>
-                <button
+                <Button
+                  size="sm"
                   className={`policy-toggle ${policy.allowProcessExecution ? 'on' : ''}`}
                   onClick={() => updatePolicy({ allowProcessExecution: !policy.allowProcessExecution })}
                   disabled={isRunning}
                 >
                   {policy.allowProcessExecution ? 'ENABLED' : 'OFF'}
-                </button>
+                </Button>
               </div>
 
               {/* Numeric controls */}
               <div className="policy-field">
                 <label>Max generations (0 = unlimited)</label>
                 <input
-                  type="number" min={0} max={9999}
+                  type="number"
+                  min={0}
+                  max={9999}
                   value={policy.maxGenerations}
                   onChange={(e) => updatePolicy({ maxGenerations: Number(e.target.value) })}
                   disabled={isRunning}
@@ -348,7 +355,9 @@ function SovereignPanel() {
               <div className="policy-field">
                 <label>Candidates / gen</label>
                 <input
-                  type="number" min={2} max={50}
+                  type="number"
+                  min={2}
+                  max={50}
                   value={policy.maxCandidatesPerGen}
                   onChange={(e) => updatePolicy({ maxCandidatesPerGen: Number(e.target.value) })}
                   disabled={isRunning}
@@ -357,7 +366,10 @@ function SovereignPanel() {
               <div className="policy-field">
                 <label>Mutation aggression</label>
                 <input
-                  type="number" min={0.05} max={1.0} step={0.05}
+                  type="number"
+                  min={0.05}
+                  max={1.0}
+                  step={0.05}
                   value={policy.mutationAggressiveness}
                   onChange={(e) => updatePolicy({ mutationAggressiveness: Number(e.target.value) })}
                   disabled={isRunning}
@@ -366,7 +378,9 @@ function SovereignPanel() {
               <div className="policy-field">
                 <label>Max runtime ms (0 = unlimited)</label>
                 <input
-                  type="number" min={0} max={999999}
+                  type="number"
+                  min={0}
+                  max={999999}
                   value={policy.maxRuntimeMs}
                   onChange={(e) => updatePolicy({ maxRuntimeMs: Number(e.target.value) })}
                   disabled={isRunning}
@@ -375,7 +389,9 @@ function SovereignPanel() {
               <div className="policy-field">
                 <label>Reasoning depth (1-10)</label>
                 <input
-                  type="number" min={1} max={10}
+                  type="number"
+                  min={1}
+                  max={10}
                   value={policy.reasoningDepth}
                   onChange={(e) => updatePolicy({ reasoningDepth: Number(e.target.value) })}
                   disabled={isRunning}
@@ -384,7 +400,9 @@ function SovereignPanel() {
               <div className="policy-field">
                 <label>Exploration breadth (1-10)</label>
                 <input
-                  type="number" min={1} max={10}
+                  type="number"
+                  min={1}
+                  max={10}
                   value={policy.explorationBreadth}
                   onChange={(e) => updatePolicy({ explorationBreadth: Number(e.target.value) })}
                   disabled={isRunning}
@@ -400,28 +418,29 @@ function SovereignPanel() {
                   <strong style={{ fontSize: 18 }}>
                     {agiScore.latest ? `${agiScore.latest.total.toFixed(2)} / 10` : 'n/a'}
                   </strong>
-                  {agiScore.lastError && (
-                    <span style={{ color: '#ff006e' }}>{agiScore.lastError}</span>
-                  )}
+                  {agiScore.lastError && <span style={{ color: '#ff006e' }}>{agiScore.lastError}</span>}
                 </div>
               </div>
 
               <div className="policy-field">
                 <label>Optimize Auto Cycle for AGI score</label>
-                <button
+                <Button
+                  size="sm"
                   className={`policy-toggle ${agiScore.config.optimizeInAutoCycle ? 'on' : ''}`}
                   onClick={() => agiScoreSetConfig({ optimizeInAutoCycle: !agiScore.config.optimizeInAutoCycle })}
                   disabled={isRunning}
                   title="When enabled, Forge adaptive benchmarks target the weakest AGI subscores."
                 >
                   {agiScore.config.optimizeInAutoCycle ? 'ENABLED' : 'OFF'}
-                </button>
+                </Button>
               </div>
 
               <div className="policy-field">
                 <label>Require real-workflow evidence</label>
                 <input
-                  type="number" min={0} max={10}
+                  type="number"
+                  min={0}
+                  max={10}
                   value={agiScore.config.requireRealWorkflowCountForFullCredit}
                   onChange={(e) => agiScoreSetConfig({ requireRealWorkflowCountForFullCredit: Number(e.target.value) })}
                   disabled={isRunning}
@@ -431,54 +450,96 @@ function SovereignPanel() {
               <div className="policy-field">
                 <label>Weight: Reasoning & logic</label>
                 <input
-                  type="number" min={0} max={1} step={0.01}
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.01}
                   value={agiScore.config.weights.abstractReasoningLogic}
-                  onChange={(e) => agiScoreSetConfig({ weights: { ...agiScore.config.weights, abstractReasoningLogic: Number(e.target.value) } })}
+                  onChange={(e) =>
+                    agiScoreSetConfig({
+                      weights: { ...agiScore.config.weights, abstractReasoningLogic: Number(e.target.value) },
+                    })
+                  }
                   disabled={isRunning}
                 />
               </div>
               <div className="policy-field">
                 <label>Weight: Learning flexibility</label>
                 <input
-                  type="number" min={0} max={1} step={0.01}
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.01}
                   value={agiScore.config.weights.learningFlexibility}
-                  onChange={(e) => agiScoreSetConfig({ weights: { ...agiScore.config.weights, learningFlexibility: Number(e.target.value) } })}
+                  onChange={(e) =>
+                    agiScoreSetConfig({
+                      weights: { ...agiScore.config.weights, learningFlexibility: Number(e.target.value) },
+                    })
+                  }
                   disabled={isRunning}
                 />
               </div>
               <div className="policy-field">
                 <label>Weight: Domain generality</label>
                 <input
-                  type="number" min={0} max={1} step={0.01}
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.01}
                   value={agiScore.config.weights.domainGenerality}
-                  onChange={(e) => agiScoreSetConfig({ weights: { ...agiScore.config.weights, domainGenerality: Number(e.target.value) } })}
+                  onChange={(e) =>
+                    agiScoreSetConfig({
+                      weights: { ...agiScore.config.weights, domainGenerality: Number(e.target.value) },
+                    })
+                  }
                   disabled={isRunning}
                 />
               </div>
               <div className="policy-field">
                 <label>Weight: Goal-setting</label>
                 <input
-                  type="number" min={0} max={1} step={0.01}
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.01}
                   value={agiScore.config.weights.autonomousGoalSetting}
-                  onChange={(e) => agiScoreSetConfig({ weights: { ...agiScore.config.weights, autonomousGoalSetting: Number(e.target.value) } })}
+                  onChange={(e) =>
+                    agiScoreSetConfig({
+                      weights: { ...agiScore.config.weights, autonomousGoalSetting: Number(e.target.value) },
+                    })
+                  }
                   disabled={isRunning}
                 />
               </div>
               <div className="policy-field">
                 <label>Weight: Meta-cognition</label>
                 <input
-                  type="number" min={0} max={1} step={0.01}
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.01}
                   value={agiScore.config.weights.selfModelingMetaCognition}
-                  onChange={(e) => agiScoreSetConfig({ weights: { ...agiScore.config.weights, selfModelingMetaCognition: Number(e.target.value) } })}
+                  onChange={(e) =>
+                    agiScoreSetConfig({
+                      weights: { ...agiScore.config.weights, selfModelingMetaCognition: Number(e.target.value) },
+                    })
+                  }
                   disabled={isRunning}
                 />
               </div>
               <div className="policy-field">
                 <label>Weight: Creativity</label>
                 <input
-                  type="number" min={0} max={1} step={0.01}
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.01}
                   value={agiScore.config.weights.creativeProblemSolving}
-                  onChange={(e) => agiScoreSetConfig({ weights: { ...agiScore.config.weights, creativeProblemSolving: Number(e.target.value) } })}
+                  onChange={(e) =>
+                    agiScoreSetConfig({
+                      weights: { ...agiScore.config.weights, creativeProblemSolving: Number(e.target.value) },
+                    })
+                  }
                   disabled={isRunning}
                 />
               </div>
@@ -512,9 +573,7 @@ function SovereignPanel() {
           </div>
           <div className="sovereign-metric">
             <span>Pass Rate</span>
-            <strong>
-              {sovereign.currentBest ? `${(sovereign.currentBest.passRate * 100).toFixed(1)}%` : '--'}
-            </strong>
+            <strong>{sovereign.currentBest ? `${(sovereign.currentBest.passRate * 100).toFixed(1)}%` : '--'}</strong>
           </div>
           <div className="sovereign-metric">
             <span>Champion</span>
@@ -525,39 +584,44 @@ function SovereignPanel() {
         </div>
 
         {/* ─── Mission Control (PrimeOS Orchestrator) ───── */}
-        <div className="sovereign-log mission-control-log">
-          <h3>Mission Control</h3>
+        <Card title="Mission Control" className="sovereign-log mission-control-log" glow="none">
           <div className="mission-control-toolbar">
-            <button
+            <Button
               className={`sovereign-btn ${activeProfile === 'manual-operator' ? 'mission-selected' : ''}`}
               onClick={() => void setProfile('manual-operator')}
             >
               PROFILE: MANUAL
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="primary"
               className={`sovereign-btn primary ${activeProfile === 'autonomous-limited' ? 'mission-selected' : ''}`}
               onClick={() => void setProfile('autonomous-limited')}
             >
               PROFILE: AUTONOMOUS-LIMITED
-            </button>
-            <button
+            </Button>
+            <Button
               className={`sovereign-btn ${activeProfile === 'sovereign-desktop' ? 'mission-selected' : ''}`}
               onClick={() => void setProfile('sovereign-desktop')}
             >
               PROFILE: SOVEREIGN
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="danger"
               className={`sovereign-btn danger ${activeProfile === 'owner-direct' ? 'mission-selected' : ''}`}
               onClick={() => void setProfile('owner-direct')}
             >
               PROFILE: OWNER-DIRECT
-            </button>
-            <button className="sovereign-btn danger" onClick={() => void runOrchestratorCommand('emergency_stop')}>
+            </Button>
+            <Button
+              variant="danger"
+              className="sovereign-btn danger"
+              onClick={() => void runOrchestratorCommand('emergency_stop')}
+            >
               EMERGENCY STOP
-            </button>
-            <button className="sovereign-btn" onClick={() => void runOrchestratorCommand('clear_emergency_stop')}>
+            </Button>
+            <Button className="sovereign-btn" onClick={() => void runOrchestratorCommand('clear_emergency_stop')}>
               CLEAR STOP
-            </button>
+            </Button>
           </div>
 
           <div className="mission-goal-row">
@@ -568,7 +632,7 @@ function SovereignPanel() {
               placeholder="Submit high-level goal to orchestrator..."
               style={{ flex: 1 }}
             />
-            <button
+            <Button
               className="sovereign-btn"
               disabled={!goalDraft.trim()}
               onClick={() => {
@@ -579,7 +643,7 @@ function SovereignPanel() {
               }}
             >
               SUBMIT GOAL
-            </button>
+            </Button>
           </div>
 
           {mission && (
@@ -616,75 +680,107 @@ function SovereignPanel() {
             </div>
           )}
 
-          {missionError && (
-            <div className="mission-error">
-              {missionError}
-            </div>
-          )}
+          {missionError && <div className="mission-error">{missionError}</div>}
 
           <div className="sovereign-log-scroll mission-events-scroll">
             <div className="mission-runbook-strip">
-              <button
+              <Button
+                size="sm"
                 className={`sovereign-btn mission-filter-btn ${runbookRole === 'observer' ? 'mission-selected' : ''}`}
                 onClick={() => void updateRunbookRole('observer')}
               >
                 ROLE: OBSERVER
-              </button>
-              <button
+              </Button>
+              <Button
+                size="sm"
                 className={`sovereign-btn mission-filter-btn ${runbookRole === 'operator' ? 'mission-selected' : ''}`}
                 onClick={() => void updateRunbookRole('operator')}
               >
                 ROLE: OPERATOR
-              </button>
-              <button
+              </Button>
+              <Button
+                size="sm"
                 className={`sovereign-btn mission-filter-btn ${runbookRole === 'maintainer' ? 'mission-selected' : ''}`}
                 onClick={() => void updateRunbookRole('maintainer')}
               >
                 ROLE: MAINTAINER
-              </button>
+              </Button>
             </div>
             <div className="mission-runbook-strip">
-              <button className="sovereign-btn mission-filter-btn" onClick={() => void runRunbookAction('service_status')}>
+              <Button
+                size="sm"
+                className="sovereign-btn mission-filter-btn"
+                onClick={() => void runRunbookAction('service_status')}
+              >
                 SERVICE STATUS
-              </button>
-              <button className="sovereign-btn mission-filter-btn danger" onClick={() => void runRunbookAction('service_restart')}>
+              </Button>
+              <Button
+                size="sm"
+                variant="danger"
+                className="sovereign-btn mission-filter-btn danger"
+                onClick={() => void runRunbookAction('service_restart')}
+              >
                 RESTART SERVICE
-              </button>
-              <button className="sovereign-btn mission-filter-btn" onClick={() => void runRunbookAction('logs_tail')}>
+              </Button>
+              <Button
+                size="sm"
+                className="sovereign-btn mission-filter-btn"
+                onClick={() => void runRunbookAction('logs_tail')}
+              >
                 TAIL LOGS
-              </button>
-              <button className="sovereign-btn mission-filter-btn danger" onClick={() => void runRunbookAction('apt_update')}>
+              </Button>
+              <Button
+                size="sm"
+                variant="danger"
+                className="sovereign-btn mission-filter-btn danger"
+                onClick={() => void runRunbookAction('apt_update')}
+              >
                 APT UPDATE
-              </button>
-              <button className="sovereign-btn mission-filter-btn" onClick={() => void runRunbookAction('disk_health')}>
+              </Button>
+              <Button
+                size="sm"
+                className="sovereign-btn mission-filter-btn"
+                onClick={() => void runRunbookAction('disk_health')}
+              >
                 DISK HEALTH
-              </button>
-              <button className="sovereign-btn mission-filter-btn" onClick={() => void runRunbookAction('memory_health')}>
+              </Button>
+              <Button
+                size="sm"
+                className="sovereign-btn mission-filter-btn"
+                onClick={() => void runRunbookAction('memory_health')}
+              >
                 MEMORY HEALTH
-              </button>
+              </Button>
             </div>
-            {runbookOutput && (
-              <pre className="mission-runbook-output">{runbookOutput}</pre>
-            )}
+            {runbookOutput && <pre className="mission-runbook-output">{runbookOutput}</pre>}
             <div className="mission-timeline-toolbar">
               <div className="mission-filter-group">
                 {(['all', 'actions', 'goals', 'policy', 'emergency', 'errors'] as MissionFilter[]).map((f) => (
-                  <button
+                  <Button
                     key={f}
+                    size="sm"
                     className={`sovereign-btn mission-filter-btn ${timelineFilter === f ? 'mission-selected' : ''}`}
                     onClick={() => setTimelineFilter(f)}
                   >
                     {f.toUpperCase()}
-                  </button>
+                  </Button>
                 ))}
               </div>
               <div className="mission-export-group">
-                <button className="sovereign-btn mission-filter-btn" onClick={() => void exportTimeline('json')}>
+                <Button
+                  size="sm"
+                  className="sovereign-btn mission-filter-btn"
+                  onClick={() => void exportTimeline('json')}
+                >
                   EXPORT JSON
-                </button>
-                <button className="sovereign-btn mission-filter-btn" onClick={() => void exportTimeline('jsonl')}>
+                </Button>
+                <Button
+                  size="sm"
+                  className="sovereign-btn mission-filter-btn"
+                  onClick={() => void exportTimeline('jsonl')}
+                >
                   EXPORT JSONL
-                </button>
+                </Button>
               </div>
             </div>
             {exportStatus && <div className="mission-export-status">{exportStatus}</div>}
@@ -694,7 +790,11 @@ function SovereignPanel() {
               filteredEvents.map((evt) => (
                 <div key={evt.id} className={`sov-log-line mission-event tone-${missionEventTone(evt.type)}`}>
                   <span className="mission-event-time">
-                    {new Date(evt.emittedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                    {new Date(evt.emittedAt).toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      second: '2-digit',
+                    })}
                   </span>
                   <span className="mission-event-type">{missionEventLabel(evt.type)}</span>
                   <span className="mission-event-source">{String(evt.source).toUpperCase()}</span>
@@ -702,48 +802,59 @@ function SovereignPanel() {
               ))
             )}
           </div>
-        </div>
+        </Card>
 
         {/* ─── Best Candidate Detail ──────────────────────── */}
         {sovereign.currentBest && (
-          <div className="sovereign-candidate">
-            <h3>Current Champion</h3>
+          <Card title="Current Champion" className="sovereign-candidate" glow="none">
             <div className="candidate-detail">
-              <div><span>ID</span><strong>{sovereign.currentBest.id}</strong></div>
-              <div><span>Gen</span><strong>{sovereign.currentBest.generation}</strong></div>
-              <div><span>Temp</span><strong>{sovereign.currentBest.temperature.toFixed(3)}</strong></div>
-              <div><span>Tools</span><strong>{sovereign.currentBest.toolBudget}</strong></div>
+              <div>
+                <span>ID</span>
+                <strong>{sovereign.currentBest.id}</strong>
+              </div>
+              <div>
+                <span>Gen</span>
+                <strong>{sovereign.currentBest.generation}</strong>
+              </div>
+              <div>
+                <span>Temp</span>
+                <strong>{sovereign.currentBest.temperature.toFixed(3)}</strong>
+              </div>
+              <div>
+                <span>Tools</span>
+                <strong>{sovereign.currentBest.toolBudget}</strong>
+              </div>
             </div>
             <div className="candidate-prompt">
               <span>Prompt DNA</span>
               <pre>{sovereign.currentBest.promptTemplate}</pre>
             </div>
-          </div>
+          </Card>
         )}
 
         {/* ─── Hardening Health ──────────────────────────── */}
         <HardeningPanel />
 
         {/* ─── Self-Mod Pipeline (Opt-in) ─────────────────── */}
-        <div className="sovereign-log">
-          <h3>Self-Mod Pipeline (Opt-in)</h3>
+        <Card title="Self-Mod Pipeline (Opt-in)" className="sovereign-log" glow="none">
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-            <button
+            <Button
+              variant={selfMod.enabled ? 'primary' : 'ghost'}
               className={`sovereign-btn ${selfMod.enabled ? 'primary' : ''}`}
               onClick={() => selfModSetEnabled(!selfMod.enabled)}
               disabled={selfMod.running}
               title="Enables the app to attempt self-modifying code changes. Use carefully."
             >
               {selfMod.enabled ? 'ENABLED' : 'DISABLED'}
-            </button>
-            <button
+            </Button>
+            <Button
               className="sovereign-btn"
               onClick={() => selfModRun()}
               disabled={!selfMod.enabled || selfMod.running || !selfMod.request.trim()}
               title="Runs Hands -> npm test -> verification gauntlet -> rollback on regression."
             >
               {selfMod.running ? `RUNNING (${selfMod.phase})` : 'RUN SELF-MOD'}
-            </button>
+            </Button>
           </div>
 
           <div className="sovereign-log-scroll" style={{ maxHeight: 420, marginTop: 10 }}>
@@ -784,9 +895,7 @@ function SovereignPanel() {
                     {typeof selfMod.lastResult.agiDelta === 'number' && (
                       <span>AGI Δ {selfMod.lastResult.agiDelta.toFixed(2)}</span>
                     )}
-                    {selfMod.lastResult.rolledBack && (
-                      <span>rollback: applied</span>
-                    )}
+                    {selfMod.lastResult.rolledBack && <span>rollback: applied</span>}
                   </div>
                 </div>
               )}
@@ -797,19 +906,21 @@ function SovereignPanel() {
               </div>
             </div>
           </div>
-        </div>
+        </Card>
 
         {/* ─── Live Log ───────────────────────────────────── */}
-        <div className="sovereign-log">
-          <h3>Runtime Log</h3>
+        <Card title="Runtime Log" className="sovereign-log" glow="none">
           <div className="sovereign-log-scroll" ref={logScrollRef}>
             {sovereign.logs.map((line, i) => (
-              <div key={i} className={`sov-log-line ${line.startsWith('G') ? 'gen' : line.startsWith('══') ? 'header' : line.startsWith('──') ? 'divider' : ''}`}>
+              <div
+                key={i}
+                className={`sov-log-line ${line.startsWith('G') ? 'gen' : line.startsWith('══') ? 'header' : line.startsWith('──') ? 'divider' : ''}`}
+              >
                 {line}
               </div>
             ))}
           </div>
-        </div>
+        </Card>
       </div>
     </div>
   );

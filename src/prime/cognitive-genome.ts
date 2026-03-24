@@ -4,7 +4,7 @@ function clamp01(v: number): number {
   return Math.max(0, Math.min(1, v));
 }
 
-function sigmoid(x: number): number {
+function _sigmoid(x: number): number {
   return 1 / (1 + Math.exp(-x));
 }
 
@@ -21,9 +21,9 @@ function homeostaticUpdate(current: number, delta: number, setpoint: number, res
 const DRIVE_SETPOINTS = {
   attachment: 0.72,
   mastery: 0.68,
-  curiosity: 0.80,
+  curiosity: 0.8,
   safety: 0.74,
-  autonomy: 0.70,
+  autonomy: 0.7,
 };
 
 export function createDefaultGenome(): CognitiveGenome {
@@ -107,7 +107,11 @@ export function adaptGenomeFromSignal(
     next.traits.openness = clamp01(next.traits.openness + lr * 0.4);
 
     // Repair can restore secure attachment, but it takes multiple rounds
-    if (next.attachmentStyle !== 'secure' && next.traumaSensitivity.rejection < 0.6 && next.traumaSensitivity.abandonment < 0.65) {
+    if (
+      next.attachmentStyle !== 'secure' &&
+      next.traumaSensitivity.rejection < 0.6 &&
+      next.traumaSensitivity.abandonment < 0.65
+    ) {
       next.attachmentStyle = 'secure';
     }
   }
@@ -131,11 +135,14 @@ export function adaptGenomeFromSignal(
   // Uncertainty is the precondition for learning but the enemy of action.
   // A well-calibrated mind tolerates uncertainty without being paralyzed by it.
   if (typeof signal.uncertainty === 'number') {
-    next.drives.safety = homeostaticUpdate(next.drives.safety, signal.uncertainty * lr * 0.8, DRIVE_SETPOINTS.safety, 0.4);
-    next.traumaSensitivity.uncertainty = clamp01(next.traumaSensitivity.uncertainty + signal.uncertainty * lr * 0.3);
-    next.plasticity.beliefUpdateRate = clamp01(
-      next.plasticity.beliefUpdateRate + signal.uncertainty * lr * 0.5,
+    next.drives.safety = homeostaticUpdate(
+      next.drives.safety,
+      signal.uncertainty * lr * 0.8,
+      DRIVE_SETPOINTS.safety,
+      0.4,
     );
+    next.traumaSensitivity.uncertainty = clamp01(next.traumaSensitivity.uncertainty + signal.uncertainty * lr * 0.3);
+    next.plasticity.beliefUpdateRate = clamp01(next.plasticity.beliefUpdateRate + signal.uncertainty * lr * 0.5);
 
     // High persistent uncertainty develops epistemic humility (conscientiousness up)
     if (signal.uncertainty > 0.7) {

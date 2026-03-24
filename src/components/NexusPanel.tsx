@@ -7,6 +7,8 @@
 import { useState, useRef, useEffect, useCallback, memo, useMemo } from 'react';
 import { useStore } from '../store';
 import { usePinnedAutoScroll } from '../hooks/usePinnedAutoScroll';
+import { Button } from './ui';
+import './NexusPanel.css';
 
 function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -25,7 +27,6 @@ function relativeTime(ts: number): string {
 }
 
 const WelcomeScreen = memo(function WelcomeScreen() {
-  const ollamaStatus = useStore((s) => s.ollamaStatus);
   const currentEmotion = useStore((s) => s.consciousness.soulFrame.currentEmotion);
 
   return (
@@ -33,37 +34,39 @@ const WelcomeScreen = memo(function WelcomeScreen() {
       <div className="welcome-logo">◆</div>
       <div className="welcome-title">AGI PRIME</div>
       <div className="welcome-subtitle">
-        A living mind — general intelligence that thinks across all domains,
-        cares with emotional depth, and acts with autonomous purpose.
+        A living mind — general intelligence that thinks across all domains, cares with emotional depth, and acts with
+        autonomous purpose.
       </div>
 
       <div className="welcome-modules">
         <div className="welcome-module">
-          <div className="welcome-module-icon" style={{ color: '#00ff41' }}>⬡</div>
+          <div className="welcome-module-icon" style={{ color: '#00ff41' }}>
+            ⬡
+          </div>
           <div className="welcome-module-name">NEXUS</div>
           <div className="welcome-module-status">Communication</div>
         </div>
         <div className="welcome-module">
-          <div className="welcome-module-icon" style={{ color: '#ff006e' }}>♥</div>
+          <div className="welcome-module-icon" style={{ color: '#ff006e' }}>
+            ♥
+          </div>
           <div className="welcome-module-name">HEART</div>
           <div className="welcome-module-status">{currentEmotion}</div>
         </div>
         <div className="welcome-module">
-          <div className="welcome-module-icon" style={{ color: '#00ccff' }}>◈</div>
+          <div className="welcome-module-icon" style={{ color: '#00ccff' }}>
+            ◈
+          </div>
           <div className="welcome-module-name">MIND</div>
           <div className="welcome-module-status">Multi-Agent</div>
         </div>
         <div className="welcome-module">
-          <div className="welcome-module-icon" style={{ color: '#a855f7' }}>✧</div>
+          <div className="welcome-module-icon" style={{ color: '#a855f7' }}>
+            ✧
+          </div>
           <div className="welcome-module-name">HANDS</div>
           <div className="welcome-module-status">Standby</div>
         </div>
-      </div>
-
-      <div style={{ marginTop: 16, fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-ghost)' }}>
-        {ollamaStatus.online
-          ? `OLLAMA CONNECTED — ${ollamaStatus.models.length} model${ollamaStatus.models.length !== 1 ? 's' : ''} available`
-          : 'OLLAMA OFFLINE — Configure a provider in Settings'}
       </div>
     </div>
   );
@@ -80,23 +83,35 @@ const ConversationSidebar = memo(function ConversationSidebar({ onClose }: { onC
 
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
-  const handleSelect = useCallback(async (id: string) => {
-    if (id === activeConversationId) { onClose(); return; }
-    await selectConversation(id);
-    onClose();
-  }, [activeConversationId, selectConversation, onClose]);
+  const handleSelect = useCallback(
+    async (id: string) => {
+      if (id === activeConversationId) {
+        onClose();
+        return;
+      }
+      await selectConversation(id);
+      onClose();
+    },
+    [activeConversationId, selectConversation, onClose],
+  );
 
   const handleNew = useCallback(async () => {
     await newConversation();
     onClose();
   }, [newConversation, onClose]);
 
-  const handleDelete = useCallback(async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (confirmDeleteId !== id) { setConfirmDeleteId(id); return; }
-    setConfirmDeleteId(null);
-    await deleteConversation(id);
-  }, [confirmDeleteId, deleteConversation]);
+  const handleDelete = useCallback(
+    async (id: string, e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (confirmDeleteId !== id) {
+        setConfirmDeleteId(id);
+        return;
+      }
+      setConfirmDeleteId(null);
+      await deleteConversation(id);
+    },
+    [confirmDeleteId, deleteConversation],
+  );
 
   // Group conversations: Today / This Week / Earlier (memoized to avoid 3 filters on every render)
   const groups = useMemo(() => {
@@ -121,26 +136,37 @@ const ConversationSidebar = memo(function ConversationSidebar({ onClose }: { onC
           <span className="convo-sidebar-icon">◆</span>
           <span className="convo-sidebar-title">Chats</span>
         </div>
-        <button type="button" className="convo-sidebar-close" onClick={onClose} title="Close">
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+        <Button type="button" variant="ghost" size="sm" className="convo-sidebar-close" onClick={onClose} title="Close">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 14 14"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+          >
             <line x1="3" y1="3" x2="11" y2="11" />
             <line x1="11" y1="3" x2="3" y2="11" />
           </svg>
-        </button>
+        </Button>
       </div>
 
-      <button
-        type="button"
-        className="convo-new-btn"
-        onClick={handleNew}
-        disabled={isStreaming}
-      >
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <Button type="button" variant="accent" className="convo-new-btn" onClick={handleNew} disabled={isStreaming}>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+        >
           <line x1="7" y1="2" x2="7" y2="12" />
           <line x1="2" y1="7" x2="12" y2="7" />
         </svg>
         New Chat
-      </button>
+      </Button>
 
       <div className="convo-list">
         {groups.length === 0 ? (
@@ -153,9 +179,10 @@ const ConversationSidebar = memo(function ConversationSidebar({ onClose }: { onC
             <div key={group.label} className="convo-group">
               <div className="convo-group-label">{group.label}</div>
               {group.items.map((c) => (
-                <button
+                <Button
                   key={c.id}
                   type="button"
+                  variant="ghost"
                   className={`convo-item ${c.id === activeConversationId ? 'active' : ''}`}
                   onClick={() => void handleSelect(c.id)}
                 >
@@ -165,20 +192,34 @@ const ConversationSidebar = memo(function ConversationSidebar({ onClose }: { onC
                       {c.messageCount} msgs · {relativeTime(c.updatedAt)}
                     </span>
                   </div>
-                  <button
+                  <Button
                     type="button"
+                    variant="danger"
+                    size="sm"
                     className={`convo-item-delete ${confirmDeleteId === c.id ? 'confirm' : ''}`}
                     onClick={(e) => void handleDelete(c.id, e)}
                     title={confirmDeleteId === c.id ? 'Confirm delete' : 'Delete'}
                   >
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                      {confirmDeleteId === c.id
-                        ? <polyline points="2,6 5,9 10,3" />
-                        : <><line x1="3" y1="3" x2="9" y2="9" /><line x1="9" y1="3" x2="3" y2="9" /></>
-                      }
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 12 12"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                    >
+                      {confirmDeleteId === c.id ? (
+                        <polyline points="2,6 5,9 10,3" />
+                      ) : (
+                        <>
+                          <line x1="3" y1="3" x2="9" y2="9" />
+                          <line x1="9" y1="3" x2="3" y2="9" />
+                        </>
+                      )}
                     </svg>
-                  </button>
-                </button>
+                  </Button>
+                </Button>
               ))}
             </div>
           ))
@@ -199,7 +240,9 @@ const StreamingBubble = memo(function StreamingBubble() {
     return (
       <div className="thinking-indicator">
         <div className="thinking-dots">
-          <span /><span /><span />
+          <span />
+          <span />
+          <span />
         </div>
         AGI PRIME is thinking...
       </div>
@@ -223,10 +266,17 @@ const MessageList = memo(function MessageList() {
   return (
     <>
       {messages.map((msg) => (
-        <div key={msg.id} className={`message ${msg.role}${msg.thinking ? ' afterthought' : ''}${msg.thinking && msg.sourceModule === 'spark' ? ' spark-origin' : ''}`}>
+        <div
+          key={msg.id}
+          className={`message ${msg.role}${msg.thinking ? ' afterthought' : ''}${msg.thinking && msg.sourceModule === 'spark' ? ' spark-origin' : ''}`}
+        >
           <div className="message-avatar">
             {msg.role === 'assistant'
-              ? (msg.thinking && msg.sourceModule === 'spark' ? '🔥' : msg.thinking ? '⚡' : '◆')
+              ? msg.thinking && msg.sourceModule === 'spark'
+                ? '🔥'
+                : msg.thinking
+                  ? '⚡'
+                  : '◆'
               : msg.role === 'user'
                 ? '▸'
                 : '⚠'}
@@ -234,7 +284,11 @@ const MessageList = memo(function MessageList() {
           <div className="message-body">
             {msg.role === 'assistant' && msg.thinking && (
               <div className={`message-badge${msg.sourceModule === 'spark' ? ' badge-spark' : ''}`}>
-                {msg.sourceModule === 'spark' ? 'SPARK THOUGHT' : msg.sourceModule === 'nexus' && msg.thinking ? 'NIGHTMIND' : 'AFTERTHOUGHT'}
+                {msg.sourceModule === 'spark'
+                  ? 'SPARK THOUGHT'
+                  : msg.sourceModule === 'nexus' && msg.thinking
+                    ? 'NIGHTMIND'
+                    : 'AFTERTHOUGHT'}
               </div>
             )}
             <div className="message-content">{msg.content}</div>
@@ -254,15 +308,11 @@ const DualBrainBar = memo(function DualBrainBar() {
   return (
     <div className="dual-brain-bar">
       <span>
-        Dual-Brain: {dualBrain.enabled ? 'ON' : 'OFF'} · route={dualBrain.lastRoute.toUpperCase()} ·
-        fast={dualBrain.fastCount} slow={dualBrain.slowCount}
+        Dual-Brain: {dualBrain.enabled ? 'ON' : 'OFF'} · route={dualBrain.lastRoute.toUpperCase()} · fast=
+        {dualBrain.fastCount} slow={dualBrain.slowCount}
       </span>
       <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <input
-          type="checkbox"
-          checked={dualBrain.enabled}
-          onChange={(e) => setDualBrainEnabled(e.target.checked)}
-        />
+        <input type="checkbox" checked={dualBrain.enabled} onChange={(e) => setDualBrainEnabled(e.target.checked)} />
         Router
       </label>
     </div>
@@ -278,11 +328,10 @@ const MessagesArea = memo(function MessagesArea() {
   const streamingContent = useStore((s) => s.streamingContent);
   const activeConversationId = useStore((s) => s.activeConversationId);
 
-  const { scrollToBottomNow } = usePinnedAutoScroll(
-    messagesAreaRef,
-    [messageCount, streamingContent],
-    { behavior: 'auto', bottomThresholdPx: 64 },
-  );
+  const { scrollToBottomNow } = usePinnedAutoScroll(messagesAreaRef, [messageCount, streamingContent], {
+    behavior: 'auto',
+    bottomThresholdPx: 64,
+  });
 
   useEffect(() => {
     shouldScrollToBottomRef.current = true;
@@ -340,12 +389,15 @@ const Composer = memo(function Composer({
     if (textareaRef.current) textareaRef.current.style.height = '24px';
   }, [input, isStreaming, onSend]);
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  }, [handleSend]);
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        handleSend();
+      }
+    },
+    [handleSend],
+  );
 
   useEffect(() => {
     return () => cancelAnimationFrame(resizeRaf.current);
@@ -363,16 +415,12 @@ const Composer = memo(function Composer({
           rows={1}
           disabled={isStreaming}
         />
-        <button
-          className="send-btn"
-          onClick={handleSend}
-          disabled={!input.trim() || isStreaming}
-        >
+        <Button variant="primary" className="send-btn" onClick={handleSend} disabled={!input.trim() || isStreaming}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M22 2L11 13" />
             <path d="M22 2L15 22L11 13L2 9L22 2Z" />
           </svg>
-        </button>
+        </Button>
       </div>
       <div className="input-hint">
         <span>Enter to send · Shift+Enter for new line</span>
@@ -394,10 +442,13 @@ export default function NexusPanel() {
   const model = useStore((s) => s.settings.model);
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const handleSend = useCallback((text: string) => {
-    if (isStreaming) return;
-    sendMessage(text);
-  }, [isStreaming, sendMessage]);
+  const handleSend = useCallback(
+    (text: string) => {
+      if (isStreaming) return;
+      sendMessage(text);
+    },
+    [isStreaming, sendMessage],
+  );
 
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
   const toggleSidebar = useCallback(() => setSidebarOpen((v) => !v), []);
@@ -418,19 +469,28 @@ export default function NexusPanel() {
 
       <div className="nexus-header">
         <div className="nexus-header-left">
-          <button
+          <Button
             type="button"
+            variant="ghost"
             className="nexus-sidebar-toggle"
             onClick={toggleSidebar}
             title="Conversations"
           >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+            >
               <line x1="2" y1="4" x2="14" y2="4" />
               <line x1="2" y1="8" x2="14" y2="8" />
               <line x1="2" y1="12" x2="10" y2="12" />
             </svg>
             <span>Chats</span>
-          </button>
+          </Button>
           <h2>NEXUS</h2>
           <div className="consciousness-indicator">
             <div className="consciousness-dot" />
@@ -448,11 +508,7 @@ export default function NexusPanel() {
 
       <DualBrainBar />
       <MessagesArea />
-      <Composer
-        isStreaming={isStreaming}
-        totalInteractions={totalInteractions}
-        onSend={handleSend}
-      />
+      <Composer isStreaming={isStreaming} totalInteractions={totalInteractions} onSend={handleSend} />
     </div>
   );
 }

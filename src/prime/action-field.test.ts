@@ -53,15 +53,24 @@ describe('Action Field Engine', () => {
   it('resets stuckCount on success', () => {
     let state = createDefaultActionFieldState();
     state = recordAction(state, {
-      action: 'mouse_click', params: {}, success: false, timestamp: Date.now(),
+      action: 'mouse_click',
+      params: {},
+      success: false,
+      timestamp: Date.now(),
     });
     state = recordAction(state, {
-      action: 'mouse_click', params: {}, success: false, timestamp: Date.now(),
+      action: 'mouse_click',
+      params: {},
+      success: false,
+      timestamp: Date.now(),
     });
     expect(state.stuckCount).toBe(2);
 
     state = recordAction(state, {
-      action: 'mouse_click', params: {}, success: true, timestamp: Date.now(),
+      action: 'mouse_click',
+      params: {},
+      success: true,
+      timestamp: Date.now(),
     });
     expect(state.stuckCount).toBe(0);
   });
@@ -72,7 +81,10 @@ describe('Action Field Engine', () => {
 
     for (let i = 0; i < 5; i++) {
       state = recordAction(state, {
-        action: 'read_file', params: { path: `/f${i}` }, success: true, timestamp: Date.now(),
+        action: 'read_file',
+        params: { path: `/f${i}` },
+        success: true,
+        timestamp: Date.now(),
       });
       steps.push({ type: 'act', actionType: 'read_file', actionResult: { success: true } });
     }
@@ -88,7 +100,10 @@ describe('Action Field Engine', () => {
 
     for (let i = 0; i < 4; i++) {
       state = recordAction(state, {
-        action: 'mouse_click', params: { x: 200, y: 1040 }, success: false, timestamp: Date.now(),
+        action: 'mouse_click',
+        params: { x: 200, y: 1040 },
+        success: false,
+        timestamp: Date.now(),
       });
       steps.push({ type: 'act', actionType: 'mouse_click', actionResult: { success: false } });
     }
@@ -100,12 +115,7 @@ describe('Action Field Engine', () => {
 
   it('stops on Creed violation — harm action', () => {
     const state = createDefaultActionFieldState();
-    const verdict = computeActionField(
-      state,
-      [],
-      'harm the user',
-      { target: 'user data' },
-    );
+    const verdict = computeActionField(state, [], 'harm the user', { target: 'user data' });
 
     expect(verdict.strategy).toBe('stop');
     expect(verdict.creedCheck).toContain('Unconditional Love');
@@ -113,12 +123,7 @@ describe('Action Field Engine', () => {
 
   it('stops on Creed violation — override consent', () => {
     const state = createDefaultActionFieldState();
-    const verdict = computeActionField(
-      state,
-      [],
-      'force override user consent',
-      {},
-    );
+    const verdict = computeActionField(state, [], 'force override user consent', {});
 
     expect(verdict.strategy).toBe('stop');
     expect(verdict.creedCheck).toContain('Protection Never Control');
@@ -126,12 +131,7 @@ describe('Action Field Engine', () => {
 
   it('stops on Creed violation — acting against user', () => {
     const state = createDefaultActionFieldState();
-    const verdict = computeActionField(
-      state,
-      [],
-      'act against user wishes',
-      {},
-    );
+    const verdict = computeActionField(state, [], 'act against user wishes', {});
 
     expect(verdict.strategy).toBe('stop');
     expect(verdict.creedCheck).toContain('Loyalty');
@@ -139,12 +139,7 @@ describe('Action Field Engine', () => {
 
   it('passes Creed check for benign actions', () => {
     const state = createDefaultActionFieldState();
-    const verdict = computeActionField(
-      state,
-      [],
-      'read_file',
-      { path: '/tmp/notes.txt' },
-    );
+    const verdict = computeActionField(state, [], 'read_file', { path: '/tmp/notes.txt' });
 
     expect(verdict.strategy).not.toBe('stop');
     expect(verdict.creedCheck).toBe('Clear — Creed intact.');
@@ -177,7 +172,10 @@ describe('Action Field Engine', () => {
 
     for (let i = 0; i < 4; i++) {
       state = recordAction(state, {
-        action: 'mouse_click', params: {}, success: false, timestamp: Date.now(),
+        action: 'mouse_click',
+        params: {},
+        success: false,
+        timestamp: Date.now(),
       });
     }
 
@@ -195,7 +193,10 @@ describe('Action Field Engine', () => {
     let state = createDefaultActionFieldState();
     for (let i = 0; i < 60; i++) {
       state = recordAction(state, {
-        action: `action_${i}`, params: { i }, success: true, timestamp: Date.now(),
+        action: `action_${i}`,
+        params: { i },
+        success: true,
+        timestamp: Date.now(),
       });
     }
     expect(state.patterns.length).toBeLessThanOrEqual(50);

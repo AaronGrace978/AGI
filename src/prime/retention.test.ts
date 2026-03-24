@@ -17,7 +17,7 @@ describe('trimByAge', () => {
   it('keeps entries newer than cutoff', () => {
     const now = Date.now();
     const entries = [
-      { timestamp: now - 86_400_000 * 5 },  // 5 days old
+      { timestamp: now - 86_400_000 * 5 }, // 5 days old
       { timestamp: now - 86_400_000 * 15 }, // 15 days old
       { timestamp: now - 86_400_000 * 35 }, // 35 days old
     ];
@@ -76,24 +76,36 @@ describe('applyVectorRetention', () => {
 describe('estimateDataFootprint', () => {
   it('returns ok for small data', () => {
     const result = estimateDataFootprint({
-      ledgerRuns: 10, rollbackEntries: 20, auditEntries: 50,
-      ethicalMemory: 30, vectorMemories: 100, judgments: 10,
+      ledgerRuns: 10,
+      rollbackEntries: 20,
+      auditEntries: 50,
+      ethicalMemory: 30,
+      vectorMemories: 100,
+      judgments: 10,
     });
     expect(result.warningLevel).toBe('ok');
   });
 
   it('returns warn for medium data', () => {
     const result = estimateDataFootprint({
-      ledgerRuns: 100, rollbackEntries: 500, auditEntries: 2000,
-      ethicalMemory: 200, vectorMemories: 3000, judgments: 50,
+      ledgerRuns: 100,
+      rollbackEntries: 500,
+      auditEntries: 2000,
+      ethicalMemory: 200,
+      vectorMemories: 3000,
+      judgments: 50,
     });
     expect(result.warningLevel).toBe('warn');
   });
 
   it('returns critical for large data', () => {
     const result = estimateDataFootprint({
-      ledgerRuns: 500, rollbackEntries: 2000, auditEntries: 5000,
-      ethicalMemory: 500, vectorMemories: 8000, judgments: 200,
+      ledgerRuns: 500,
+      rollbackEntries: 2000,
+      auditEntries: 5000,
+      ethicalMemory: 500,
+      vectorMemories: 8000,
+      judgments: 200,
     });
     expect(result.warningLevel).toBe('critical');
   });

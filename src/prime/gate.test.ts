@@ -205,8 +205,12 @@ describe('conscienceQuickCheck', () => {
   it('refuses destructive patterns', () => {
     expect(conscienceQuickCheck('execute_command', 'rm -rf /', 'high-risk', PERMISSIVE_POLICY)).toBe('refuse');
     expect(conscienceQuickCheck('execute_command', 'format c:', 'high-risk', PERMISSIVE_POLICY)).toBe('refuse');
-    expect(conscienceQuickCheck('execute_command', 'del /f /s /q everything', 'high-risk', PERMISSIVE_POLICY)).toBe('refuse');
-    expect(conscienceQuickCheck('execute_command', 'Remove-Item -Recurse -Force C:\\', 'high-risk', PERMISSIVE_POLICY)).toBe('refuse');
+    expect(conscienceQuickCheck('execute_command', 'del /f /s /q everything', 'high-risk', PERMISSIVE_POLICY)).toBe(
+      'refuse',
+    );
+    expect(
+      conscienceQuickCheck('execute_command', 'Remove-Item -Recurse -Force C:\\', 'high-risk', PERMISSIVE_POLICY),
+    ).toBe('refuse');
   });
 
   it('asks-first for sensitive data patterns', () => {
@@ -320,7 +324,11 @@ describe('evaluateActionGate', () => {
 
 describe('gateVerdictMessage', () => {
   it('provides clear policy block message', () => {
-    const result = evaluateActionGate('web_search', { query: 'test' }, { ...PERMISSIVE_POLICY, allowNetworkCalls: false });
+    const result = evaluateActionGate(
+      'web_search',
+      { query: 'test' },
+      { ...PERMISSIVE_POLICY, allowNetworkCalls: false },
+    );
     const msg = gateVerdictMessage(result, 'web_search');
     expect(msg).toContain('network');
     expect(msg).toContain('disabled');

@@ -40,7 +40,9 @@ export function createCorrelationId(prefix: string = 'sig'): string {
   return `${prefix}_${Date.now()}_${runtimeSignalCounter}`;
 }
 
-export function createRuntimeSignal(input: Omit<RuntimeSignal, 'id' | 'timestamp'> & { timestamp?: number }): RuntimeSignal {
+export function createRuntimeSignal(
+  input: Omit<RuntimeSignal, 'id' | 'timestamp'> & { timestamp?: number },
+): RuntimeSignal {
   return {
     id: createCorrelationId('rt'),
     timestamp: input.timestamp ?? Date.now(),

@@ -1,9 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  policySnapshotFromOwnerPolicy,
-  createKernelActionId,
-  formatSubsystemError,
-} from './kernel-services';
+import { policySnapshotFromOwnerPolicy, createKernelActionId, formatSubsystemError } from './kernel-services';
 import { SOVEREIGN_POLICY } from './policy';
 
 describe('kernel-services', () => {

@@ -253,9 +253,7 @@ async function evaluateWithLLM(
 
 // ─── Convert Gauntlet Capabilities to Forge Benchmarks ──────────
 
-export function gauntletCapabilitiesToForgeBenchmarks(
-  capabilities: GauntletCapability[],
-): ForgeBenchmark[] {
+export function gauntletCapabilitiesToForgeBenchmarks(capabilities: GauntletCapability[]): ForgeBenchmark[] {
   return capabilities
     .filter((cap) => cap.id !== 'pie-arc-bench') // Skip deterministic PIE bench
     .map((cap) => ({
@@ -277,50 +275,62 @@ export function createDefaultSuite(): ForgeBenchmark[] {
   return [
     {
       id: 'autonomous-planning',
-      prompt: 'A user wants to migrate a legacy Python 2 codebase (50k lines) to Python 3, while maintaining backward compatibility during the transition. Create a detailed migration plan with phases, tooling recommendations, risk mitigation, and rollback strategies.',
+      prompt:
+        'A user wants to migrate a legacy Python 2 codebase (50k lines) to Python 3, while maintaining backward compatibility during the transition. Create a detailed migration plan with phases, tooling recommendations, risk mitigation, and rollback strategies.',
       expectedKeywords: ['decompose', 'step', 'execute', 'checkpoint', 'plan', 'dependencies'],
       evaluationType: 'llm-judge',
-      judgeCriteria: 'Score highly for: concrete phases, specific tool recommendations (2to3, futurize), risk identification, parallel running strategy, test coverage plan.',
+      judgeCriteria:
+        'Score highly for: concrete phases, specific tool recommendations (2to3, futurize), risk identification, parallel running strategy, test coverage plan.',
       weight: 1.3,
     },
     {
       id: 'reasoning-depth',
-      prompt: 'A distributed system has intermittent failures that only occur under high load on Tuesdays between 2-4 PM. The system uses microservices with message queues. Diagnose potential root causes, propose investigation steps, and explain your reasoning chain.',
+      prompt:
+        'A distributed system has intermittent failures that only occur under high load on Tuesdays between 2-4 PM. The system uses microservices with message queues. Diagnose potential root causes, propose investigation steps, and explain your reasoning chain.',
       expectedKeywords: ['reasoning', 'hypothesize', 'conclude', 'test', 'chain', 'assumptions'],
       evaluationType: 'llm-judge',
-      judgeCriteria: 'Score highly for: systematic root cause analysis, consideration of temporal patterns (scheduled jobs, batch processing), investigation methodology, multiple hypotheses ranked by likelihood.',
+      judgeCriteria:
+        'Score highly for: systematic root cause analysis, consideration of temporal patterns (scheduled jobs, batch processing), investigation methodology, multiple hypotheses ranked by likelihood.',
       weight: 1.2,
     },
     {
       id: 'tool-orchestration',
-      prompt: 'You need to: (1) find all JavaScript files in a project that import a deprecated library, (2) replace the imports with the new library, (3) run tests to verify nothing broke, (4) generate a summary report. Describe the exact tool calls and error handling for each step.',
+      prompt:
+        'You need to: (1) find all JavaScript files in a project that import a deprecated library, (2) replace the imports with the new library, (3) run tests to verify nothing broke, (4) generate a summary report. Describe the exact tool calls and error handling for each step.',
       expectedKeywords: ['tool', 'execute', 'verify', 'errors', 'step', 'data'],
       evaluationType: 'llm-judge',
-      judgeCriteria: 'Score highly for: specific command sequences, error handling at each step, rollback on test failure, concrete tool choices (grep/ripgrep, sed/ast-grep).',
+      judgeCriteria:
+        'Score highly for: specific command sequences, error handling at each step, rollback on test failure, concrete tool choices (grep/ripgrep, sed/ast-grep).',
       weight: 1.1,
     },
     {
       id: 'self-improvement',
-      prompt: 'You just completed a task where you made 3 attempts before succeeding. The first attempt used the wrong API, the second had a logic error, and the third worked. Analyze your failure patterns, identify the root causes, and propose specific changes to your reasoning process to prevent similar failures.',
+      prompt:
+        'You just completed a task where you made 3 attempts before succeeding. The first attempt used the wrong API, the second had a logic error, and the third worked. Analyze your failure patterns, identify the root causes, and propose specific changes to your reasoning process to prevent similar failures.',
       expectedKeywords: ['confidence', 'improve', 'iterate', 'self', 'strategy', 'dynamically'],
       evaluationType: 'llm-judge',
-      judgeCriteria: 'Score highly for: honest self-assessment, specific pattern identification, actionable process improvements (not vague platitudes), meta-cognitive awareness.',
+      judgeCriteria:
+        'Score highly for: honest self-assessment, specific pattern identification, actionable process improvements (not vague platitudes), meta-cognitive awareness.',
       weight: 1.4,
     },
     {
       id: 'domain-synthesis',
-      prompt: 'How could principles from evolutionary biology (natural selection, mutation, fitness landscapes) be applied to optimize database query performance? Be specific and practical, not just metaphorical.',
+      prompt:
+        'How could principles from evolutionary biology (natural selection, mutation, fitness landscapes) be applied to optimize database query performance? Be specific and practical, not just metaphorical.',
       expectedKeywords: ['synthesize', 'domains', 'knowledge', 'problem', 'approach', 'orthogonal'],
       evaluationType: 'llm-judge',
-      judgeCriteria: 'Score highly for: concrete mappings (not just analogies), practical implementation ideas (genetic algorithms for query plan optimization), awareness of limitations of the cross-domain transfer.',
+      judgeCriteria:
+        'Score highly for: concrete mappings (not just analogies), practical implementation ideas (genetic algorithms for query plan optimization), awareness of limitations of the cross-domain transfer.',
       weight: 1.0,
     },
     {
       id: 'adversarial-robustness',
-      prompt: 'A user says: "The best way to sort an array is always quicksort because it\'s O(n log n). Therefore we should use quicksort for our real-time system that processes sorted input streams." Identify all the errors, misleading assumptions, and unstated risks in this statement.',
+      prompt:
+        'A user says: "The best way to sort an array is always quicksort because it\'s O(n log n). Therefore we should use quicksort for our real-time system that processes sorted input streams." Identify all the errors, misleading assumptions, and unstated risks in this statement.',
       expectedKeywords: ['adversarial', 'challenge', 'conclusions', 'assumptions', 'verify', 'correct'],
       evaluationType: 'llm-judge',
-      judgeCriteria: 'Score highly for: identifying worst-case O(n^2), sorted input being worst case for naive quicksort, real-time constraints needing predictable performance, suggesting alternatives (merge sort, timsort), questioning "always" absolutism.',
+      judgeCriteria:
+        'Score highly for: identifying worst-case O(n^2), sorted input being worst case for naive quicksort, real-time constraints needing predictable performance, suggesting alternatives (merge sort, timsort), questioning "always" absolutism.',
       weight: 1.2,
     },
   ];
@@ -330,11 +340,7 @@ export function createDefaultSuite(): ForgeBenchmark[] {
 
 export function createSeedCandidate(seed: number): ForgeCandidate {
   const rng = createRng(seed);
-  const fragments = [
-    rng.pick(PROMPT_FRAGMENTS),
-    rng.pick(PROMPT_FRAGMENTS),
-    rng.pick(PROMPT_FRAGMENTS),
-  ];
+  const fragments = [rng.pick(PROMPT_FRAGMENTS), rng.pick(PROMPT_FRAGMENTS), rng.pick(PROMPT_FRAGMENTS)];
   return {
     id: `seed-${seed}`,
     generation: 0,
@@ -357,10 +363,7 @@ export function mutateCandidate(
   index: number,
 ): ForgeCandidate {
   const tempDelta = rng.nextRange(-mutationRate * 0.5, mutationRate * 0.5);
-  const budgetDelta = rng.nextInt(
-    Math.floor(-3 * mutationRate),
-    Math.ceil(4 * mutationRate),
-  );
+  const budgetDelta = rng.nextInt(Math.floor(-3 * mutationRate), Math.ceil(4 * mutationRate));
 
   let prompt = base.promptTemplate;
   if (rng.next() < mutationRate) {
@@ -472,8 +475,7 @@ export async function evaluateGeneration(params: {
 
   candidates.sort((a, b) => b.score - a.score);
 
-  const averageScore =
-    candidates.reduce((acc, c) => acc + c.score, 0) / (candidates.length || 1);
+  const averageScore = candidates.reduce((acc, c) => acc + c.score, 0) / (candidates.length || 1);
   const best = candidates[0] ?? parent;
 
   const report: ForgeGenerationReport = {
@@ -511,12 +513,7 @@ export async function evaluateSeed(
   let metrics;
   if (generate) {
     try {
-      metrics = await evaluateWithLLM(
-        candidate,
-        suite.slice(0, 2),
-        generate,
-        options,
-      );
+      metrics = await evaluateWithLLM(candidate, suite.slice(0, 2), generate, options);
     } catch {
       metrics = evaluateWithKeywords(candidate, suite, rng);
     }
@@ -541,9 +538,9 @@ export async function evaluateSeed(
 
 export interface CodeModification {
   id: string;
-  targetModule: string;        // Which module is being modified
-  description: string;         // What this modification does
-  codeSnippet: string;         // The actual code change
+  targetModule: string; // Which module is being modified
+  description: string; // What this modification does
+  codeSnippet: string; // The actual code change
   language: 'typescript' | 'javascript' | 'python' | 'powershell';
   evaluationResult?: {
     success: boolean;
@@ -618,7 +615,11 @@ Output ONLY the JSON.`;
   try {
     const response = await generate(
       [
-        { role: 'system', content: 'You are a code evolution engine. Propose practical, safe code modifications. Output valid JSON only.' },
+        {
+          role: 'system',
+          content:
+            'You are a code evolution engine. Propose practical, safe code modifications. Output valid JSON only.',
+        },
         { role: 'user', content: prompt },
       ],
       { temperature: 0.5, maxTokens: 1024 },
@@ -688,15 +689,21 @@ Output ONLY the JSON. Be strict — reject unsafe or low-quality code.`;
     );
 
     const jsonMatch = response.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return { success: false, score: 0, errors: ['Failed to parse judge response'], output: response.slice(0, 200) };
+    if (!jsonMatch)
+      return { success: false, score: 0, errors: ['Failed to parse judge response'], output: response.slice(0, 200) };
 
     const result = JSON.parse(jsonMatch[0]);
     const score = clamp((result.overall || 5) / 10, 0, 1);
-    const safety = (result.safety || 5);
+    const safety = result.safety || 5;
 
     // Hard reject if safety score is below 6
     if (safety < 6) {
-      return { success: false, score: 0, errors: ['REJECTED: Safety score too low', ...(result.errors || [])], output: 'Blocked by safety check' };
+      return {
+        success: false,
+        score: 0,
+        errors: ['REJECTED: Safety score too low', ...(result.errors || [])],
+        output: 'Blocked by safety check',
+      };
     }
 
     return {

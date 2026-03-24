@@ -1,0 +1,18 @@
+dist/
+release/
+node_modules/
+scripts/
+electron/
+environment_files/
+Memory/
+AGIPRIME/
+AGIPrime-Mobile/
+AGIPrime Documents/
+Demos/
+*.json
+*.md
+*.pdf
+*.docx
+*.mp4
+*.html
+*.pyc

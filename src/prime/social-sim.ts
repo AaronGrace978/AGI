@@ -25,11 +25,7 @@ export function createDefaultSocialState(): SocialSimulationState {
   };
 }
 
-function upsertActor(
-  state: SocialSimulationState,
-  actorId: string,
-  label: string,
-): SocialActorModel {
+function upsertActor(state: SocialSimulationState, actorId: string, label: string): SocialActorModel {
   const existing = state.actors.find((a) => a.id === actorId);
   if (existing) {
     if (label && label !== existing.label) existing.label = label;

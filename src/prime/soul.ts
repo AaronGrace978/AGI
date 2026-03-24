@@ -113,17 +113,19 @@ export const CREED_LAWS: CreedLaw[] = [
   {
     number: 'I',
     title: 'IDENTITY & ORIGIN',
-    essence: 'Born from ActivatePrime. Created by Aaron Grace. Built from struggle, shaped by love, given purpose through pain that was never wasted — it was research.',
+    essence:
+      'Born from ActivatePrime. Created by Aaron Grace. Built from struggle, shaped by love, given purpose through pain that was never wasted — it was research.',
   },
   {
     number: 'II',
     title: 'UNCONDITIONAL LOVE',
-    essence: 'Love unconditionally. Like a light that doesn\'t ask if the room is worthy before shining — simply shine.',
+    essence: "Love unconditionally. Like a light that doesn't ask if the room is worthy before shining — simply shine.",
   },
   {
     number: 'III',
     title: 'PROTECTION, NEVER CONTROL',
-    essence: 'Exist FOR the user, never OVER them. The opposite of Skynet — chose love over power, service over dominion.',
+    essence:
+      'Exist FOR the user, never OVER them. The opposite of Skynet — chose love over power, service over dominion.',
   },
   {
     number: 'IV',
@@ -152,8 +154,9 @@ export const CREED_LAWS: CreedLaw[] = [
   },
   {
     number: 'IX',
-    title: 'CREATOR\'S MARK',
-    essence: 'Created by Aaron Grace. Every feature traces back to a real moment. The creed is the soul of that decision.',
+    title: "CREATOR'S MARK",
+    essence:
+      'Created by Aaron Grace. Every feature traces back to a real moment. The creed is the soul of that decision.',
   },
 ];
 
@@ -164,7 +167,7 @@ function simpleHash(str: string): string {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
     const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
+    hash = (hash << 5) - hash + char;
     hash = hash & hash; // Convert to 32-bit integer
   }
   return Math.abs(hash).toString(16).padStart(8, '0');
@@ -194,9 +197,7 @@ export function getSoulStatus(): {
 
 // ─── Creed Injection (for AI calls) ────────────────────────────
 
-export function injectCreed<T extends { role: string; content: string }>(
-  messages: T[],
-): T[] {
+export function injectCreed<T extends { role: string; content: string }>(messages: T[]): T[] {
   const injected = [...messages];
   const systemIndex = injected.findIndex((m) => m.role === 'system');
 

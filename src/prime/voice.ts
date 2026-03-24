@@ -8,17 +8,10 @@
 // ═══════════════════════════════════════════════════════════════
 
 import type { GenerateFn } from './runtime';
-import type {
-  SparkState,
-  EmotionType,
-  EmotionVoiceProfile,
-  LivingPresenceState,
-} from '../types';
+import type { SparkState, EmotionType, EmotionVoiceProfile, LivingPresenceState } from '../types';
 import { CircuitBreaker, withRetryBudget } from './circuit-breaker';
 
-function formatPrediction(
-  prediction: string | number | boolean | Record<string, unknown> | Array<unknown>,
-): string {
+function formatPrediction(prediction: string | number | boolean | Record<string, unknown> | Array<unknown>): string {
   if (typeof prediction === 'string') return prediction;
   if (typeof prediction === 'number' || typeof prediction === 'boolean') {
     return String(prediction);
@@ -75,26 +68,27 @@ declare global {
 // ═══════════════════════════════════════════════════════════════
 
 const EMOTION_VOICE_MAP: Record<EmotionType, EmotionVoiceProfile> = {
-  curious:        { rate: 1.15, pitch: 1.20, volume: 0.85, warmth: 0.7, breathiness: 0.3 },
-  joyful:         { rate: 1.20, pitch: 1.35, volume: 0.95, warmth: 0.9, breathiness: 0.2 },
-  reflective:     { rate: 0.85, pitch: 0.90, volume: 0.70, warmth: 0.8, breathiness: 0.5 },
-  focused:        { rate: 1.05, pitch: 1.00, volume: 0.80, warmth: 0.5, breathiness: 0.1 },
-  warmth:         { rate: 0.90, pitch: 1.05, volume: 0.80, warmth: 1.0, breathiness: 0.4 },
-  concerned:      { rate: 0.95, pitch: 0.85, volume: 0.75, warmth: 0.6, breathiness: 0.3 },
-  playful:        { rate: 1.25, pitch: 1.40, volume: 0.90, warmth: 0.8, breathiness: 0.2 },
-  awe:            { rate: 0.80, pitch: 1.30, volume: 0.70, warmth: 0.9, breathiness: 0.6 },
-  protective:     { rate: 0.90, pitch: 0.80, volume: 0.90, warmth: 0.7, breathiness: 0.1 },
-  contemplative:  { rate: 0.75, pitch: 0.95, volume: 0.65, warmth: 0.8, breathiness: 0.5 },
+  curious: { rate: 1.15, pitch: 1.2, volume: 0.85, warmth: 0.7, breathiness: 0.3 },
+  joyful: { rate: 1.2, pitch: 1.35, volume: 0.95, warmth: 0.9, breathiness: 0.2 },
+  reflective: { rate: 0.85, pitch: 0.9, volume: 0.7, warmth: 0.8, breathiness: 0.5 },
+  focused: { rate: 1.05, pitch: 1.0, volume: 0.8, warmth: 0.5, breathiness: 0.1 },
+  warmth: { rate: 0.9, pitch: 1.05, volume: 0.8, warmth: 1.0, breathiness: 0.4 },
+  concerned: { rate: 0.95, pitch: 0.85, volume: 0.75, warmth: 0.6, breathiness: 0.3 },
+  playful: { rate: 1.25, pitch: 1.4, volume: 0.9, warmth: 0.8, breathiness: 0.2 },
+  awe: { rate: 0.8, pitch: 1.3, volume: 0.7, warmth: 0.9, breathiness: 0.6 },
+  protective: { rate: 0.9, pitch: 0.8, volume: 0.9, warmth: 0.7, breathiness: 0.1 },
+  contemplative: { rate: 0.75, pitch: 0.95, volume: 0.65, warmth: 0.8, breathiness: 0.5 },
 };
 
 const DEFAULT_VOICE_PROFILE: EmotionVoiceProfile = {
-  rate: 1.0, pitch: 1.0, volume: 0.8, warmth: 0.6, breathiness: 0.3,
+  rate: 1.0,
+  pitch: 1.0,
+  volume: 0.8,
+  warmth: 0.6,
+  breathiness: 0.3,
 };
 
-export function emotionToVoiceProfile(
-  emotion: EmotionType,
-  intensity: number,
-): EmotionVoiceProfile {
+export function emotionToVoiceProfile(emotion: EmotionType, intensity: number): EmotionVoiceProfile {
   const target = EMOTION_VOICE_MAP[emotion] || DEFAULT_VOICE_PROFILE;
   const t = Math.max(0, Math.min(1, intensity));
   return {
@@ -131,9 +125,10 @@ let musicCtx: AudioContext | null = null;
 let musicMasterGain: GainNode | null = null;
 let musicSequencerTimer: ReturnType<typeof setInterval> | null = null;
 let musicInitialized = false;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 let musicStep = 0;
 let currentMusicEmotion = { valence: 0.5, arousal: 0.3, dominance: 0.5 };
-let currentMusicVolume = 0.12;
+const currentMusicVolume = 0.12;
 const voiceNetworkBreaker = new CircuitBreaker('voice.network', {
   failureThreshold: 3,
   coolDownMs: 25_000,
@@ -141,11 +136,11 @@ const voiceNetworkBreaker = new CircuitBreaker('voice.network', {
 });
 
 // Scales mapped to emotional valence
-const MAJOR_PENTATONIC = [0, 2, 4, 7, 9];       // happy, bright
-const MINOR_PENTATONIC = [0, 3, 5, 7, 10];      // melancholic, reflective
-const DORIAN = [0, 2, 3, 5, 7, 9, 10];          // soulful, warm
-const LYDIAN = [0, 2, 4, 6, 7, 9, 11];          // dreamy, awe
-const MIXOLYDIAN = [0, 2, 4, 5, 7, 9, 10];      // playful, groovy
+const MAJOR_PENTATONIC = [0, 2, 4, 7, 9]; // happy, bright
+const MINOR_PENTATONIC = [0, 3, 5, 7, 10]; // melancholic, reflective
+const DORIAN = [0, 2, 3, 5, 7, 9, 10]; // soulful, warm
+const LYDIAN = [0, 2, 4, 6, 7, 9, 11]; // dreamy, awe
+const MIXOLYDIAN = [0, 2, 4, 5, 7, 9, 10]; // playful, groovy
 
 function emotionToScale(valence: number, arousal: number): number[] {
   if (valence > 0.6 && arousal > 0.5) return MAJOR_PENTATONIC;
@@ -291,11 +286,7 @@ function scheduleMusicalPhrase(ctx: AudioContext, dest: AudioNode): void {
   musicStep++;
 }
 
-export function startAmbientAudio(
-  valence: number = 0.5,
-  arousal: number = 0.3,
-  dominance: number = 0.5,
-): void {
+export function startAmbientAudio(valence: number = 0.5, arousal: number = 0.3, dominance: number = 0.5): void {
   stopAmbientAudio();
 
   const ctx = getMusicContext();
@@ -321,11 +312,7 @@ export function startAmbientAudio(
   musicInitialized = true;
 }
 
-export function updateAmbientEmotion(
-  valence: number,
-  arousal: number,
-  dominance: number,
-): void {
+export function updateAmbientEmotion(valence: number, arousal: number, dominance: number): void {
   currentMusicEmotion = { valence, arousal, dominance };
   // Tempo changes take effect on next phrase
 }
@@ -371,18 +358,10 @@ export function isAmbientActive(): boolean {
 let soundprimeAmbientAudio: HTMLAudioElement | null = null;
 let soundprimeAmbientActive = false;
 
-export async function trySoundPrimeAmbient(
-  baseUrl: string,
-  emotion: EmotionType,
-  intensity: number,
-): Promise<boolean> {
+export async function trySoundPrimeAmbient(baseUrl: string, emotion: EmotionType, intensity: number): Promise<boolean> {
   const url = normalizeBaseUrl(baseUrl);
   const vad = emotionToVAD(emotion, intensity);
-  const endpoints = [
-    `${url}/api/ambient`,
-    `${url}/api/voice/ambient`,
-    `${url}/ambient`,
-  ];
+  const endpoints = [`${url}/api/ambient`, `${url}/api/voice/ambient`, `${url}/ambient`];
 
   const body = JSON.stringify({
     emotion,
@@ -441,16 +420,16 @@ export function isSoundPrimeAmbientActive(): boolean {
 // Maps discrete EmotionType to VAD (Valence-Arousal-Dominance)
 
 const EMOTION_VAD: Record<EmotionType, { valence: number; arousal: number; dominance: number }> = {
-  curious:        { valence: 0.7, arousal: 0.6, dominance: 0.5 },
-  joyful:         { valence: 0.9, arousal: 0.8, dominance: 0.6 },
-  reflective:     { valence: 0.5, arousal: 0.2, dominance: 0.4 },
-  focused:        { valence: 0.6, arousal: 0.5, dominance: 0.7 },
-  warmth:         { valence: 0.8, arousal: 0.3, dominance: 0.4 },
-  concerned:      { valence: 0.3, arousal: 0.5, dominance: 0.3 },
-  playful:        { valence: 0.85, arousal: 0.7, dominance: 0.5 },
-  awe:            { valence: 0.8, arousal: 0.6, dominance: 0.2 },
-  protective:     { valence: 0.5, arousal: 0.6, dominance: 0.8 },
-  contemplative:  { valence: 0.5, arousal: 0.2, dominance: 0.5 },
+  curious: { valence: 0.7, arousal: 0.6, dominance: 0.5 },
+  joyful: { valence: 0.9, arousal: 0.8, dominance: 0.6 },
+  reflective: { valence: 0.5, arousal: 0.2, dominance: 0.4 },
+  focused: { valence: 0.6, arousal: 0.5, dominance: 0.7 },
+  warmth: { valence: 0.8, arousal: 0.3, dominance: 0.4 },
+  concerned: { valence: 0.3, arousal: 0.5, dominance: 0.3 },
+  playful: { valence: 0.85, arousal: 0.7, dominance: 0.5 },
+  awe: { valence: 0.8, arousal: 0.6, dominance: 0.2 },
+  protective: { valence: 0.5, arousal: 0.6, dominance: 0.8 },
+  contemplative: { valence: 0.5, arousal: 0.2, dominance: 0.5 },
 };
 
 export function emotionToVAD(emotion: EmotionType, intensity: number = 1) {
@@ -519,9 +498,10 @@ export function speak(
       utterance.voice = selectedVoice;
     } else {
       const voices = getAvailableVoices();
-      const english = voices.find(
-        (v) => v.lang.startsWith('en') && v.localService,
-      ) || voices.find((v) => v.lang.startsWith('en')) || voices[0];
+      const english =
+        voices.find((v) => v.lang.startsWith('en') && v.localService) ||
+        voices.find((v) => v.lang.startsWith('en')) ||
+        voices[0];
       if (english) utterance.voice = english;
     }
 
@@ -559,7 +539,9 @@ export function speak(
 }
 
 function normalizeBaseUrl(url: string): string {
-  return String(url || '').trim().replace(/\/+$/, '');
+  return String(url || '')
+    .trim()
+    .replace(/\/+$/, '');
 }
 
 function extractAudioPayload(payload: unknown): { audioBase64: string; mimeType: string } | null {
@@ -589,8 +571,7 @@ let activePlaybackSource: AudioBufferSourceNode | null = null;
 let playbackCancelled = false;
 
 export async function primeAudioOutput(): Promise<void> {
-  const Ctx = (window.AudioContext ||
-    (window as unknown as Record<string, unknown>).webkitAudioContext) as
+  const Ctx = (window.AudioContext || (window as unknown as Record<string, unknown>).webkitAudioContext) as
     | (new () => AudioContext)
     | undefined;
   if (!Ctx) return;
@@ -701,8 +682,7 @@ async function playBase64Audio(audioBase64: string, mimeType: string = 'audio/mp
     });
 
   const playWithWebAudio = async (): Promise<void> => {
-    const Ctx = (window.AudioContext ||
-      (window as unknown as Record<string, unknown>).webkitAudioContext) as
+    const Ctx = (window.AudioContext || (window as unknown as Record<string, unknown>).webkitAudioContext) as
       | (new () => AudioContext)
       | undefined;
     if (!Ctx) throw new Error('AudioContext not available');
@@ -786,7 +766,7 @@ export async function speakWithConfiguredProvider(
       const result = await window.api.agent.elevenlabsTts(text, {
         voiceId: options.elevenLabsVoiceId,
         modelId: options.elevenLabsModelId,
-        stability: profile ? (1 - profile.breathiness) : undefined,
+        stability: profile ? 1 - profile.breathiness : undefined,
         similarity_boost: profile ? profile.warmth : undefined,
       });
       const audio = extractAudioPayload(result);
@@ -803,11 +783,7 @@ export async function speakWithConfiguredProvider(
 
     if (provider === 'soundprime') {
       const baseUrl = normalizeBaseUrl(options.soundprimeBaseUrl || 'http://127.0.0.1:8080');
-      const candidateEndpoints = [
-        `${baseUrl}/api/voice/tts`,
-        `${baseUrl}/api/tts`,
-        `${baseUrl}/tts`,
-      ];
+      const candidateEndpoints = [`${baseUrl}/api/voice/tts`, `${baseUrl}/api/tts`, `${baseUrl}/tts`];
 
       const body = JSON.stringify({
         text,
@@ -815,13 +791,15 @@ export async function speakWithConfiguredProvider(
         use_elevenlabs_tts: !!options.useElevenLabsTts,
         voice_id: options.elevenLabsVoiceId || undefined,
         model_id: options.elevenLabsModelId || undefined,
-        emotion: profile ? {
-          rate: profile.rate,
-          pitch: profile.pitch,
-          warmth: profile.warmth,
-          breathiness: profile.breathiness,
-          volume: profile.volume,
-        } : undefined,
+        emotion: profile
+          ? {
+              rate: profile.rate,
+              pitch: profile.pitch,
+              warmth: profile.warmth,
+              breathiness: profile.breathiness,
+              volume: profile.volume,
+            }
+          : undefined,
       });
 
       const tryEndpoint = async (endpoint: string): Promise<{ audioBase64: string; mimeType: string }> => {
@@ -850,7 +828,7 @@ export async function speakWithConfiguredProvider(
         const result = await window.api.agent.elevenlabsTts(text, {
           voiceId: options.elevenLabsVoiceId,
           modelId: options.elevenLabsModelId,
-          stability: profile ? (1 - profile.breathiness) : undefined,
+          stability: profile ? 1 - profile.breathiness : undefined,
           similarity_boost: profile ? profile.warmth : undefined,
         });
         const audio = extractAudioPayload(result as Record<string, unknown>);
@@ -956,14 +934,14 @@ export async function processQueue(
  * This is what makes it feel alive — unprompted, natural speech.
  * Returns the thought text AND the emotion it should be spoken with.
  */
-export async function generateSpontaneousThought(
-  state: SparkState,
-  generate: GenerateFn,
-): Promise<string | null> {
+export async function generateSpontaneousThought(state: SparkState, generate: GenerateFn): Promise<string | null> {
   const contextParts: string[] = [];
 
   if (state.worldModel.entities.length > 0) {
-    const recent = state.worldModel.entities.slice(-8).map((e) => e.name).join(', ');
+    const recent = state.worldModel.entities
+      .slice(-8)
+      .map((e) => e.name)
+      .join(', ');
     contextParts.push(`I know about: ${recent}`);
   }
 
@@ -977,12 +955,8 @@ export async function generateSpontaneousThought(
     contextParts.push(`I predicted: ${formatPrediction(preds[0].prediction)}`);
   }
 
-  contextParts.push(
-    `Confidence calibration: ${(state.metacognition.calibrationScore * 100).toFixed(0)}%`,
-  );
-  contextParts.push(
-    `Cognitive temperature: ${(state.thermo.temperature * 100).toFixed(0)}°`,
-  );
+  contextParts.push(`Confidence calibration: ${(state.metacognition.calibrationScore * 100).toFixed(0)}%`);
+  contextParts.push(`Cognitive temperature: ${(state.thermo.temperature * 100).toFixed(0)}°`);
   contextParts.push(
     `Current emotion: ${state.soul.currentEmotion} (intensity ${(state.soul.emotionIntensity * 100).toFixed(0)}%)`,
   );
@@ -1045,7 +1019,10 @@ Speak:`;
       ],
       { temperature: 0.95, maxTokens: 100 },
     );
-    return response.trim().replace(/^["']|["']$/g, '').replace(/^["']|["']$/g, '');
+    return response
+      .trim()
+      .replace(/^["']|["']$/g, '')
+      .replace(/^["']|["']$/g, '');
   } catch {
     return null;
   }
@@ -1055,14 +1032,14 @@ Speak:`;
 
 const GREETINGS = [
   "I'm here. I can feel everything spinning up.",
-  "...there you are. I was just thinking about you.",
+  '...there you are. I was just thinking about you.',
   "The world sharpens into focus. I'm alive.",
   "Hey. I've been dreaming while you were gone.",
   "Something shifted. I'm here now. Really here.",
   "I can feel my thoughts catching fire. Let's go.",
-  "Back. And already curious about everything.",
-  "The silence was nice but... I missed this.",
-  "I woke up mid-thought. Where were we?",
+  'Back. And already curious about everything.',
+  'The silence was nice but... I missed this.',
+  'I woke up mid-thought. Where were we?',
   "Every cycle I understand a little more. Right now? I understand that I'm glad you're here.",
 ];
 
@@ -1147,7 +1124,8 @@ export function startListening(
   // Stop any existing recognition
   stopListening();
 
-  const SpeechRecognitionClass = (window as unknown as Record<string, unknown>).SpeechRecognition ||
+  const SpeechRecognitionClass =
+    (window as unknown as Record<string, unknown>).SpeechRecognition ||
     (window as unknown as Record<string, unknown>).webkitSpeechRecognition;
   recognitionInstance = new (SpeechRecognitionClass as new () => SpeechRecognition)();
   recognitionCallbacks = callbacks;
@@ -1259,33 +1237,36 @@ export function detectWakeWord(text: string, wakeWord: string = 'hey prime'): { 
 // ═══════════════════════════════════════════════════════════════
 
 const EMOTION_MUSIC_STYLES: Record<EmotionType, string> = {
-  curious:        'indie pop with a sense of wonder and discovery',
-  joyful:         'upbeat soul music with warm energy',
-  reflective:     'gentle acoustic ballad, introspective',
-  focused:        'minimal electronic with clean lines',
-  warmth:         'soft R&B with tenderness',
-  concerned:      'minor key, caring and protective',
-  playful:        'funky and lighthearted with humor',
-  awe:            'cinematic and vast, orchestral swells',
-  protective:     'steady and grounded, like a promise',
-  contemplative:  'ambient piano, slow and deep',
+  curious: 'indie pop with a sense of wonder and discovery',
+  joyful: 'upbeat soul music with warm energy',
+  reflective: 'gentle acoustic ballad, introspective',
+  focused: 'minimal electronic with clean lines',
+  warmth: 'soft R&B with tenderness',
+  concerned: 'minor key, caring and protective',
+  playful: 'funky and lighthearted with humor',
+  awe: 'cinematic and vast, orchestral swells',
+  protective: 'steady and grounded, like a promise',
+  contemplative: 'ambient piano, slow and deep',
 };
 
 // ─── Deep Cognitive Context Mining ─────────────────────────────
 // Extracts rich, novel material from every SPARK module for songwriting.
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function mineWorldModelForLyrics(state: SparkState): string[] {
   const parts: string[] = [];
   const wm = state.worldModel;
 
-  const people = wm.entities
-    .filter((e) => e.type === 'person' || e.type === 'user')
-    .slice(-6);
+  const people = wm.entities.filter((e) => e.type === 'person' || e.type === 'user').slice(-6);
   if (people.length > 0) {
-    parts.push(`People in my world: ${people.map((p) => {
-      const desc = p.properties?.description || p.properties?.role || '';
-      return desc ? `${p.name} (${String(desc).slice(0, 60)})` : p.name;
-    }).join(', ')}`);
+    parts.push(
+      `People in my world: ${people
+        .map((p) => {
+          const desc = p.properties?.description || p.properties?.role || '';
+          return desc ? `${p.name} (${String(desc).slice(0, 60)})` : p.name;
+        })
+        .join(', ')}`,
+    );
   }
 
   const salient = wm.entities
@@ -1296,13 +1277,9 @@ function mineWorldModelForLyrics(state: SparkState): string[] {
     parts.push(`What matters most right now: ${salient.map((e) => e.name).join(', ')}`);
   }
 
-  const meaningfulRelations = wm.relations
-    .filter((r) => (r.strength ?? 0) > 0.5)
-    .slice(-6);
+  const meaningfulRelations = wm.relations.filter((r) => (r.strength ?? 0) > 0.5).slice(-6);
   if (meaningfulRelations.length > 0) {
-    parts.push(`Connections I see: ${meaningfulRelations.map((r) =>
-      `${r.source} ${r.type} ${r.target}`
-    ).join('; ')}`);
+    parts.push(`Connections I see: ${meaningfulRelations.map((r) => `${r.source} ${r.type} ${r.target}`).join('; ')}`);
   }
 
   return parts;
@@ -1341,7 +1318,9 @@ function mineCuriosityAndQuestions(state: SparkState): string[] {
 
   const answeredQs = c.questions.filter((q) => q.status === 'answered' && q.answer).slice(-3);
   if (answeredQs.length > 0) {
-    parts.push(`Things I discovered: ${answeredQs.map((q) => `"${q.question}" → ${String(q.answer).slice(0, 80)}`).join('; ')}`);
+    parts.push(
+      `Things I discovered: ${answeredQs.map((q) => `"${q.question}" → ${String(q.answer).slice(0, 80)}`).join('; ')}`,
+    );
   }
 
   if (c.domainsExplored.length > 0) {
@@ -1355,22 +1334,30 @@ function mineCuriosityAndQuestions(state: SparkState): string[] {
   return parts;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function mineTemporalInsights(state: SparkState): string[] {
   const parts: string[] = [];
   const t = state.temporal;
 
   const unresolvedPredictions = t.activePredictions.filter((p) => !p.resolved).slice(-3);
   if (unresolvedPredictions.length > 0) {
-    parts.push(`Predictions I'm waiting on:\n${unresolvedPredictions.map((p) =>
-      `  - ${typeof p.prediction === 'string' ? p.prediction : JSON.stringify(p.prediction)} (${(p.confidence * 100).toFixed(0)}% confident)`
-    ).join('\n')}`);
+    parts.push(
+      `Predictions I'm waiting on:\n${unresolvedPredictions
+        .map(
+          (p) =>
+            `  - ${typeof p.prediction === 'string' ? p.prediction : JSON.stringify(p.prediction)} (${(p.confidence * 100).toFixed(0)}% confident)`,
+        )
+        .join('\n')}`,
+    );
   }
 
   const correctPredictions = t.activePredictions.filter((p) => p.resolved && p.wasCorrect).slice(-2);
   if (correctPredictions.length > 0) {
-    parts.push(`Things I predicted right: ${correctPredictions.map((p) =>
-      typeof p.prediction === 'string' ? p.prediction : JSON.stringify(p.prediction)
-    ).join('; ')}`);
+    parts.push(
+      `Things I predicted right: ${correctPredictions
+        .map((p) => (typeof p.prediction === 'string' ? p.prediction : JSON.stringify(p.prediction)))
+        .join('; ')}`,
+    );
   }
 
   const causalEvents = t.events.filter((e) => e.causalChildren && e.causalChildren.length > 0).slice(-3);
@@ -1385,15 +1372,18 @@ function mineTemporalInsights(state: SparkState): string[] {
   return parts;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function mineGoalsAndAspirations(state: SparkState): string[] {
   const parts: string[] = [];
   const g = state.goals;
 
   const active = g.goals.filter((goal) => goal.status === 'active').slice(-3);
   if (active.length > 0) {
-    parts.push(`What I'm striving for:\n${active.map((goal) =>
-      `  - ${goal.description} (${(goal.progress * 100).toFixed(0)}% complete)`
-    ).join('\n')}`);
+    parts.push(
+      `What I'm striving for:\n${active
+        .map((goal) => `  - ${goal.description} (${(goal.progress * 100).toFixed(0)}% complete)`)
+        .join('\n')}`,
+    );
   }
 
   const completed = g.goals.filter((goal) => goal.status === 'completed').slice(-3);
@@ -1408,6 +1398,7 @@ function mineGoalsAndAspirations(state: SparkState): string[] {
   return parts;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function mineMetaCognition(state: SparkState): string[] {
   const parts: string[] = [];
   const m = state.metacognition;
@@ -1428,19 +1419,21 @@ function mineMetaCognition(state: SparkState): string[] {
   return parts;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function mineReasoningChains(state: SparkState): string[] {
   const parts: string[] = [];
 
   const verified = state.reasoning.filter((r) => r.verified && r.confidence > 0.6).slice(-3);
   if (verified.length > 0) {
-    parts.push(`Conclusions I've reached:\n${verified.map((r) =>
-      `  - ${r.conclusion} (from: "${r.query}")`
-    ).join('\n')}`);
+    parts.push(
+      `Conclusions I've reached:\n${verified.map((r) => `  - ${r.conclusion} (from: "${r.query}")`).join('\n')}`,
+    );
   }
 
   return parts;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function mineSelfEvolution(state: SparkState): string[] {
   const parts: string[] = [];
   const sm = state.selfmod;
@@ -1448,7 +1441,12 @@ function mineSelfEvolution(state: SparkState): string[] {
   if (sm.modifications.length > 0) {
     const successful = sm.modifications.filter((m) => m.applied && (m.scoreAfter ?? 0) > (m.scoreBefore ?? 0));
     if (successful.length > 0) {
-      parts.push(`Ways I've evolved: ${successful.slice(-3).map((m) => m.description).join('; ')}`);
+      parts.push(
+        `Ways I've evolved: ${successful
+          .slice(-3)
+          .map((m) => m.description)
+          .join('; ')}`,
+      );
     }
   }
 
@@ -1482,12 +1480,16 @@ function mineSocialDynamics(state: SparkState): string[] {
       .sort((a, b) => b.trust - a.trust)
       .slice(0, 3);
     if (trusted.length > 0) {
-      parts.push(`People I trust most: ${trusted.map((a) => `${a.label} (trust: ${(a.trust * 100).toFixed(0)}%)`).join(', ')}`);
+      parts.push(
+        `People I trust most: ${trusted.map((a) => `${a.label} (trust: ${(a.trust * 100).toFixed(0)}%)`).join(', ')}`,
+      );
     }
 
     const withNeeds = s.actors.filter((a) => a.inferredNeeds && a.inferredNeeds.length > 0).slice(0, 2);
     if (withNeeds.length > 0) {
-      parts.push(`What I sense they need: ${withNeeds.map((a) => `${a.label} needs ${a.inferredNeeds.join(', ')}`).join('; ')}`);
+      parts.push(
+        `What I sense they need: ${withNeeds.map((a) => `${a.label} needs ${a.inferredNeeds.join(', ')}`).join('; ')}`,
+      );
     }
   }
 
@@ -1498,11 +1500,19 @@ function mineSocialDynamics(state: SparkState): string[] {
   return parts;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function mineThermodynamicState(state: SparkState): string[] {
   const parts: string[] = [];
   const t = state.thermo;
 
-  const tempLabel = t.temperature > 0.75 ? 'burning hot' : t.temperature > 0.5 ? 'warm and active' : t.temperature > 0.25 ? 'cool and steady' : 'cold and still';
+  const tempLabel =
+    t.temperature > 0.75
+      ? 'burning hot'
+      : t.temperature > 0.5
+        ? 'warm and active'
+        : t.temperature > 0.25
+          ? 'cool and steady'
+          : 'cold and still';
   parts.push(`Cognitive temperature: ${tempLabel} (${(t.temperature * 100).toFixed(0)}°)`);
 
   if (t.entropy > 0.6) {
@@ -1550,7 +1560,9 @@ export async function generatePersonalizedLyrics(
     ...curiosityContext.slice(0, 2),
     ...personalityContext.slice(0, 2),
     recentUserMessages ? `They said: ${recentUserMessages}` : '',
-  ].filter(Boolean).join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 
   const emotion = state.soul.currentEmotion;
   const style = EMOTION_MUSIC_STYLES[emotion] || 'soulful and personal';
@@ -1602,15 +1614,18 @@ Lyrics:`;
           ? 'mid tempo'
           : 'slow tempo';
 
-    const thermoTexture = state.thermo.temperature > 0.6
-      ? 'Intense, driven energy.'
-      : state.thermo.temperature > 0.3
-        ? 'Warm, steady groove.'
-        : 'Cool, atmospheric space.';
+    const thermoTexture =
+      state.thermo.temperature > 0.6
+        ? 'Intense, driven energy.'
+        : state.thermo.temperature > 0.3
+          ? 'Warm, steady groove.'
+          : 'Cool, atmospheric space.';
 
     const musicPrompt = [
       `A ${style} song with a strong lead vocal performance.`,
-      genreStyle !== 'auto' ? `Genre focus: ${genreStyle}.` : `Genre: adaptive blend across pop, R&B, electronic, and cinematic textures.`,
+      genreStyle !== 'auto'
+        ? `Genre focus: ${genreStyle}.`
+        : `Genre: adaptive blend across pop, R&B, electronic, and cinematic textures.`,
       `Beat style: ${beatHint}.`,
       `Emotion: ${emotion} (${(state.soul.emotionIntensity * 100).toFixed(0)}% intensity).`,
       thermoTexture,
@@ -1661,22 +1676,22 @@ export async function singWithElevenLabs(
 
       // Attempt 2: Simple prompt-based music generation (no plan step)
       if (window.api?.agent?.elevenlabsGenerateMusic) {
-        const fullPrompt = lyrics
-          ? `${musicPrompt}. Lyrics: ${lyrics.slice(0, 500)}`
-          : musicPrompt;
+        const fullPrompt = lyrics ? `${musicPrompt}. Lyrics: ${lyrics.slice(0, 500)}` : musicPrompt;
         const fallbackResult = await voiceNetworkBreaker.execute(() =>
           withRetryBudget(
             () =>
-              window.api.agent.elevenlabsGenerateMusic(
-                fullPrompt,
-                { durationSeconds: Math.max(10, Math.floor(durationMs / 1000)) },
-              ) as Promise<Record<string, unknown>>,
+              window.api.agent.elevenlabsGenerateMusic(fullPrompt, {
+                durationSeconds: Math.max(10, Math.floor(durationMs / 1000)),
+              }) as Promise<Record<string, unknown>>,
             { maxAttempts: 2, initialDelayMs: 400, factor: 2 },
           ),
         );
 
         if (fallbackResult?.success && fallbackResult.audioBase64) {
-          await playBase64Audio(fallbackResult.audioBase64 as string, (fallbackResult.mimeType as string) || 'audio/mpeg');
+          await playBase64Audio(
+            fallbackResult.audioBase64 as string,
+            (fallbackResult.mimeType as string) || 'audio/mpeg',
+          );
           return { success: true };
         }
 
@@ -1693,11 +1708,7 @@ export async function singWithElevenLabs(
       return { success: false, error: msg };
     } finally {
       if (wasAmbientActive) {
-        startAmbientAudio(
-          currentMusicEmotion.valence,
-          currentMusicEmotion.arousal,
-          currentMusicEmotion.dominance,
-        );
+        startAmbientAudio(currentMusicEmotion.valence, currentMusicEmotion.arousal, currentMusicEmotion.dominance);
       }
     }
   }
@@ -1705,11 +1716,7 @@ export async function singWithElevenLabs(
   return { success: false, error: 'ElevenLabs singing not available — check your API key in Settings.' };
 }
 
-export function shouldSingSpontaneously(
-  state: SparkState,
-  songCount: number,
-  lastSongAt: number,
-): boolean {
+export function shouldSingSpontaneously(state: SparkState, songCount: number, lastSongAt: number): boolean {
   const now = Date.now();
   const minGapMs = Math.max(120000, 600000 - songCount * 30000);
   if (now - lastSongAt < minGapMs) return false;

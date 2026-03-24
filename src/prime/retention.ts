@@ -6,15 +6,15 @@
 // ═══════════════════════════════════════════════════════════════
 
 export interface RetentionPolicy {
-  ledgerMaxAgeDays: number;          // delete completed ledger runs older than this
-  ledgerMaxCount: number;            // keep at most this many ledger files
-  rollbackMaxAgeDays: number;        // remove rollback entries + backups older than this
-  rollbackMaxCount: number;          // keep at most this many rollback entries
-  auditMaxEntries: number;           // cap audit log entries
-  ethicalMemoryMaxEntries: number;   // cap ethical memory
-  vectorMemoryMaxEntries: number;    // cap vector store
-  vectorMemoryMaxAgeDays: number;    // prune vectors older than this
-  judgmentMaxEntries: number;        // cap conscience judgments
+  ledgerMaxAgeDays: number; // delete completed ledger runs older than this
+  ledgerMaxCount: number; // keep at most this many ledger files
+  rollbackMaxAgeDays: number; // remove rollback entries + backups older than this
+  rollbackMaxCount: number; // keep at most this many rollback entries
+  auditMaxEntries: number; // cap audit log entries
+  ethicalMemoryMaxEntries: number; // cap ethical memory
+  vectorMemoryMaxEntries: number; // cap vector store
+  vectorMemoryMaxAgeDays: number; // prune vectors older than this
+  judgmentMaxEntries: number; // cap conscience judgments
 }
 
 export const DEFAULT_RETENTION_POLICY: RetentionPolicy = {
@@ -51,10 +51,7 @@ export function trimByAge<T extends { timestamp: number }>(
   return { kept, removed: entries.length - kept.length };
 }
 
-export function trimByCount<T>(
-  entries: T[],
-  maxCount: number,
-): { kept: T[]; removed: number } {
+export function trimByCount<T>(entries: T[], maxCount: number): { kept: T[]; removed: number } {
   if (entries.length <= maxCount) return { kept: entries, removed: 0 };
   const kept = entries.slice(-maxCount);
   return { kept, removed: entries.length - maxCount };
@@ -74,10 +71,7 @@ export function applyEthicalMemoryRetention<T extends { timestamp: number }>(
 /**
  * Apply retention to conscience judgments.
  */
-export function applyJudgmentRetention<T>(
-  entries: T[],
-  policy: RetentionPolicy,
-): { kept: T[]; removed: number } {
+export function applyJudgmentRetention<T>(entries: T[], policy: RetentionPolicy): { kept: T[]; removed: number } {
   return trimByCount(entries, policy.judgmentMaxEntries);
 }
 

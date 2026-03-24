@@ -154,13 +154,13 @@ function buildOrchestraPrompt(config: OrchestraConfig): string {
       : config.beatStyle === 'soft'
         ? 'Gentle percussion, softer groove, warm low end.'
         : 'Balanced modern beat with clear rhythm and tasteful drums.';
-  const genreLine = config.genreStyle && config.genreStyle !== 'auto'
-    ? `Genre focus: ${config.genreStyle} instrumental.`
-    : '';
+  const genreLine =
+    config.genreStyle && config.genreStyle !== 'auto' ? `Genre focus: ${config.genreStyle} instrumental.` : '';
 
-  const crossfadeLine = previousEmotion && previousEmotion !== config.emotion
-    ? `Transitioning from ${previousEmotion} mood — blend smoothly.`
-    : '';
+  const crossfadeLine =
+    previousEmotion && previousEmotion !== config.emotion
+      ? `Transitioning from ${previousEmotion} mood — blend smoothly.`
+      : '';
 
   return [
     `Instrumental only. No vocals.`,
@@ -174,7 +174,9 @@ function buildOrchestraPrompt(config: OrchestraConfig): string {
     `Mood: ${config.emotion}. ${intensityTag}.`,
     `Seamless loop-friendly background for a living AI presence.`,
     context ? `Context hint: ${context}.` : '',
-  ].filter(Boolean).join(' ');
+  ]
+    .filter(Boolean)
+    .join(' ');
 }
 
 function decodeBase64ToBlobUrl(audioBase64: string, mimeType: string = 'audio/mpeg'): string {
@@ -204,11 +206,11 @@ async function generateOrchestraTrack(force: boolean = false): Promise<void> {
     previousEmotion = activeConfig.emotion;
     const prompt = buildOrchestraPrompt(activeConfig);
     const durationSeconds = clampRefreshSeconds(activeConfig.refreshSeconds);
-    const response = await window.api.agent.elevenlabsGenerateMusic(prompt, {
+    const response = (await window.api.agent.elevenlabsGenerateMusic(prompt, {
       modelId: activeConfig.musicModelId,
       durationSeconds,
       saveToDisk: false,
-    }) as MusicGenerationResponse | null;
+    })) as MusicGenerationResponse | null;
 
     if (!response?.success || !response?.audioBase64) {
       lastGenerationError = response?.error || 'No audio data returned';
@@ -344,4 +346,3 @@ export function getOrchestraDebugState(): OrchestraDebugState {
     refreshSeconds: activeConfig?.refreshSeconds ?? 0,
   };
 }
-

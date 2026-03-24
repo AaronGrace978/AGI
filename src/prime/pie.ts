@@ -68,7 +68,7 @@ const PRIMITIVE_COMPLEXITY: Record<GridPrimitiveType, number> = {
 };
 
 function cloneGrid(g: Grid): Grid {
-  return g.map(row => [...row]);
+  return g.map((row) => [...row]);
 }
 
 // ─── HASHING / MEMOIZATION ──────────────────────────────────────
@@ -325,9 +325,15 @@ function anchorColsBottomKeepFirstTwoLast(grid: Grid): Grid {
   for (let c = cols - 1; c >= 0; c--) {
     let has = false;
     for (let r = 0; r < rows; r++) {
-      if (grid[r][c] !== 0) { has = true; break; }
+      if (grid[r][c] !== 0) {
+        has = true;
+        break;
+      }
     }
-    if (has) { rightmostNonZeroCol = c; break; }
+    if (has) {
+      rightmostNonZeroCol = c;
+      break;
+    }
   }
   const last = rightmostNonZeroCol >= 0 ? rightmostNonZeroCol : cols - 1;
   const anchors: number[] = new Array(cols).fill(0);
@@ -352,7 +358,10 @@ function fillLastTwoWithRightmostNonZero(grid: Grid): Grid {
     if (row.length < 2) continue;
     let v = 0;
     for (let c = row.length - 1; c >= 0; c--) {
-      if (row[c] !== 0) { v = row[c]; break; }
+      if (row[c] !== 0) {
+        v = row[c];
+        break;
+      }
     }
     if (v !== 0) {
       row[row.length - 2] = v;
@@ -429,8 +438,11 @@ function tileMajorityRow(grid: Grid): Grid {
   let bestRow = 0;
   let bestNonZero = 0;
   for (let r = 0; r < grid.length; r++) {
-    const nz = grid[r].filter(v => v !== 0).length;
-    if (nz > bestNonZero) { bestNonZero = nz; bestRow = r; }
+    const nz = grid[r].filter((v) => v !== 0).length;
+    if (nz > bestNonZero) {
+      bestNonZero = nz;
+      bestRow = r;
+    }
   }
   return grid.map(() => [...grid[bestRow]]);
 }
@@ -444,7 +456,10 @@ function tileMajorityCol(grid: Grid): Grid {
   for (let c = 0; c < cols; c++) {
     let nz = 0;
     for (let r = 0; r < rows; r++) if (grid[r][c] !== 0) nz++;
-    if (nz > bestNonZero) { bestNonZero = nz; bestCol = c; }
+    if (nz > bestNonZero) {
+      bestNonZero = nz;
+      bestCol = c;
+    }
   }
   const out: Grid = [];
   for (let r = 0; r < rows; r++) {
@@ -493,17 +508,17 @@ function rotateCCW(grid: Grid): Grid {
 }
 
 function mirrorH(grid: Grid): Grid {
-  return grid.map(row => [...row].reverse());
+  return grid.map((row) => [...row].reverse());
 }
 
 function mirrorV(grid: Grid): Grid {
-  return [...grid].reverse().map(row => [...row]);
+  return [...grid].reverse().map((row) => [...row]);
 }
 
 function stripZerosToValue(grid: Grid): Grid {
   const out = cloneGrid(grid);
   for (let r = 0; r < out.length; r++) {
-    const nonZero = out[r].filter(v => v !== 0);
+    const nonZero = out[r].filter((v) => v !== 0);
     if (nonZero.length === 1) {
       for (let c = 0; c < out[r].length; c++) out[r][c] = nonZero[0];
     }
@@ -521,7 +536,10 @@ function findAllZeroDividerCol(grid: Grid): number {
   for (let c = 1; c < cols - 1; c++) {
     let allZero = true;
     for (let r = 0; r < grid.length; r++) {
-      if ((grid[r]?.[c] ?? 0) !== 0) { allZero = false; break; }
+      if ((grid[r]?.[c] ?? 0) !== 0) {
+        allZero = false;
+        break;
+      }
     }
     if (allZero) return c;
   }
@@ -530,7 +548,10 @@ function findAllZeroDividerCol(grid: Grid): number {
   for (let c = 0; c < cols; c++) {
     let allZero = true;
     for (let r = 0; r < grid.length; r++) {
-      if ((grid[r]?.[c] ?? 0) !== 0) { allZero = false; break; }
+      if ((grid[r]?.[c] ?? 0) !== 0) {
+        allZero = false;
+        break;
+      }
     }
     if (allZero) return c;
   }
@@ -608,7 +629,10 @@ function paintDividerColWithLeftmostColor(grid: Grid): Grid {
   for (let r = 0; r < out.length; r++) {
     let hasDominantLeft = false;
     for (let c = 0; c < divider; c++) {
-      if ((out[r][c] ?? 0) === dominant) { hasDominantLeft = true; break; }
+      if ((out[r][c] ?? 0) === dominant) {
+        hasDominantLeft = true;
+        break;
+      }
     }
     if (hasDominantLeft) out[r][divider] = dominant;
   }
@@ -644,7 +668,10 @@ function extendDominantBBoxRightOne(grid: Grid): Grid {
   for (let r = 0; r < out.length; r++) {
     let has = false;
     for (let c = 0; c <= rightmost; c++) {
-      if (out[r][c] === dominant) { has = true; break; }
+      if (out[r][c] === dominant) {
+        has = true;
+        break;
+      }
     }
     if (!has) continue;
     if (out[r][targetCol] === 0) out[r][targetCol] = dominant;
@@ -663,7 +690,10 @@ function inBounds(grid: Grid, r: number, c: number): boolean {
 
 function bboxOfPoints(points: Pt[]): { r0: number; c0: number; r1: number; c1: number } | null {
   if (points.length === 0) return null;
-  let r0 = points[0].r, r1 = points[0].r, c0 = points[0].c, c1 = points[0].c;
+  let r0 = points[0].r,
+    r1 = points[0].r,
+    c0 = points[0].c,
+    c1 = points[0].c;
   for (const p of points) {
     if (p.r < r0) r0 = p.r;
     if (p.r > r1) r1 = p.r;
@@ -688,7 +718,12 @@ function connectedComponents4(grid: Grid): Array<{ points: Pt[]; colors: number[
   const cols = rows ? grid[0].length : 0;
   const seen = new Array(rows).fill(0).map(() => new Array(cols).fill(false));
   const comps: Array<{ points: Pt[]; colors: number[] }> = [];
-  const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+  const dirs = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ];
 
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
@@ -841,7 +876,12 @@ function floodfillZerosFromOrigin(grid: Grid, fillColor: number): Grid {
   const cols = out[0].length;
   const q: Pt[] = [{ r: 0, c: 0 }];
   out[0][0] = fillColor;
-  const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+  const dirs = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ];
   while (q.length) {
     const cur = q.pop()!;
     for (const [dr, dc] of dirs) {
@@ -944,9 +984,10 @@ const EXECUTORS: Record<GridPrimitiveType, PrimitiveExecutor> = {
 
 export function executeProgram(grid: Grid, program: GridProgram): Grid {
   let current = cloneGrid(grid);
-  const steps = program.steps && program.steps.length > 0
-    ? program.steps
-    : (program.primitives || []).map((p) => ({ prim: p as GridPrimitiveType, args: undefined }));
+  const steps =
+    program.steps && program.steps.length > 0
+      ? program.steps
+      : (program.primitives || []).map((p) => ({ prim: p as GridPrimitiveType, args: undefined }));
   for (const step of steps) {
     const executor = EXECUTORS[step.prim];
     if (!executor) return current;
@@ -1005,7 +1046,10 @@ function applyPrimitiveCached(
 ): CachedExec {
   const inHash = hashGrid(input);
   const argKey = args
-    ? Object.keys(args).sort().map((k) => `${k}=${args[k]}`).join(',')
+    ? Object.keys(args)
+        .sort()
+        .map((k) => `${k}=${args[k]}`)
+        .join(',')
     : '';
   const key = `${prim}(${argKey}):${inHash}`;
   const hit = execCache.get(key) || GLOBAL_EXEC_CACHE.get(key);
@@ -1026,7 +1070,7 @@ type SearchNode = {
   steps: GridStep[];
   complexity: number;
   label: string;
-  outputs: Grid[];      // one per training pair input
+  outputs: Grid[]; // one per training pair input
   outputHashes: string[]; // one per training pair input
   passCount: number;
   failedPairs: number[];
@@ -1081,7 +1125,10 @@ function compareScore(a: SearchNode, b: SearchNode): number {
 
 function stepLabel(step: GridStep): string {
   if (!step.args || Object.keys(step.args).length === 0) return primitiveLabel(step.prim);
-  const args = Object.keys(step.args).sort().map((k) => `${k}=${step.args![k]}`).join(',');
+  const args = Object.keys(step.args)
+    .sort()
+    .map((k) => `${k}=${step.args![k]}`)
+    .join(',');
   return `${primitiveLabel(step.prim)}(${args})`;
 }
 
@@ -1130,8 +1177,18 @@ function searchPrograms(
   const inPalette = new Set<number>();
   const outPalette = new Set<number>();
   for (const p of pairs) {
-    for (const row of p.input) for (const v of row) if (v !== 0) { palette.add(v); inPalette.add(v); }
-    for (const row of p.output) for (const v of row) if (v !== 0) { palette.add(v); outPalette.add(v); }
+    for (const row of p.input)
+      for (const v of row)
+        if (v !== 0) {
+          palette.add(v);
+          inPalette.add(v);
+        }
+    for (const row of p.output)
+      for (const v of row)
+        if (v !== 0) {
+          palette.add(v);
+          outPalette.add(v);
+        }
   }
   const colors = [...palette].slice(0, 12);
   const palettesDiffer = (() => {
@@ -1309,13 +1366,7 @@ const SINGLE_PRIMITIVES: GridPrimitiveType[] = [
   'strip_zeros_to_value',
 ];
 
-const STRUCTURAL_PRIMITIVES: GridPrimitiveType[] = [
-  'transpose',
-  'rotate_cw',
-  'rotate_ccw',
-  'mirror_h',
-  'mirror_v',
-];
+const STRUCTURAL_PRIMITIVES: GridPrimitiveType[] = ['transpose', 'rotate_cw', 'rotate_ccw', 'mirror_h', 'mirror_v'];
 
 function primitiveLabel(p: GridPrimitiveType): string {
   return p.replace(/_/g, ' ');
@@ -1381,10 +1432,7 @@ export function falsifyProgram(
   return results;
 }
 
-export function runParallelFalsification(
-  programs: GridProgram[],
-  pairs: TrainingPair[],
-): ProgramCandidate[] {
+export function runParallelFalsification(programs: GridProgram[], pairs: TrainingPair[]): ProgramCandidate[] {
   const candidates: ProgramCandidate[] = [];
 
   for (const program of programs) {
@@ -1401,9 +1449,10 @@ export function runParallelFalsification(
       failedPairs,
       falsifications,
       eliminated: passCount < pairs.length,
-      eliminationReason: passCount < pairs.length
-        ? `Failed ${pairs.length - passCount}/${pairs.length} pairs (indices: ${failedPairs.join(',')})`
-        : undefined,
+      eliminationReason:
+        passCount < pairs.length
+          ? `Failed ${pairs.length - passCount}/${pairs.length} pairs (indices: ${failedPairs.join(',')})`
+          : undefined,
     });
   }
 
@@ -1425,10 +1474,7 @@ export function selectMinimalProgram(survivors: ProgramCandidate[]): ProgramCand
   return sorted[0];
 }
 
-export function selectLockedProgram(
-  survivors: ProgramCandidate[],
-  pairs: TrainingPair[],
-): ProgramCandidate | null {
+export function selectLockedProgram(survivors: ProgramCandidate[], pairs: TrainingPair[]): ProgramCandidate | null {
   if (survivors.length === 0) return null;
 
   // First rank by MDL; then among the MDL-frontier, prefer the most robust
@@ -1461,10 +1507,7 @@ export function selectLockedProgram(
 // Generate stress-test inputs to probe program robustness.
 // These are systematic, not LLM-generated.
 
-export function generateAdversarialTests(
-  basePairs: TrainingPair[],
-  lockedProgram: GridProgram,
-): AdversarialTest[] {
+export function generateAdversarialTests(basePairs: TrainingPair[], lockedProgram: GridProgram): AdversarialTest[] {
   const tests: AdversarialTest[] = [];
   if (basePairs.length === 0) return tests;
 
@@ -1628,7 +1671,7 @@ export function runPIEBenchmarkSuite(overrides?: Partial<PIESearchOptions>): PIE
   const details: PIEBenchReport['details'] = [];
   let solved = 0;
   let totalMs = 0;
-  let total = PIE_BENCH_SUITE.length;
+  const total = PIE_BENCH_SUITE.length;
   let advPass = 0;
   let advTotal = 0;
 
@@ -1667,18 +1710,14 @@ export function runPIEBenchmarkSuite(overrides?: Partial<PIESearchOptions>): PIE
 
   // Composite score: solve dominates; speed and robustness are secondary.
   const speedScore = avgMs <= 50 ? 1 : avgMs >= 600 ? 0 : 1 - (avgMs - 50) / 550;
-  const score = Math.max(0, Math.min(1, solveRate * 0.75 + robustnessPassRate * 0.15 + speedScore * 0.10));
+  const score = Math.max(0, Math.min(1, solveRate * 0.75 + robustnessPassRate * 0.15 + speedScore * 0.1));
 
   // Restore caller defaults.
   setPIESearchDefaults(prevDefaults);
   return { solved, total, avgMs, robustnessPassRate, score, details };
 }
 
-export function runPIE(
-  trainingPairs: TrainingPair[],
-  testInput?: Grid,
-  maxDepth: number = 4,
-): PIERunResult {
+export function runPIE(trainingPairs: TrainingPair[], testInput?: Grid, maxDepth: number = 4): PIERunResult {
   // Fast path: if we've already locked a program for the same task signature,
   // reuse it. This prevents repeated heavy searches in chat loops.
   const sig = taskSignature(trainingPairs);
@@ -1689,9 +1728,11 @@ export function runPIE(
     const summary = [
       `PIE(cache): reused locked program for task ${sig}.`,
       `Locked: "${cached.lockedProgramLabel}" (complexity=${cached.lockedProgram.complexity}).`,
-      `Adversarial: ${adversarialTests.filter(t => t.programStillValid).length}/${adversarialTests.length} tests passed.`,
-      testOutput ? `Test output: [${testOutput.map(r => r.join(',')).join(' | ')}]` : '',
-    ].filter(Boolean).join('\n');
+      `Adversarial: ${adversarialTests.filter((t) => t.programStillValid).length}/${adversarialTests.length} tests passed.`,
+      testOutput ? `Test output: [${testOutput.map((r) => r.join(',')).join(' | ')}]` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
     return {
       candidates: [],
       survivors: [],
@@ -1714,10 +1755,7 @@ export function runPIE(
 
   // Convert search nodes to ProgramCandidate (for UI/telemetry).
   // We only materialize falsification evidence for a small subset (top frontier + survivors).
-  const nodesForEvidence = [
-    ...search.survivors.slice(0, 50),
-    ...search.bestFrontier.slice(0, 50),
-  ];
+  const nodesForEvidence = [...search.survivors.slice(0, 50), ...search.bestFrontier.slice(0, 50)];
 
   const nodeToCandidate = (n: SearchNode): ProgramCandidate => {
     const program: GridProgram = {
@@ -1738,9 +1776,10 @@ export function runPIE(
       failedPairs,
       falsifications,
       eliminated: passCount < trainingPairs.length,
-      eliminationReason: passCount < trainingPairs.length
-        ? `Failed ${trainingPairs.length - passCount}/${trainingPairs.length} pairs (indices: ${failedPairs.join(',')})`
-        : undefined,
+      eliminationReason:
+        passCount < trainingPairs.length
+          ? `Failed ${trainingPairs.length - passCount}/${trainingPairs.length} pairs (indices: ${failedPairs.join(',')})`
+          : undefined,
     };
   };
 
@@ -1761,24 +1800,22 @@ export function runPIE(
   );
 
   // 5. ADVERSARIAL — stress-test the locked program
-  const adversarialTests = locked
-    ? generateAdversarialTests(trainingPairs, locked.program)
-    : [];
+  const adversarialTests = locked ? generateAdversarialTests(trainingPairs, locked.program) : [];
 
   // 6. EXECUTE — run locked program on test input
-  const testOutput = locked && testInput
-    ? executeProgram(testInput, locked.program)
-    : null;
+  const testOutput = locked && testInput ? executeProgram(testInput, locked.program) : null;
 
   // 7. SUMMARIZE — no narrative, just facts
-  const eliminated = candidates.filter(c => c.eliminated);
+  const eliminated = candidates.filter((c) => c.eliminated);
   const summary = locked
     ? [
         `PIE: ${search.expansions} expansions evaluated, ${eliminated.length} eliminated (evidence set), ${survivors.length} survived.`,
         `Locked: "${locked.program.label}" (complexity=${locked.program.complexity}, MDL rank≈top).`,
-        `Adversarial: ${adversarialTests.filter(t => t.programStillValid).length}/${adversarialTests.length} tests passed.`,
-        testOutput ? `Test output: [${testOutput.map(r => r.join(',')).join(' | ')}]` : '',
-      ].filter(Boolean).join('\n')
+        `Adversarial: ${adversarialTests.filter((t) => t.programStillValid).length}/${adversarialTests.length} tests passed.`,
+        testOutput ? `Test output: [${testOutput.map((r) => r.join(',')).join(' | ')}]` : '',
+      ]
+        .filter(Boolean)
+        .join('\n')
     : `PIE: ${search.expansions} expansions evaluated, 0 survivors. No program in the DSL explains all training pairs.`;
 
   return {
@@ -1806,14 +1843,22 @@ export function parseGrid(text: string): Grid | null {
   if (trimmed.startsWith('[')) {
     try {
       const parsed = JSON.parse(trimmed);
-      if (Array.isArray(parsed) && parsed.every(row => Array.isArray(row) && row.every((v: unknown) => typeof v === 'number'))) {
+      if (
+        Array.isArray(parsed) &&
+        parsed.every((row) => Array.isArray(row) && row.every((v: unknown) => typeof v === 'number'))
+      ) {
         return parsed as Grid;
       }
-    } catch { /* fall through */ }
+    } catch {
+      /* fall through */
+    }
   }
 
   // Try space-separated rows (newline delimited)
-  const lines = trimmed.split(/\n/).map(l => l.trim()).filter(l => l.length > 0);
+  const lines = trimmed
+    .split(/\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
   if (lines.length === 0) return null;
 
   const grid: Grid = [];
@@ -1825,13 +1870,13 @@ export function parseGrid(text: string): Grid | null {
 
   // Validate rectangular
   const cols = grid[0].length;
-  if (!grid.every(row => row.length === cols)) return null;
+  if (!grid.every((row) => row.length === cols)) return null;
 
   return grid;
 }
 
 export function gridToString(grid: Grid): string {
-  return grid.map(row => row.join(' ')).join('\n');
+  return grid.map((row) => row.join(' ')).join('\n');
 }
 
 // ─── ARC TASK DETECTION ─────────────────────────────────────────
@@ -1878,7 +1923,7 @@ export function detectARCTask(message: string): DetectedARCTask | null {
     testSection.match(/Input\s*:?\s*\n((?:\d[\d\s]*\n?)+)/i);
   if (testMatch) {
     const candidate = parseGrid(testMatch[1]);
-    if (candidate && !pairs.some(p => gridsEqual(p.input, candidate))) {
+    if (candidate && !pairs.some((p) => gridsEqual(p.input, candidate))) {
       testInput = candidate;
     }
   }
@@ -1922,7 +1967,7 @@ export function formatPIEContext(state: PIEState): string {
     `Training Pairs Tested: ${state.trainingPairs.length}`,
     `Programs Enumerated: ${state.candidates.length}`,
     `Survivors: ${state.survivors.length}`,
-    `Adversarial Tests: ${state.adversarialTests.filter(t => t.programStillValid).length}/${state.adversarialTests.length} passed`,
+    `Adversarial Tests: ${state.adversarialTests.filter((t) => t.programStillValid).length}/${state.adversarialTests.length} passed`,
   ];
 
   if (state.survivors.length > 1) {
@@ -1933,7 +1978,7 @@ export function formatPIEContext(state: PIEState): string {
     }
   }
 
-  const failedAdv = state.adversarialTests.filter(t => !t.programStillValid);
+  const failedAdv = state.adversarialTests.filter((t) => !t.programStillValid);
   if (failedAdv.length > 0) {
     lines.push('');
     lines.push('Known Brittleness:');

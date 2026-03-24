@@ -3,12 +3,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { describe, it, expect } from 'vitest';
-import {
-  isPathForbidden,
-  validateSandboxedPath,
-  isCommandAllowlisted,
-  validateCommand,
-} from './sandbox';
+import { isPathForbidden, validateSandboxedPath, isCommandAllowlisted, validateCommand } from './sandbox';
 
 describe('isPathForbidden', () => {
   it('blocks Windows system directories', () => {
@@ -48,20 +43,12 @@ describe('validateSandboxedPath', () => {
   });
 
   it('allows paths within sandbox roots', () => {
-    const result = validateSandboxedPath(
-      'C:\\Users\\Aaron\\project\\file.txt',
-      ['C:\\Users\\Aaron\\project'],
-      'win32',
-    );
+    const result = validateSandboxedPath('C:\\Users\\Aaron\\project\\file.txt', ['C:\\Users\\Aaron\\project'], 'win32');
     expect(result.allowed).toBe(true);
   });
 
   it('blocks paths outside sandbox roots', () => {
-    const result = validateSandboxedPath(
-      'D:\\other\\secret.txt',
-      ['C:\\Users\\Aaron\\project'],
-      'win32',
-    );
+    const result = validateSandboxedPath('D:\\other\\secret.txt', ['C:\\Users\\Aaron\\project'], 'win32');
     expect(result.allowed).toBe(false);
     expect(result.reason).toContain('outside');
   });

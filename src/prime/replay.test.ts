@@ -11,19 +11,27 @@ import type { LedgerRun } from '../types';
 function buildTestLedger(): LedgerRun {
   let run = createLedgerRun('cognitive', { goal: 'test goal' });
   run = appendLedgerEntry(run, 'cognitive_step', {
-    type: 'observe', content: 'Initial observation', timestamp: 1000,
+    type: 'observe',
+    content: 'Initial observation',
+    timestamp: 1000,
   });
   run = appendLedgerEntry(run, 'cognitive_step', {
-    type: 'think', content: 'Planning...', timestamp: 2000,
+    type: 'think',
+    content: 'Planning...',
+    timestamp: 2000,
   });
   run = appendLedgerEntry(run, 'cognitive_step', {
-    type: 'act', content: 'Executing command',
-    timestamp: 3000, actionType: 'execute_command',
+    type: 'act',
+    content: 'Executing command',
+    timestamp: 3000,
+    actionType: 'execute_command',
     goalProgress: 0.5,
     actionResult: { success: true, output: 'done' },
   });
   run = appendLedgerEntry(run, 'cognitive_step', {
-    type: 'reflect', content: 'Command succeeded', timestamp: 4000,
+    type: 'reflect',
+    content: 'Command succeeded',
+    timestamp: 4000,
   });
   run = appendLedgerEntry(run, 'non_cognitive_event', { ignored: true });
   run = finalizeLedgerRun(run, { success: true });
@@ -40,14 +48,12 @@ describe('buildReplayTimeline', () => {
 
   it('preserves step types in order', () => {
     const timeline = buildReplayTimeline(buildTestLedger());
-    expect(timeline.steps.map(s => s.type)).toEqual([
-      'observe', 'think', 'act', 'reflect',
-    ]);
+    expect(timeline.steps.map((s) => s.type)).toEqual(['observe', 'think', 'act', 'reflect']);
   });
 
   it('preserves action metadata', () => {
     const timeline = buildReplayTimeline(buildTestLedger());
-    const actStep = timeline.steps.find(s => s.type === 'act');
+    const actStep = timeline.steps.find((s) => s.type === 'act');
     expect(actStep?.actionType).toBe('execute_command');
     expect(actStep?.goalProgress).toBe(0.5);
     expect(actStep?.actionResult?.success).toBe(true);

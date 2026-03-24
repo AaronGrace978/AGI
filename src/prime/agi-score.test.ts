@@ -105,7 +105,6 @@ describe('agi-score', () => {
 
     expect(snapshot).not.toBeNull();
     // The cap is 6.5/10 when there are zero real-workflow runs.
-    expect((snapshot!.subscores.domainGenerality)).toBeLessThanOrEqual(6.5);
+    expect(snapshot!.subscores.domainGenerality).toBeLessThanOrEqual(6.5);
   });
 });
-

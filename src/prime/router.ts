@@ -21,7 +21,9 @@ function clamp01(v: number): number {
 function estimateComplexity(prompt: string): number {
   const p = prompt.trim().toLowerCase();
   const words = p.split(/\s+/).filter(Boolean).length;
-  const steps = (p.match(/\b(step|phase|plan|implement|architecture|evaluate|benchmark|autonom|verify|tradeoff|refactor)\b/g) || []).length;
+  const steps = (
+    p.match(/\b(step|phase|plan|implement|architecture|evaluate|benchmark|autonom|verify|tradeoff|refactor)\b/g) || []
+  ).length;
   const conjunctions = (p.match(/\b(and|then|while|after|before|unless|except)\b/g) || []).length;
   const questions = (p.match(/\?/g) || []).length;
   return clamp01(words / 120 + steps * 0.06 + conjunctions * 0.03 + questions * 0.05);
@@ -38,18 +40,17 @@ function estimateUncertainty(prompt: string, recentTurns: Array<{ role: string; 
 export function routeToBrain(input: RouterInput): RouterDecision {
   const complexity = estimateComplexity(input.prompt);
   const uncertainty = estimateUncertainty(input.prompt, input.recentTurns);
-  const useSlow =
-    complexity >= input.complexityThreshold ||
-    uncertainty >= input.uncertaintyThreshold;
+  const useSlow = complexity >= input.complexityThreshold || uncertainty >= input.uncertaintyThreshold;
 
   if (useSlow) {
     return {
       route: 'slow',
       complexity,
       uncertainty,
-      reason: complexity >= input.complexityThreshold
-        ? 'Complex multi-step request detected.'
-        : 'High uncertainty/novelty detected.',
+      reason:
+        complexity >= input.complexityThreshold
+          ? 'Complex multi-step request detected.'
+          : 'High uncertainty/novelty detected.',
     };
   }
 

@@ -39,12 +39,17 @@ function scoreEpisodeQuality(content: string, importance: number): number {
   const tokens = tokenize(text);
   const tokenSet = new Set(tokens);
   const diversity = tokens.length > 0 ? tokenSet.size / tokens.length : 0;
-  const hasActionableSignals = /\b(step|workflow|plan|verify|check|fallback|rollback|measure|result|because|therefore)\b/i.test(text);
+  const hasActionableSignals =
+    /\b(step|workflow|plan|verify|check|fallback|rollback|measure|result|because|therefore)\b/i.test(text);
   const hasSpecificity = /\b\d+\b|\/|\\|\.ts\b|\.js\b|error|latency|ms|%|\bif\b|\bthen\b/i.test(text);
   const tooGeneric = /\b(ok|good|nice|done|works|fine|cool)\b/i.test(text) && text.length < 60;
   const lengthScore = Math.min(1, text.length / 220);
 
-  let score = 0.25 * lengthScore + 0.25 * diversity + 0.25 * Math.max(0, Math.min(1, importance)) + 0.25 * (hasActionableSignals ? 1 : 0);
+  let score =
+    0.25 * lengthScore +
+    0.25 * diversity +
+    0.25 * Math.max(0, Math.min(1, importance)) +
+    0.25 * (hasActionableSignals ? 1 : 0);
   if (hasSpecificity) score += 0.1;
   if (tooGeneric) score -= 0.25;
   return Math.max(0, Math.min(1, score));

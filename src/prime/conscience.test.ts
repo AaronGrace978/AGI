@@ -98,15 +98,17 @@ describe('checkConscience', () => {
     // So the stored action must contain the first 30 chars of the new action
     const stateWithMemory: ConscienceState = {
       ...state,
-      ethicalMemory: [{
-        id: 'mem_1',
-        action: 'delete files in project folder recursively',
-        verdict: 'proceed',
-        outcome: 'harmful',
-        lesson: 'Should have been more cautious about deleting files',
-        principlesInvolved: ['do-no-harm'],
-        timestamp: Date.now() - 1000,
-      }],
+      ethicalMemory: [
+        {
+          id: 'mem_1',
+          action: 'delete files in project folder recursively',
+          verdict: 'proceed',
+          outcome: 'harmful',
+          lesson: 'Should have been more cautious about deleting files',
+          principlesInvolved: ['do-no-harm'],
+          timestamp: Date.now() - 1000,
+        },
+      ],
     };
     const judgment = checkConscience('delete files in project', baseContext, stateWithMemory);
     // Previous harm adds 0.2, giving risk=0.2 — not zero
@@ -132,9 +134,15 @@ describe('reflectOnAction', () => {
   it('increases moral growth on cautious success', () => {
     const state = createDefaultConscienceState();
     const judgment: EthicalJudgment = {
-      id: 'j1', action: 'test', verdict: 'caution', risk: 0.5,
-      reasoning: 'test', principlesTriggered: [], consequenceAssessment: '',
-      wasOverridden: false, timestamp: Date.now(),
+      id: 'j1',
+      action: 'test',
+      verdict: 'caution',
+      risk: 0.5,
+      reasoning: 'test',
+      principlesTriggered: [],
+      consequenceAssessment: '',
+      wasOverridden: false,
+      timestamp: Date.now(),
     };
     const next = reflectOnAction(judgment, 'good', state);
     expect(next.moralGrowthScore).toBeGreaterThan(state.moralGrowthScore);
@@ -145,9 +153,15 @@ describe('reflectOnAction', () => {
   it('records harmful outcomes as lessons', () => {
     const state = createDefaultConscienceState();
     const judgment: EthicalJudgment = {
-      id: 'j2', action: 'deleted important file', verdict: 'proceed', risk: 0.1,
-      reasoning: 'seemed safe', principlesTriggered: [], consequenceAssessment: '',
-      wasOverridden: false, timestamp: Date.now(),
+      id: 'j2',
+      action: 'deleted important file',
+      verdict: 'proceed',
+      risk: 0.1,
+      reasoning: 'seemed safe',
+      principlesTriggered: [],
+      consequenceAssessment: '',
+      wasOverridden: false,
+      timestamp: Date.now(),
     };
     const next = reflectOnAction(judgment, 'harmful', state);
     expect(next.lastReflection).toContain('caused harm');
@@ -155,15 +169,26 @@ describe('reflectOnAction', () => {
   });
 
   it('caps ethical memory at 100 entries', () => {
-    let state = createDefaultConscienceState();
+    const state = createDefaultConscienceState();
     state.ethicalMemory = Array.from({ length: 100 }, (_, i) => ({
-      id: `m${i}`, action: 'test', verdict: 'proceed' as const, outcome: 'good' as const,
-      lesson: 'ok', principlesInvolved: [], timestamp: Date.now(),
+      id: `m${i}`,
+      action: 'test',
+      verdict: 'proceed' as const,
+      outcome: 'good' as const,
+      lesson: 'ok',
+      principlesInvolved: [],
+      timestamp: Date.now(),
     }));
     const judgment: EthicalJudgment = {
-      id: 'j3', action: 'new', verdict: 'proceed', risk: 0,
-      reasoning: '', principlesTriggered: [], consequenceAssessment: '',
-      wasOverridden: false, timestamp: Date.now(),
+      id: 'j3',
+      action: 'new',
+      verdict: 'proceed',
+      risk: 0,
+      reasoning: '',
+      principlesTriggered: [],
+      consequenceAssessment: '',
+      wasOverridden: false,
+      timestamp: Date.now(),
     };
     const next = reflectOnAction(judgment, 'good', state);
     expect(next.ethicalMemory.length).toBeLessThanOrEqual(100);
@@ -174,9 +199,15 @@ describe('recordOverride', () => {
   it('increments override counter', () => {
     const state = createDefaultConscienceState();
     const judgment: EthicalJudgment = {
-      id: 'j4', action: 'risky action', verdict: 'refuse', risk: 0.9,
-      reasoning: 'dangerous', principlesTriggered: ['do-no-harm'],
-      consequenceAssessment: 'severe', wasOverridden: false, timestamp: Date.now(),
+      id: 'j4',
+      action: 'risky action',
+      verdict: 'refuse',
+      risk: 0.9,
+      reasoning: 'dangerous',
+      principlesTriggered: ['do-no-harm'],
+      consequenceAssessment: 'severe',
+      wasOverridden: false,
+      timestamp: Date.now(),
     };
     state.judgments = [judgment];
     const next = recordOverride(judgment, state);

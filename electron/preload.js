@@ -86,6 +86,11 @@ contextBridge.exposeInMainWorld('api', {
     checkOllama: () => ipcRenderer.invoke('ollama:check'),
   },
 
+  // ─── Provider Health ──────────────────────────────────
+  providers: {
+    health: () => ipcRenderer.invoke('providers:health'),
+  },
+
   // ─── Settings ──────────────────────────────────────────
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),

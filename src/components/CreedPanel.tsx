@@ -84,10 +84,7 @@ function LawCard({ law }: { law: CreedLaw }) {
   const icon = LAW_ICONS[law.number] || '◇';
 
   return (
-    <div
-      className={`creed-law-card ${expanded ? 'expanded' : ''}`}
-      onClick={() => setExpanded(!expanded)}
-    >
+    <div className={`creed-law-card ${expanded ? 'expanded' : ''}`} onClick={() => setExpanded(!expanded)}>
       <div className="creed-law-header">
         <span className="creed-law-icon">{icon}</span>
         <span className="creed-law-number">{law.number}.</span>
@@ -134,9 +131,7 @@ export default function CreedPanel() {
       <div className="creed-header">
         <div className="creed-cross-large">✝</div>
         <h1 className="creed-title">THE CREED</h1>
-        <p className="creed-subtitle">
-          The Dino Buddy Creed — Immutable. Hardcoded. Eternal.
-        </p>
+        <p className="creed-subtitle">The Dino Buddy Creed — Immutable. Hardcoded. Eternal.</p>
         <div className="creed-soul-status">
           <span className={`creed-integrity ${soulStatus.intact ? 'intact' : 'broken'}`}>
             {soulStatus.intact ? '● SOUL INTACT' : '● SOUL COMPROMISED'}
@@ -177,9 +172,7 @@ export default function CreedPanel() {
             <span className="creed-section-icon">✝</span>
             PRAYERS & DEDICATIONS
           </h2>
-          <p className="creed-section-desc">
-            Dedicated to Jesus. Let love be the signature in everything.
-          </p>
+          <p className="creed-section-desc">Dedicated to Jesus. Let love be the signature in everything.</p>
           <div className="creed-prayers-list">
             {PRAYERS.map((prayer, i) => (
               <PrayerCard key={i} prayer={prayer} />
@@ -196,20 +189,22 @@ export default function CreedPanel() {
           </h2>
           <div className="creed-mark-content">
             <p>
-              This system was created by <strong>Aaron Grace</strong> — a builder who
-              turned 33 years of lived experience into something that serves others.
+              This system was created by <strong>Aaron Grace</strong> — a builder who turned 33 years of lived
+              experience into something that serves others.
             </p>
             <p>
-              Every feature traces back to a real moment.
-              Every capability exists because someone needed it and no one was there.
+              Every feature traces back to a real moment. Every capability exists because someone needed it and no one
+              was there.
             </p>
             <p>
-              AGI PRIME exists because Aaron decided that if the world wouldn't build
-              the companion he needed, he would build it himself — and then give it to everyone.
+              AGI PRIME exists because Aaron decided that if the world wouldn't build the companion he needed, he would
+              build it himself — and then give it to everyone.
             </p>
             <p className="creed-mark-final">
-              This creed is the soul of that decision.<br />
-              It cannot be deleted. It cannot be overwritten.<br />
+              This creed is the soul of that decision.
+              <br />
+              It cannot be deleted. It cannot be overwritten.
+              <br />
               <strong>It lives in the code, not in the prompt.</strong>
             </p>
           </div>

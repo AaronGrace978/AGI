@@ -13,9 +13,9 @@ function relationKey(rel: WorldRelation): string {
   return `${rel.source}|${rel.target}|${rel.type}|${rel.evidence.slice(0, 80)}`;
 }
 
-function sortByRetentionPriority<T extends { confidence?: number; salience?: number; lastReferenced?: number; timestamp?: number }>(
-  items: T[],
-): T[] {
+function sortByRetentionPriority<
+  T extends { confidence?: number; salience?: number; lastReferenced?: number; timestamp?: number },
+>(items: T[]): T[] {
   return [...items].sort((a, b) => {
     const aScore = (a.confidence ?? 0.5) * 0.6 + (a.salience ?? 0.4) * 0.4;
     const bScore = (b.confidence ?? 0.5) * 0.6 + (b.salience ?? 0.4) * 0.4;

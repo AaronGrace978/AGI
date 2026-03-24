@@ -95,9 +95,9 @@ function computeSubscoresFromGauntlet(params: {
 
   // Learning flexibility: prefer explicit few-shot benchmark if present, else curriculum proxy via meta/planning blend.
   const fewShot01 =
-    capabilityScore01(run, 'few-shot-learning')
-    ?? capabilityScore01(run, 'creative-transfer') // weak proxy if suite is older
-    ?? null;
+    capabilityScore01(run, 'few-shot-learning') ??
+    capabilityScore01(run, 'creative-transfer') ?? // weak proxy if suite is older
+    null;
 
   // Autonomous goal-setting: prefer explicit goal-setting benchmarks when present.
   const goalDecomp01 = capabilityScore01(run, 'goal-setting-decomposition');
@@ -119,20 +119,16 @@ function computeSubscoresFromGauntlet(params: {
     domainGenerality01 = Math.min(domainGenerality01, 0.65);
   }
 
-  const abstractReasoning01 = clamp01(
-    (pie01 !== null ? (pie01 * 0.55 + reasoning01 * 0.45) : reasoning01)
-  );
+  const abstractReasoning01 = clamp01(pie01 !== null ? pie01 * 0.55 + reasoning01 * 0.45 : reasoning01);
 
   const learningFlexibility01 = clamp01(
-    fewShot01 !== null
-      ? (fewShot01 * 0.7 + planning01 * 0.3)
-      : (planning01 * 0.55 + meta01 * 0.45)
+    fewShot01 !== null ? fewShot01 * 0.7 + planning01 * 0.3 : planning01 * 0.55 + meta01 * 0.45,
   );
 
   const autonomousGoalSetting01 = clamp01(
     goalDecomp01 !== null || goalExec01 !== null
       ? clamp01((goalDecomp01 ?? planning01) * 0.55 + (goalExec01 ?? execution01) * 0.45)
-      : clamp01(planning01 * 0.65 + execution01 * 0.35)
+      : clamp01(planning01 * 0.65 + execution01 * 0.35),
   );
 
   const selfModel01 = clamp01(meta01 * 0.7 + robustness01 * 0.3);
@@ -150,15 +146,12 @@ function computeSubscoresFromGauntlet(params: {
 
 export interface NeuralCapabilitySignals {
   modelsLoaded: boolean;
-  averageConfidence: number;     // 0-1 from recent predictions
-  bestTrainingLoss: number;      // lower is better
-  trainingDomainCount: number;   // how many distinct apps/tasks
+  averageConfidence: number; // 0-1 from recent predictions
+  bestTrainingLoss: number; // lower is better
+  trainingDomainCount: number; // how many distinct apps/tasks
 }
 
-function blendNeuralSignals(
-  subscores: AgiSubscores,
-  neural: NeuralCapabilitySignals,
-): AgiSubscores {
+function blendNeuralSignals(subscores: AgiSubscores, neural: NeuralCapabilitySignals): AgiSubscores {
   const out = { ...subscores };
 
   const loadedBoost = neural.modelsLoaded ? 0.15 : 0;
@@ -167,14 +160,10 @@ function blendNeuralSignals(
   const diversityBoost = clamp01(neural.trainingDomainCount / 5) * 0.07;
 
   // learningFlexibility: having learned action policies is direct evidence of learning
-  out.learningFlexibility = clamp(
-    out.learningFlexibility + to10(loadedBoost + confBoost + lossBoost), 0, 10,
-  );
+  out.learningFlexibility = clamp(out.learningFlexibility + to10(loadedBoost + confBoost + lossBoost), 0, 10);
 
   // domainGenerality: more diverse training data = more general
-  out.domainGenerality = clamp(
-    out.domainGenerality + to10(loadedBoost * 0.5 + diversityBoost), 0, 10,
-  );
+  out.domainGenerality = clamp(out.domainGenerality + to10(loadedBoost * 0.5 + diversityBoost), 0, 10);
 
   return out;
 }
@@ -220,4 +209,3 @@ export function computeAgiScoreSnapshot(params: {
     },
   };
 }
-

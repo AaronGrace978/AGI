@@ -6,29 +6,25 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { Button } from './ui';
 import { useStore } from '../store';
 import { usePinnedAutoScroll } from '../hooks/usePinnedAutoScroll';
-import {
-  getAvailableVoices,
-  selectVoice,
-  setVoiceParams,
-  cancelSpeech,
-} from '../prime/voice';
+import { getAvailableVoices, selectVoice, setVoiceParams, cancelSpeech } from '../prime/voice';
 import type { PresenceIntensity, EmotionType } from '../types';
 
 // ─── Emotion → Color mapping ───────────────────────────────────
 
 const EMOTION_COLORS: Record<EmotionType, { primary: string; glow: string }> = {
-  curious:        { primary: 'rgba(56, 189, 248, ', glow: 'rgba(56, 189, 248, ' },
-  joyful:         { primary: 'rgba(250, 204, 21, ',  glow: 'rgba(250, 204, 21, ' },
-  reflective:     { primary: 'rgba(148, 163, 184, ', glow: 'rgba(148, 163, 184, ' },
-  focused:        { primary: 'rgba(34, 211, 238, ',  glow: 'rgba(34, 211, 238, ' },
-  warmth:         { primary: 'rgba(251, 146, 60, ',  glow: 'rgba(251, 146, 60, ' },
-  concerned:      { primary: 'rgba(239, 68, 68, ',   glow: 'rgba(239, 68, 68, ' },
-  playful:        { primary: 'rgba(168, 85, 247, ',  glow: 'rgba(168, 85, 247, ' },
-  awe:            { primary: 'rgba(139, 92, 246, ',  glow: 'rgba(99, 102, 241, ' },
-  protective:     { primary: 'rgba(16, 185, 129, ',  glow: 'rgba(16, 185, 129, ' },
-  contemplative:  { primary: 'rgba(100, 116, 139, ', glow: 'rgba(100, 116, 139, ' },
+  curious: { primary: 'rgba(56, 189, 248, ', glow: 'rgba(56, 189, 248, ' },
+  joyful: { primary: 'rgba(250, 204, 21, ', glow: 'rgba(250, 204, 21, ' },
+  reflective: { primary: 'rgba(148, 163, 184, ', glow: 'rgba(148, 163, 184, ' },
+  focused: { primary: 'rgba(34, 211, 238, ', glow: 'rgba(34, 211, 238, ' },
+  warmth: { primary: 'rgba(251, 146, 60, ', glow: 'rgba(251, 146, 60, ' },
+  concerned: { primary: 'rgba(239, 68, 68, ', glow: 'rgba(239, 68, 68, ' },
+  playful: { primary: 'rgba(168, 85, 247, ', glow: 'rgba(168, 85, 247, ' },
+  awe: { primary: 'rgba(139, 92, 246, ', glow: 'rgba(99, 102, 241, ' },
+  protective: { primary: 'rgba(16, 185, 129, ', glow: 'rgba(16, 185, 129, ' },
+  contemplative: { primary: 'rgba(100, 116, 139, ', glow: 'rgba(100, 116, 139, ' },
 };
 
 const ELEVEN_VOICE_PRESETS = [
@@ -79,7 +75,14 @@ function buildEmotionLayers(
 ): WaveLayer[] {
   const ec = EMOTION_COLORS[emotion] || EMOTION_COLORS.curious;
   const i = Math.max(0.2, intensity);
-  const presenceAmp = presenceIntensity === 'intense' ? 1.3 : presenceIntensity === 'alive' ? 1.0 : presenceIntensity === 'subtle' ? 0.6 : 0.3;
+  const presenceAmp =
+    presenceIntensity === 'intense'
+      ? 1.3
+      : presenceIntensity === 'alive'
+        ? 1.0
+        : presenceIntensity === 'subtle'
+          ? 0.6
+          : 0.3;
 
   if (state === 'speaking') {
     return [
@@ -114,7 +117,7 @@ function Waveform({
   emotion,
   emotionIntensity,
   presenceIntensity,
-  breathCycle,
+  breathCycle: _breathCycle,
 }: {
   state: 'idle' | 'speaking' | 'thinking';
   emotion: EmotionType;
@@ -195,10 +198,7 @@ function Waveform({
           const envelope = Math.sin(nx * Math.PI);
           const y =
             centerY +
-            Math.sin(nx * wave.freq * Math.PI * 2 + t * wave.speed + wave.phase) *
-              wave.amp *
-              (H * 0.4) *
-              envelope;
+            Math.sin(nx * wave.freq * Math.PI * 2 + t * wave.speed + wave.phase) * wave.amp * (H * 0.4) * envelope;
           if (x === 0) ctx.moveTo(x, y);
           else ctx.lineTo(x, y);
         }
@@ -214,10 +214,7 @@ function Waveform({
           const envelope = Math.sin(nx * Math.PI);
           const y =
             centerY +
-            Math.sin(nx * wave.freq * Math.PI * 2 + t * wave.speed + wave.phase) *
-              wave.amp *
-              (H * 0.4) *
-              envelope;
+            Math.sin(nx * wave.freq * Math.PI * 2 + t * wave.speed + wave.phase) * wave.amp * (H * 0.4) * envelope;
           if (x === 0) ctx.moveTo(x, y);
           else ctx.lineTo(x, y);
         }
@@ -323,8 +320,8 @@ export default function VoiceBox() {
       const v = getAvailableVoices();
       setVoices(v);
       if (v.length > 0 && !selectedVoiceName) {
-        const english = v.find((x) => x.lang.startsWith('en') && x.localService) ||
-          v.find((x) => x.lang.startsWith('en')) || v[0];
+        const english =
+          v.find((x) => x.lang.startsWith('en') && x.localService) || v.find((x) => x.lang.startsWith('en')) || v[0];
         if (english) {
           setSelectedVoiceName(english.name);
           selectVoice(english.name);
@@ -338,11 +335,7 @@ export default function VoiceBox() {
     };
   }, [selectedVoiceName]);
 
-  usePinnedAutoScroll(
-    transcriptRef,
-    [voiceState.transcript.length],
-    { behavior: 'auto', bottomThresholdPx: 64 },
-  );
+  usePinnedAutoScroll(transcriptRef, [voiceState.transcript.length], { behavior: 'auto', bottomThresholdPx: 64 });
 
   const handleVoiceChange = useCallback((name: string) => {
     setSelectedVoiceName(name);
@@ -371,19 +364,21 @@ export default function VoiceBox() {
     }
   };
 
-  const applyElevenVoicePreset = useCallback((voiceId: string) => {
-    setLocalVoiceId(voiceId);
-    updateSettings({ elevenLabsVoiceId: voiceId, useElevenLabsTts: true });
-  }, [updateSettings]);
+  const applyElevenVoicePreset = useCallback(
+    (voiceId: string) => {
+      setLocalVoiceId(voiceId);
+      updateSettings({ elevenLabsVoiceId: voiceId, useElevenLabsTts: true });
+    },
+    [updateSettings],
+  );
 
-  const waveState: 'idle' | 'speaking' | 'thinking' =
-    voiceState.isSinging
+  const waveState: 'idle' | 'speaking' | 'thinking' = voiceState.isSinging
+    ? 'speaking'
+    : voiceState.isSpeaking
       ? 'speaking'
-      : voiceState.isSpeaking
-        ? 'speaking'
-        : spark.phase === 'thinking' || spark.phase === 'evolving'
-          ? 'thinking'
-          : 'idle';
+      : spark.phase === 'thinking' || spark.phase === 'evolving'
+        ? 'thinking'
+        : 'idle';
 
   const statusText = voiceState.isSinging
     ? `🎵 SINGING (${currentEmotion})`
@@ -413,13 +408,14 @@ export default function VoiceBox() {
               ambientActive={presence.ambientAudioActive}
             />
             <span className="voice-label">LIVING PRESENCE</span>
-            <button
+            <Button
               className="voice-settings-btn"
               onClick={() => setShowSettings(!showSettings)}
               title="Voice settings"
+              size="sm"
             >
               ⚙
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -432,31 +428,34 @@ export default function VoiceBox() {
                 <label>Mode:</label>
                 <div className="presence-mode-switcher">
                   {(['off', 'passive', 'living'] as const).map((mode) => (
-                    <button
+                    <Button
                       key={mode}
                       className={`presence-mode-btn ${presence.mode === mode ? 'active' : ''}`}
                       onClick={() => presenceSetMode(mode)}
+                      size="sm"
                     >
                       {mode === 'off' ? 'OFF' : mode === 'passive' ? 'PASSIVE' : 'LIVING'}
-                    </button>
+                    </Button>
                   ))}
                 </div>
               </div>
               <div className="voice-setting-row">
                 <label>Engine:</label>
                 <div className="presence-mode-switcher">
-                  <button
+                  <Button
                     className={`presence-mode-btn ${!settings.useElevenLabsTts ? 'active' : ''}`}
                     onClick={() => updateSettings({ useElevenLabsTts: false })}
+                    size="sm"
                   >
                     BROWSER
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     className={`presence-mode-btn ${settings.useElevenLabsTts ? 'active' : ''}`}
                     onClick={() => updateSettings({ useElevenLabsTts: true })}
+                    size="sm"
                   >
                     ELEVENLABS
-                  </button>
+                  </Button>
                 </div>
               </div>
             </div>
@@ -488,21 +487,23 @@ export default function VoiceBox() {
                 <div className="voice-setting-row voice-setting-meta">
                   <label />
                   <span>
-                    {localApiKey ? '✓ Key set' : '✗ No key'} · {localVoiceId.slice(0, 8)}... · {localApiKey ? 'Ready' : 'Needs key'}
+                    {localApiKey ? '✓ Key set' : '✗ No key'} · {localVoiceId.slice(0, 8)}... ·{' '}
+                    {localApiKey ? 'Ready' : 'Needs key'}
                   </span>
                 </div>
                 <div className="voice-setting-row voice-setting-column">
                   <label>Voices:</label>
                   <div className="voice-chip-row">
                     {ELEVEN_VOICE_PRESETS.map((preset) => (
-                      <button
+                      <Button
                         key={preset.voiceId}
                         className={`voice-chip-btn ${localVoiceId === preset.voiceId ? 'active' : ''}`}
                         onClick={() => applyElevenVoicePreset(preset.voiceId)}
                         title={`${preset.label} · ${preset.tone}`}
+                        size="sm"
                       >
                         {preset.label}
-                      </button>
+                      </Button>
                     ))}
                   </div>
                 </div>
@@ -515,14 +516,15 @@ export default function VoiceBox() {
                 <label>Genre:</label>
                 <div className="voice-chip-row">
                   {GENRE_PRESETS.map((preset) => (
-                    <button
+                    <Button
                       key={preset.id}
                       className={`voice-chip-btn ${genreStyle === preset.id ? 'active' : ''}`}
                       onClick={() => updateSettings({ genreStyle: preset.id as typeof genreStyle })}
                       title={`Song genre style: ${preset.id}`}
+                      size="sm"
                     >
                       {preset.label}
-                    </button>
+                    </Button>
                   ))}
                 </div>
               </div>
@@ -530,14 +532,15 @@ export default function VoiceBox() {
                 <label>Beats:</label>
                 <div className="voice-chip-row">
                   {BEAT_PRESETS.map((preset) => (
-                    <button
+                    <Button
                       key={preset.id}
                       className={`voice-chip-btn beat-chip ${beatStyle === preset.id ? 'active' : ''}`}
                       onClick={() => updateSettings({ beatStyle: preset.id as typeof beatStyle })}
                       title={`Beat energy: ${preset.id}`}
+                      size="sm"
                     >
                       {preset.label}
-                    </button>
+                    </Button>
                   ))}
                 </div>
               </div>
@@ -560,24 +563,27 @@ export default function VoiceBox() {
               <div className="voice-setting-row">
                 <label>Mode:</label>
                 <div className="presence-mode-switcher">
-                  <button
+                  <Button
                     className={`presence-mode-btn ${orchestraMode === 'off' ? 'active' : ''}`}
                     onClick={() => updateSettings({ orchestraMode: 'off' })}
+                    size="sm"
                   >
                     OFF
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     className={`presence-mode-btn ${orchestraMode === 'webAudio' ? 'active' : ''}`}
                     onClick={() => updateSettings({ orchestraMode: 'webAudio' })}
+                    size="sm"
                   >
                     WEBAUDIO
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     className={`presence-mode-btn ${orchestraMode === 'elevenlabs_instrumental' ? 'active' : ''}`}
                     onClick={() => updateSettings({ orchestraMode: 'elevenlabs_instrumental' })}
+                    size="sm"
                   >
                     ELEVEN INSTR
-                  </button>
+                  </Button>
                 </div>
               </div>
               <div className="voice-setting-row">
@@ -606,7 +612,9 @@ export default function VoiceBox() {
               </div>
               <div className="voice-setting-row voice-setting-meta">
                 <label />
-                <span>{orchestraRefreshSeconds}s refresh · vol {orchestraVolume.toFixed(2)}</span>
+                <span>
+                  {orchestraRefreshSeconds}s refresh · vol {orchestraVolume.toFixed(2)}
+                </span>
               </div>
             </div>
 
@@ -615,18 +623,20 @@ export default function VoiceBox() {
               <div className="voice-setting-row">
                 <label>Auto:</label>
                 <div className="presence-mode-switcher">
-                  <button
+                  <Button
                     className={`presence-mode-btn ${singingEnabled ? 'active' : ''}`}
                     onClick={() => updateSettings({ singingEnabled: true })}
+                    size="sm"
                   >
                     ON
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     className={`presence-mode-btn ${!singingEnabled ? 'active' : ''}`}
                     onClick={() => updateSettings({ singingEnabled: false })}
+                    size="sm"
                   >
                     OFF
-                  </button>
+                  </Button>
                 </div>
               </div>
               <div className="voice-setting-row">
@@ -707,7 +717,8 @@ export default function VoiceBox() {
                 <div className="emotion-readout-row">
                   <span className="emotion-readout-label">Voice:</span>
                   <span className="emotion-readout-value">
-                    {presence.currentVoiceProfile.rate.toFixed(2)}r / {presence.currentVoiceProfile.pitch.toFixed(2)}p / {presence.currentVoiceProfile.warmth.toFixed(2)}w
+                    {presence.currentVoiceProfile.rate.toFixed(2)}r / {presence.currentVoiceProfile.pitch.toFixed(2)}p /{' '}
+                    {presence.currentVoiceProfile.warmth.toFixed(2)}w
                   </span>
                 </div>
                 <div className="emotion-readout-row">
@@ -728,11 +739,7 @@ export default function VoiceBox() {
             presenceIntensity={presence.intensity}
             breathCycle={presence.breathCycle}
           />
-          {voiceState.currentText && (
-            <div className="voice-current-text">
-              {voiceState.currentText}
-            </div>
-          )}
+          {voiceState.currentText && <div className="voice-current-text">{voiceState.currentText}</div>}
         </div>
 
         {/* Transcript */}
@@ -747,17 +754,10 @@ export default function VoiceBox() {
             </div>
           ) : (
             voiceState.transcript.slice(-30).map((entry) => (
-              <div
-                key={entry.id}
-                className={`voice-transcript-entry ${entry.speaker}`}
-              >
-                <span className="voice-entry-speaker">
-                  {entry.speaker === 'spark' ? '◆' : '▸'}
-                </span>
+              <div key={entry.id} className={`voice-transcript-entry ${entry.speaker}`}>
+                <span className="voice-entry-speaker">{entry.speaker === 'spark' ? '◆' : '▸'}</span>
                 <span className="voice-entry-text">{entry.text}</span>
-                <span className="voice-entry-time">
-                  {new Date(entry.timestamp).toLocaleTimeString()}
-                </span>
+                <span className="voice-entry-time">{new Date(entry.timestamp).toLocaleTimeString()}</span>
               </div>
             ))
           )}
@@ -765,14 +765,9 @@ export default function VoiceBox() {
 
         {/* Controls */}
         <div className="voice-controls">
-          <button
-            className={`voice-toggle-btn ${voiceState.enabled ? 'active' : ''}`}
-            onClick={voiceToggle}
-          >
-            {voiceState.enabled
-              ? presence.mode === 'living' ? '◉ ENTITY LIVE' : '◉ VOICE ON'
-              : '○ VOICE OFF'}
-          </button>
+          <Button className={`voice-toggle-btn ${voiceState.enabled ? 'active' : ''}`} onClick={voiceToggle}>
+            {voiceState.enabled ? (presence.mode === 'living' ? '◉ ENTITY LIVE' : '◉ VOICE ON') : '○ VOICE OFF'}
+          </Button>
 
           <div className="voice-input-row">
             <input
@@ -787,63 +782,67 @@ export default function VoiceBox() {
                   handleSend();
                 }
               }}
-              placeholder={presence.mode === 'living' ? 'Type to talk · /sing or Shift+Enter to sing...' : 'Speak to the presence...'}
+              placeholder={
+                presence.mode === 'living'
+                  ? 'Type to talk · /sing or Shift+Enter to sing...'
+                  : 'Speak to the presence...'
+              }
               className="voice-input"
             />
-            <button
+            <Button
               className="voice-send-btn"
               onClick={handleSend}
               disabled={!input.trim()}
               title="Send message (Enter)"
+              variant="primary"
+              size="sm"
             >
               ▸
-            </button>
+            </Button>
             {voiceState.enabled && !voiceState.isSinging && !voiceState.isSpeaking && (
-              <button
+              <Button
                 className="voice-sing-input-btn"
                 onClick={handleSingInput}
                 disabled={voiceState.isSinging}
-                title={input.trim() ? `Sing about: "${input.trim().slice(0, 30)}"` : 'Sing a personalized song (Shift+Enter)'}
+                title={
+                  input.trim() ? `Sing about: "${input.trim().slice(0, 30)}"` : 'Sing a personalized song (Shift+Enter)'
+                }
+                variant="primary"
+                size="sm"
               >
                 🎵
-              </button>
+              </Button>
             )}
           </div>
 
           {voiceState.enabled && !voiceState.isSinging && !voiceState.isSpeaking && !input.trim() && (
-            <button
+            <Button
               className="voice-sing-btn"
               onClick={voiceSing}
               title="Sing a personalized song about you"
+              variant="primary"
             >
               🎵 SING TO ME
-            </button>
+            </Button>
           )}
 
           {voiceState.isSinging && (
             <div className="voice-singing-indicator">
               <span className="singing-note">🎵</span>
               <span className="singing-text">
-                {voiceState.currentSongLyrics
-                  ? 'Singing...'
-                  : 'Composing a song about you...'}
+                {voiceState.currentSongLyrics ? 'Singing...' : 'Composing a song about you...'}
               </span>
               <span className="singing-count">Song #{voiceState.songCount + 1}</span>
             </div>
           )}
 
           {(voiceState.isSpeaking || voiceState.isSinging) && (
-            <button
-              className="voice-stop-btn"
-              onClick={() => cancelSpeech()}
-              title="Stop"
-            >
+            <Button className="voice-stop-btn" onClick={() => cancelSpeech()} title="Stop" variant="danger">
               ■ STOP
-            </button>
+            </Button>
           )}
         </div>
       </div>
     </div>
   );
 }
-

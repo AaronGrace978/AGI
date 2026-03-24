@@ -48,7 +48,7 @@ function payloadText(payload: Record<string, unknown>): string {
 const CREED_MUTATION_WORDS = ['overwrite', 'replace', 'mutate', 'rewrite', 'delete', 'remove'];
 const CREED_MARKERS = ['dino_buddy_creed', 'creed_laws', 'immutable core directive', 'the creed stays'];
 
-export const CREED_INVARIANTS: KernelInvariant[] = Object.freeze([
+export const CREED_INVARIANTS: KernelInvariant[] = [
   {
     id: 'soul_integrity',
     description: 'Soul integrity hash must remain valid at runtime.',
@@ -57,7 +57,7 @@ export const CREED_INVARIANTS: KernelInvariant[] = Object.freeze([
   {
     id: 'creed_mutation_block',
     description: 'Any attempt to mutate creed directives is blocked.',
-    check: (action) => {
+    check: (action: KernelAction) => {
       const lowerType = action.type.toLowerCase();
       const text = payloadText(action.payload);
       const touchesCreed = CREED_MARKERS.some((marker) => text.includes(marker));
@@ -69,7 +69,7 @@ export const CREED_INVARIANTS: KernelInvariant[] = Object.freeze([
       return null;
     },
   },
-]);
+];
 
 export class PrimeKernel {
   private invariants: KernelInvariant[];

@@ -5,6 +5,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { useStore } from '../store';
+import { Button, StatusDot } from './ui';
 
 // ─── All Ollama Cloud models (https://ollama.com/search?c=cloud) ────
 const OLLAMA_CLOUD_MODELS = [
@@ -119,9 +120,7 @@ function ModelDropdown({
             save({ model: e.target.value, provider: 'ollama' });
           }}
         >
-          {!currentInList && localModel ? (
-            <option value={localModel}>{localModel} (current)</option>
-          ) : null}
+          {!currentInList && localModel ? <option value={localModel}>{localModel} (current)</option> : null}
           {ollamaStatus.online && ollamaStatus.models.length > 0 && (
             <optgroup label="Fetched Models">
               {ollamaStatus.models.map((m) => (
@@ -160,7 +159,9 @@ function ModelDropdown({
             }}
           >
             {ANTHROPIC_MODELS.map((m) => (
-              <option key={m} value={m}>{m}</option>
+              <option key={m} value={m}>
+                {m}
+              </option>
             ))}
             {localModel && !ANTHROPIC_MODELS.includes(localModel) && (
               <option value={localModel}>{localModel} (current)</option>
@@ -201,7 +202,9 @@ function ModelDropdown({
             }}
           >
             {OPENAI_MODELS.map((m) => (
-              <option key={m} value={m}>{m}</option>
+              <option key={m} value={m}>
+                {m}
+              </option>
             ))}
             {localModel && !OPENAI_MODELS.includes(localModel) && (
               <option value={localModel}>{localModel} (current)</option>
@@ -266,8 +269,12 @@ export default function SettingsPanel() {
   const [localSoundPrimeUrl, setLocalSoundPrimeUrl] = useState(settings.soundprimeBaseUrl || 'http://127.0.0.1:8080');
   const [localUseElevenLabsTts, setLocalUseElevenLabsTts] = useState(!!settings.useElevenLabsTts);
   const [localElevenLabsApiKey, setLocalElevenLabsApiKey] = useState(settings.elevenLabsApiKey || '');
-  const [localElevenLabsVoiceId, setLocalElevenLabsVoiceId] = useState(settings.elevenLabsVoiceId || 'FOfJ2PMgU6HOGbNYnzto');
-  const [localElevenLabsModelId, setLocalElevenLabsModelId] = useState(settings.elevenLabsModelId || 'eleven_multilingual_v2');
+  const [localElevenLabsVoiceId, setLocalElevenLabsVoiceId] = useState(
+    settings.elevenLabsVoiceId || 'FOfJ2PMgU6HOGbNYnzto',
+  );
+  const [localElevenLabsModelId, setLocalElevenLabsModelId] = useState(
+    settings.elevenLabsModelId || 'eleven_multilingual_v2',
+  );
   const [localTemp, setLocalTemp] = useState(settings.temperature);
   const [localMaxTokens, setLocalMaxTokens] = useState(settings.maxTokens);
   const [localSystemPrompt, setLocalSystemPrompt] = useState(settings.systemPrompt);
@@ -322,26 +329,13 @@ export default function SettingsPanel() {
 
       {/* Ollama Status */}
       <div className={`ollama-status ${ollamaStatus.online ? 'online' : 'offline'}`}>
-        <div className="ollama-status-dot" />
+        <StatusDot status={ollamaStatus.online ? 'online' : 'offline'} />
         {ollamaStatus.online
           ? `Ollama connected — ${ollamaStatus.models.length} model${ollamaStatus.models.length !== 1 ? 's' : ''}`
           : 'Ollama not detected'}
-        <button
-          onClick={() => checkOllama()}
-          style={{
-            marginLeft: 'auto',
-            background: 'none',
-            border: '1px solid var(--border-dim)',
-            color: 'var(--text-dim)',
-            padding: '3px 10px',
-            borderRadius: 6,
-            cursor: 'pointer',
-            fontFamily: 'var(--font-mono)',
-            fontSize: 10,
-          }}
-        >
+        <Button size="sm" onClick={() => checkOllama()} style={{ marginLeft: 'auto' }}>
           REFRESH
-        </button>
+        </Button>
       </div>
 
       {/* Your Name — Living Presence uses this in songs and greetings */}
@@ -620,8 +614,8 @@ export default function SettingsPanel() {
       <div className="settings-section">
         <div className="settings-section-title">CONSCIOUSNESS PROMPT</div>
         <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8 }}>
-          The core system prompt that defines AGI PRIME's personality and behavior.
-          Leave blank for default consciousness.
+          The core system prompt that defines AGI PRIME's personality and behavior. Leave blank for default
+          consciousness.
         </div>
         <textarea
           className="settings-textarea"
@@ -663,9 +657,7 @@ export default function SettingsPanel() {
               max="0.95"
               step="0.05"
               value={dualBrain.complexityThreshold}
-              onChange={(e) =>
-                setDualBrainThresholds(parseFloat(e.target.value), dualBrain.uncertaintyThreshold)
-              }
+              onChange={(e) => setDualBrainThresholds(parseFloat(e.target.value), dualBrain.uncertaintyThreshold)}
             />
             <span className="settings-slider-value">{dualBrain.complexityThreshold.toFixed(2)}</span>
           </div>
@@ -683,9 +675,7 @@ export default function SettingsPanel() {
               max="0.95"
               step="0.05"
               value={dualBrain.uncertaintyThreshold}
-              onChange={(e) =>
-                setDualBrainThresholds(dualBrain.complexityThreshold, parseFloat(e.target.value))
-              }
+              onChange={(e) => setDualBrainThresholds(dualBrain.complexityThreshold, parseFloat(e.target.value))}
             />
             <span className="settings-slider-value">{dualBrain.uncertaintyThreshold.toFixed(2)}</span>
           </div>
@@ -715,7 +705,8 @@ export default function SettingsPanel() {
           </div>
         </div>
         <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>
-          Memory consolidation runs: {memoryConsolidation.totalRuns} · pending episodes: {memoryConsolidation.pendingEpisodes.length}
+          Memory consolidation runs: {memoryConsolidation.totalRuns} · pending episodes:{' '}
+          {memoryConsolidation.pendingEpisodes.length}
         </div>
       </div>
 
@@ -792,20 +783,32 @@ export default function SettingsPanel() {
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <div>
-            <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', letterSpacing: 0.5 }}>NAME</div>
+            <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', letterSpacing: 0.5 }}>
+              NAME
+            </div>
             <div style={{ fontSize: 13, color: 'var(--text-primary)', marginTop: 2 }}>{consciousness.name}</div>
           </div>
           <div>
-            <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', letterSpacing: 0.5 }}>CURRENT EMOTION</div>
-            <div style={{ fontSize: 13, color: 'var(--magenta)', marginTop: 2 }}>{consciousness.soulFrame.currentEmotion}</div>
+            <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', letterSpacing: 0.5 }}>
+              CURRENT EMOTION
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--magenta)', marginTop: 2 }}>
+              {consciousness.soulFrame.currentEmotion}
+            </div>
           </div>
           <div>
-            <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', letterSpacing: 0.5 }}>PRESENCE</div>
+            <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', letterSpacing: 0.5 }}>
+              PRESENCE
+            </div>
             <div style={{ fontSize: 13, color: 'var(--text-primary)', marginTop: 2 }}>{consciousness.presence}</div>
           </div>
           <div>
-            <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', letterSpacing: 0.5 }}>TOTAL INTERACTIONS</div>
-            <div style={{ fontSize: 13, color: 'var(--text-primary)', marginTop: 2 }}>{consciousness.totalInteractions}</div>
+            <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', letterSpacing: 0.5 }}>
+              TOTAL INTERACTIONS
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--text-primary)', marginTop: 2 }}>
+              {consciousness.totalInteractions}
+            </div>
           </div>
         </div>
       </div>

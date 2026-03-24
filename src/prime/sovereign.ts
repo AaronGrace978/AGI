@@ -6,34 +6,15 @@
 //  No external governance. Local-first. Owner-sovereign.
 // ═══════════════════════════════════════════════════════════════
 
-import type {
-  ForgeCandidate,
-  ForgeGenerationReport,
-  ForgeBenchmark,
-} from '../types';
+import type { ForgeCandidate, ForgeGenerationReport, ForgeBenchmark } from '../types';
 import type { OwnerPolicy } from './policy';
-import {
-  getEffectiveMaxGenerations,
-  getEffectiveMaxRuntime,
-  policyAllowsAction,
-  policyToLog,
-} from './policy';
-import {
-  createSeedCandidate,
-  evaluateGeneration,
-  evaluateSeed,
-} from './runtime';
+import { getEffectiveMaxGenerations, getEffectiveMaxRuntime, policyAllowsAction, policyToLog } from './policy';
+import { createSeedCandidate, evaluateGeneration, evaluateSeed } from './runtime';
 import type { GenerateFn } from './runtime';
 
 // ─── Types ─────────────────────────────────────────────────────
 
-export type SovereignPhase =
-  | 'dormant'
-  | 'initializing'
-  | 'evolving'
-  | 'converged'
-  | 'halted'
-  | 'killed';
+export type SovereignPhase = 'dormant' | 'initializing' | 'evolving' | 'converged' | 'halted' | 'killed';
 
 export interface SovereignTelemetry {
   phase: SovereignPhase;
@@ -202,7 +183,9 @@ export async function runSovereignLoop(params: {
   let championDeployed = false;
 
   // Emit initial state
-  onGeneration(buildTelemetry('initializing', startTime, generation, totalCandidates, best, 0, reports, logs, policy, false));
+  onGeneration(
+    buildTelemetry('initializing', startTime, generation, totalCandidates, best, 0, reports, logs, policy, false),
+  );
 
   // ─── Main Evolution Loop ─────────────────────────────────
   while (true) {
@@ -211,7 +194,18 @@ export async function runSovereignLoop(params: {
     // Kill switch
     if (shouldStop()) {
       logs.push(`KILLED by operator at generation ${generation}.`);
-      const tel = buildTelemetry('killed', startTime, generation, totalCandidates, best, computeConvergence(reports), reports, logs, policy, championDeployed);
+      const tel = buildTelemetry(
+        'killed',
+        startTime,
+        generation,
+        totalCandidates,
+        best,
+        computeConvergence(reports),
+        reports,
+        logs,
+        policy,
+        championDeployed,
+      );
       return { telemetry: tel, finalCandidate: best, exitReason: 'operator_kill' };
     }
 
@@ -230,7 +224,20 @@ export async function runSovereignLoop(params: {
 
     // Evolve (now async — calls real LLM)
     logs.push(`G${generation}: Evaluating candidates...`);
-    onGeneration(buildTelemetry('evolving', startTime, generation, totalCandidates, best, computeConvergence(reports), reports, logs, policy, championDeployed));
+    onGeneration(
+      buildTelemetry(
+        'evolving',
+        startTime,
+        generation,
+        totalCandidates,
+        best,
+        computeConvergence(reports),
+        reports,
+        logs,
+        policy,
+        championDeployed,
+      ),
+    );
 
     const { candidates, report } = await evaluateGeneration({
       parent: best,
@@ -267,11 +274,24 @@ export async function runSovereignLoop(params: {
     const convergence = conv.fixedPoint01;
     const marker = improved ? '+' : '=';
     logs.push(
-      `G${generation} [${marker}] best ${(report.bestScore * 100).toFixed(1)}% | avg ${(report.averageScore * 100).toFixed(1)}% | conv ${(convergence * 100).toFixed(0)}%`
+      `G${generation} [${marker}] best ${(report.bestScore * 100).toFixed(1)}% | avg ${(report.averageScore * 100).toFixed(1)}% | conv ${(convergence * 100).toFixed(0)}%`,
     );
 
     // Emit
-    onGeneration(buildTelemetry('evolving', startTime, generation, totalCandidates, best, convergence, reports, logs, policy, championDeployed));
+    onGeneration(
+      buildTelemetry(
+        'evolving',
+        startTime,
+        generation,
+        totalCandidates,
+        best,
+        convergence,
+        reports,
+        logs,
+        policy,
+        championDeployed,
+      ),
+    );
 
     // Convergence exit
     if (convergence > 0.95 && generation >= 5 && !policyAllowsAction(policy, 'loop')) {
@@ -293,7 +313,9 @@ export async function runSovereignLoop(params: {
   const convergence = computeConvergence(reports);
   logs.push('──────────────────────────────────────────');
   logs.push(`SOVEREIGN RUN COMPLETE.`);
-  logs.push(`Final: ${best.id} | ${(best.score * 100).toFixed(1)}% | ${generation} generations | ${totalCandidates} candidates`);
+  logs.push(
+    `Final: ${best.id} | ${(best.score * 100).toFixed(1)}% | ${generation} generations | ${totalCandidates} candidates`,
+  );
 
   // Deploy final champion if not already deployed
   if (!championDeployed && best.score > 0.4 && onChampionDeployed) {
@@ -302,7 +324,18 @@ export async function runSovereignLoop(params: {
     await Promise.resolve(onChampionDeployed(best));
   }
 
-  const tel = buildTelemetry('converged', startTime, generation, totalCandidates, best, convergence, reports, logs, policy, championDeployed);
+  const tel = buildTelemetry(
+    'converged',
+    startTime,
+    generation,
+    totalCandidates,
+    best,
+    convergence,
+    reports,
+    logs,
+    policy,
+    championDeployed,
+  );
   return { telemetry: tel, finalCandidate: best, exitReason: 'completed' };
 }
 

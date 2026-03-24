@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { OracleLifeEvent, OracleSentimentProfile, OracleSocialNode } from '../types';
-import {
-  computeDomainModifiers,
-  createDefaultOracleState,
-  runMonteCarloSimulation,
-  runOraclePipeline,
-} from './oracle';
+import { computeDomainModifiers, createDefaultOracleState, runMonteCarloSimulation, runOraclePipeline } from './oracle';
 
 const BASE_SENTIMENT: OracleSentimentProfile = {
   loneliness: 0.62,
@@ -129,7 +124,6 @@ describe('oracle hybrid pipeline', () => {
     const burnoutBoosted = boosted.branches.find((b) => b.domain === 'career' && b.label === 'Burnout spiral');
     expect(burnoutBase).toBeDefined();
     expect(burnoutBoosted).toBeDefined();
-    expect((burnoutBoosted?.probability || 0)).toBeLessThan((burnoutBase?.probability || 1));
+    expect(burnoutBoosted?.probability || 0).toBeLessThan(burnoutBase?.probability || 1);
   });
 });
-

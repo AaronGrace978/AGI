@@ -1,11 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { MemoryType, VectorMemory } from '../prime/memory';
-import {
-  getLegacyMemorySummary,
-  getMemoryStats,
-  listVectorMemories,
-  searchMemories,
-} from '../prime/memory';
+import { getLegacyMemorySummary, getMemoryStats, listVectorMemories, searchMemories } from '../prime/memory';
+import { Button, Card } from './ui';
 
 type FilterType = 'all' | MemoryType;
 type SortType = 'newest' | 'oldest' | 'importance';
@@ -118,7 +114,9 @@ export default function MemoryPanel() {
       void loadOverview();
       if (!isSearching) void loadMemories(false);
     });
-    return () => { unsubscribe?.(); };
+    return () => {
+      unsubscribe?.();
+    };
   }, [loadOverview, loadMemories, isSearching]);
 
   useEffect(() => {
@@ -133,15 +131,13 @@ export default function MemoryPanel() {
 
   const canLoadMore = !isSearching && memories.length < totalMemories;
   const factsCount = snapshot?.counts?.facts ?? (Array.isArray(snapshot?.facts) ? snapshot.facts.length : 0);
-  const conversationsCount = snapshot?.counts?.conversations ?? (Array.isArray(snapshot?.conversations) ? snapshot.conversations.length : 0);
+  const conversationsCount =
+    snapshot?.counts?.conversations ?? (Array.isArray(snapshot?.conversations) ? snapshot.conversations.length : 0);
   const insights = Array.isArray(snapshot?.consciousness?.insights) ? snapshot?.consciousness?.insights || [] : [];
   const soulTrust = snapshot?.soul?.trust ?? 0;
   const soulIntimacy = snapshot?.soul?.intimacy ?? 0;
 
-  const byTypeEntries = useMemo(
-    () => Object.entries(stats.byType || {}).sort((a, b) => b[1] - a[1]),
-    [stats.byType],
-  );
+  const byTypeEntries = useMemo(() => Object.entries(stats.byType || {}).sort((a, b) => b[1] - a[1]), [stats.byType]);
 
   const handleExport = useCallback(async () => {
     if (!window.api?.memory?.export) {
@@ -176,7 +172,9 @@ export default function MemoryPanel() {
     try {
       const result = await window.api.memory.import();
       if (result.success) {
-        setExportStatus(`Imported: ${result.added} added, ${result.updated} updated, ${result.skipped} skipped (total: ${result.total})`);
+        setExportStatus(
+          `Imported: ${result.added} added, ${result.updated} updated, ${result.skipped} skipped (total: ${result.total})`,
+        );
         setTimeout(() => setExportStatus(''), 8000);
         // Reload memories and overview
         await loadOverview();
@@ -199,30 +197,30 @@ export default function MemoryPanel() {
       </div>
 
       <div className="memory-overview-grid">
-        <div className="memory-overview-card">
+        <Card compact glow="cyan" className="memory-overview-card">
           <div className="memory-overview-label">Vector memories</div>
           <div className="memory-overview-value">{stats.total}</div>
-        </div>
-        <div className="memory-overview-card">
+        </Card>
+        <Card compact glow="green" className="memory-overview-card">
           <div className="memory-overview-label">Facts</div>
           <div className="memory-overview-value">{factsCount}</div>
-        </div>
-        <div className="memory-overview-card">
+        </Card>
+        <Card compact className="memory-overview-card">
           <div className="memory-overview-label">Conversations</div>
           <div className="memory-overview-value">{conversationsCount}</div>
-        </div>
-        <div className="memory-overview-card">
+        </Card>
+        <Card compact className="memory-overview-card">
           <div className="memory-overview-label">Insights</div>
           <div className="memory-overview-value">{insights.length}</div>
-        </div>
-        <div className="memory-overview-card">
+        </Card>
+        <Card compact glow="magenta" className="memory-overview-card">
           <div className="memory-overview-label">Soul trust</div>
           <div className="memory-overview-value">{formatPercent(soulTrust)}</div>
-        </div>
-        <div className="memory-overview-card">
+        </Card>
+        <Card compact glow="purple" className="memory-overview-card">
           <div className="memory-overview-label">Soul intimacy</div>
           <div className="memory-overview-value">{formatPercent(soulIntimacy)}</div>
-        </div>
+        </Card>
       </div>
 
       <div className="memory-type-row">
@@ -230,7 +228,9 @@ export default function MemoryPanel() {
           <span className="memory-type-chip">no typed memory yet</span>
         ) : (
           byTypeEntries.map(([type, count]) => (
-            <span key={type} className="memory-type-chip">{type}: {count}</span>
+            <span key={type} className="memory-type-chip">
+              {type}: {count}
+            </span>
           ))
         )}
       </div>
@@ -264,8 +264,8 @@ export default function MemoryPanel() {
           <option value="oldest">oldest first</option>
           <option value="importance">highest importance</option>
         </select>
-        <button
-          className="memory-refresh-btn"
+        <Button
+          size="sm"
           onClick={() => {
             void loadOverview();
             void loadMemories(false);
@@ -273,23 +273,13 @@ export default function MemoryPanel() {
           disabled={loading}
         >
           refresh
-        </button>
-        <button
-          className="memory-refresh-btn"
-          onClick={handleExport}
-          disabled={exporting || loading}
-          style={{ background: exporting ? 'rgba(96, 165, 250, 0.25)' : undefined }}
-        >
+        </Button>
+        <Button size="sm" variant="accent" onClick={handleExport} disabled={exporting || loading} loading={exporting}>
           {exporting ? 'exporting...' : 'export'}
-        </button>
-        <button
-          className="memory-refresh-btn"
-          onClick={handleImport}
-          disabled={importing || loading}
-          style={{ background: importing ? 'rgba(96, 165, 250, 0.25)' : undefined }}
-        >
+        </Button>
+        <Button size="sm" variant="accent" onClick={handleImport} disabled={importing || loading} loading={importing}>
           {importing ? 'importing...' : 'import'}
-        </button>
+        </Button>
       </div>
 
       <div className="memory-list-meta">
@@ -318,19 +308,16 @@ export default function MemoryPanel() {
                   <span className="memory-badge sim">match: {formatPercent(similarity)}</span>
                 )}
                 {memory.content.length > CONTENT_PREVIEW_CHARS && (
-                  <button
-                    className="memory-refresh-btn"
-                    onClick={() => setExpanded((prev) => ({ ...prev, [memory.id]: !prev[memory.id] }))}
-                    style={{ padding: '4px 8px' }}
-                  >
+                  <Button size="sm" onClick={() => setExpanded((prev) => ({ ...prev, [memory.id]: !prev[memory.id] }))}>
                     {expanded[memory.id] ? 'collapse' : 'expand'}
-                  </button>
+                  </Button>
                 )}
               </div>
               <div className="memory-content">
                 {expanded[memory.id]
                   ? memory.content
-                  : memory.content.slice(0, CONTENT_PREVIEW_CHARS) + (memory.content.length > CONTENT_PREVIEW_CHARS ? '…' : '')}
+                  : memory.content.slice(0, CONTENT_PREVIEW_CHARS) +
+                    (memory.content.length > CONTENT_PREVIEW_CHARS ? '…' : '')}
               </div>
               <div className="memory-item-bottom">
                 <span>{formatTimestamp(memory.timestamp)}</span>
@@ -346,19 +333,14 @@ export default function MemoryPanel() {
 
       {canLoadMore && (
         <div className="memory-load-more-row">
-          <button
-            className="memory-refresh-btn"
-            onClick={() => void loadMemories(true)}
-            disabled={loading}
-          >
+          <Button size="sm" onClick={() => void loadMemories(true)} disabled={loading}>
             load more
-          </button>
+          </Button>
         </div>
       )}
 
       <div className="memory-legacy-grid">
-        <div className="memory-legacy-card">
-          <div className="memory-legacy-title">Recent insights</div>
+        <Card title="Recent insights" compact className="memory-legacy-card">
           {insights.length === 0 ? (
             <div className="memory-legacy-empty">none yet</div>
           ) : (
@@ -371,10 +353,9 @@ export default function MemoryPanel() {
                 </div>
               ))
           )}
-        </div>
+        </Card>
 
-        <div className="memory-legacy-card">
-          <div className="memory-legacy-title">Recent facts</div>
+        <Card title="Recent facts" compact className="memory-legacy-card">
           {factsCount === 0 ? (
             <div className="memory-legacy-empty">none yet</div>
           ) : (
@@ -387,10 +368,9 @@ export default function MemoryPanel() {
                 </div>
               ))
           )}
-        </div>
+        </Card>
 
-        <div className="memory-legacy-card">
-          <div className="memory-legacy-title">Recent conversations</div>
+        <Card title="Recent conversations" compact className="memory-legacy-card">
           {conversationsCount === 0 ? (
             <div className="memory-legacy-empty">none yet</div>
           ) : (
@@ -403,7 +383,7 @@ export default function MemoryPanel() {
                 </div>
               ))
           )}
-        </div>
+        </Card>
       </div>
     </div>
   );

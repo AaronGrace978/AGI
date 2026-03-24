@@ -43,16 +43,13 @@ export function applyEcologyAction(
   next.plansApplied += 1;
   if (input.observedSuccess) {
     next.successfulPlans += 1;
-    next.worldState.verifiedActions =
-      Number(next.worldState.verifiedActions || 0) + 1;
+    next.worldState.verifiedActions = Number(next.worldState.verifiedActions || 0) + 1;
   } else {
     next.failedPlans += 1;
-    next.worldState.failedActions =
-      Number(next.worldState.failedActions || 0) + 1;
+    next.worldState.failedActions = Number(next.worldState.failedActions || 0) + 1;
   }
   next.worldState.signalStrength = clamp01(
-    Number(next.worldState.signalStrength || 0.5) * 0.8 +
-      (input.observedSuccess ? 0.75 : 0.25) * 0.2,
+    Number(next.worldState.signalStrength || 0.5) * 0.8 + (input.observedSuccess ? 0.75 : 0.25) * 0.2,
   );
   next.lastUpdated = Date.now();
   return next;

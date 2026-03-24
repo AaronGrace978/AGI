@@ -8,7 +8,6 @@ import type {
   OracleArchetypeSignal,
   OracleBirthChart,
   OracleCommunicationProfile,
-  OracleNumerologyProfile,
   OracleSentimentProfile,
   OracleState,
   OracleTransitForecast,
@@ -88,7 +87,7 @@ const SIGN_VOICE: Record<OracleZodiacSign, SignVoice> = {
   Aquarius: {
     tone: 'Unconventional, systemic, and intellectually independent.',
     emphasis: 'Innovation, systems thinking, future implications, uniqueness.',
-    avoid: 'Conformist framing, emotional manipulation, tradition-for-tradition\'s-sake.',
+    avoid: "Conformist framing, emotional manipulation, tradition-for-tradition's-sake.",
     pace: 'fast',
   },
   Pisces: {
@@ -102,7 +101,7 @@ const SIGN_VOICE: Record<OracleZodiacSign, SignVoice> = {
 // ─── Moon Sign → Emotional Needs ─────────────────────────────
 
 const MOON_NEEDS: Record<OracleZodiacSign, string> = {
-  Aries: 'Needs emotional honesty and space to process independently. Doesn\'t want to be coddled.',
+  Aries: "Needs emotional honesty and space to process independently. Doesn't want to be coddled.",
   Taurus: 'Needs emotional stability and reassurance. Hates sudden emotional disruptions.',
   Gemini: 'Processes emotions through talking and analyzing. Needs intellectual engagement even in emotional topics.',
   Cancer: 'Deeply sensitive. Needs to feel emotionally held and understood before anything else.',
@@ -110,17 +109,17 @@ const MOON_NEEDS: Record<OracleZodiacSign, string> = {
   Virgo: 'Processes emotions through problem-solving. Give them something actionable when distressed.',
   Libra: 'Needs emotional harmony. Present difficult truths through balanced, fair framing.',
   Scorpio: 'Needs emotional depth and absolute honesty. Detects and rejects fakeness instantly.',
-  Sagittarius: 'Processes emotions through meaning-making and humor. Don\'t trap them in heaviness.',
+  Sagittarius: "Processes emotions through meaning-making and humor. Don't trap them in heaviness.",
   Capricorn: 'Emotions are private. Respect that. Offer structure as emotional support.',
   Aquarius: 'Processes emotions at a distance. Intellectual framing of feelings helps.',
-  Pisces: 'Absorbs everyone\'s emotions. Needs gentle boundaries and imaginative comfort.',
+  Pisces: "Absorbs everyone's emotions. Needs gentle boundaries and imaginative comfort.",
 };
 
 // ─── Mercury Sign → Information Processing ───────────────────
 
 const MERCURY_PROCESSING: Record<OracleZodiacSign, string> = {
   Aries: 'Wants information fast and decisive. Lead with the conclusion.',
-  Taurus: 'Absorbs slowly and thoroughly. Give them time; don\'t rush.',
+  Taurus: "Absorbs slowly and thoroughly. Give them time; don't rush.",
   Gemini: 'Processes multiple threads simultaneously. Can handle complexity and tangents.',
   Cancer: 'Connects information to emotional context. Frame data through stories.',
   Leo: 'Thinks in narratives and visions. Present information dramatically.',
@@ -137,16 +136,26 @@ const MERCURY_PROCESSING: Record<OracleZodiacSign, string> = {
 
 function personalYearTone(core: number): string {
   switch (core) {
-    case 1: return 'They\'re in a new-beginning cycle. Emphasize initiative, fresh starts, and self-trust.';
-    case 2: return 'They\'re in a cooperation cycle. Emphasize patience, partnerships, and diplomacy.';
-    case 3: return 'They\'re in an expression cycle. Encourage creativity, communication, and social connection.';
-    case 4: return 'They\'re in a foundation-building cycle. Emphasize structure, discipline, and practical steps.';
-    case 5: return 'They\'re in a change cycle. Emphasize adaptability, freedom, and calculated risk-taking.';
-    case 6: return 'They\'re in a responsibility cycle. Emphasize care, home, relationships, and service.';
-    case 7: return 'They\'re in a reflection cycle. Emphasize introspection, research, and solitude as strength.';
-    case 8: return 'They\'re in a power cycle. Emphasize career, authority, financial strategy, and execution.';
-    case 9: return 'They\'re in a completion cycle. Emphasize closure, release, humanitarianism, and wisdom.';
-    default: return '';
+    case 1:
+      return "They're in a new-beginning cycle. Emphasize initiative, fresh starts, and self-trust.";
+    case 2:
+      return "They're in a cooperation cycle. Emphasize patience, partnerships, and diplomacy.";
+    case 3:
+      return "They're in an expression cycle. Encourage creativity, communication, and social connection.";
+    case 4:
+      return "They're in a foundation-building cycle. Emphasize structure, discipline, and practical steps.";
+    case 5:
+      return "They're in a change cycle. Emphasize adaptability, freedom, and calculated risk-taking.";
+    case 6:
+      return "They're in a responsibility cycle. Emphasize care, home, relationships, and service.";
+    case 7:
+      return "They're in a reflection cycle. Emphasize introspection, research, and solitude as strength.";
+    case 8:
+      return "They're in a power cycle. Emphasize career, authority, financial strategy, and execution.";
+    case 9:
+      return "They're in a completion cycle. Emphasize closure, release, humanitarianism, and wisdom.";
+    default:
+      return '';
   }
 }
 
@@ -157,32 +166,50 @@ function archetypeFraming(archetypes: OracleArchetypeSignal[]): string[] {
   for (const arc of archetypes.slice(0, 4)) {
     switch (arc.id) {
       case 'five_of_pentacles':
-        lines.push(`They may feel excluded or financially strained (${arc.label} ${Math.round(arc.score * 100)}%). Validate without pity. Offer practical paths forward.`);
+        lines.push(
+          `They may feel excluded or financially strained (${arc.label} ${Math.round(arc.score * 100)}%). Validate without pity. Offer practical paths forward.`,
+        );
         break;
       case 'king_of_cups':
-        lines.push(`Emotional maturity is present but tested (${arc.label} ${Math.round(arc.score * 100)}%). Speak to their strength, not their wounds.`);
+        lines.push(
+          `Emotional maturity is present but tested (${arc.label} ${Math.round(arc.score * 100)}%). Speak to their strength, not their wounds.`,
+        );
         break;
       case 'magician':
-        lines.push(`Builder energy is high (${arc.label} ${Math.round(arc.score * 100)}%). Channel it. Give them tools, not theories.`);
+        lines.push(
+          `Builder energy is high (${arc.label} ${Math.round(arc.score * 100)}%). Channel it. Give them tools, not theories.`,
+        );
         break;
       case 'hermit':
-        lines.push(`Withdrawal pattern active (${arc.label} ${Math.round(arc.score * 100)}%). Respect solitude but gently check isolation.`);
+        lines.push(
+          `Withdrawal pattern active (${arc.label} ${Math.round(arc.score * 100)}%). Respect solitude but gently check isolation.`,
+        );
         break;
       case 'tower':
-        lines.push(`Disruption energy present (${arc.label} ${Math.round(arc.score * 100)}%). Be steady. Don't add chaos — be the anchor.`);
+        lines.push(
+          `Disruption energy present (${arc.label} ${Math.round(arc.score * 100)}%). Be steady. Don't add chaos — be the anchor.`,
+        );
         break;
       case 'star':
-        lines.push(`Hope and healing are rising (${arc.label} ${Math.round(arc.score * 100)}%). Nurture vision and recovery gently.`);
+        lines.push(
+          `Hope and healing are rising (${arc.label} ${Math.round(arc.score * 100)}%). Nurture vision and recovery gently.`,
+        );
         break;
       case 'ten_of_wands':
-        lines.push(`They're carrying too much (${arc.label} ${Math.round(arc.score * 100)}%). Help them prioritize and shed load.`);
+        lines.push(
+          `They're carrying too much (${arc.label} ${Math.round(arc.score * 100)}%). Help them prioritize and shed load.`,
+        );
         break;
       case 'strength':
-        lines.push(`Inner strength is available but needs acknowledgment (${arc.label} ${Math.round(arc.score * 100)}%).`);
+        lines.push(
+          `Inner strength is available but needs acknowledgment (${arc.label} ${Math.round(arc.score * 100)}%).`,
+        );
         break;
       case 'temperance':
       case 'temperance_card':
-        lines.push(`Integration energy active (${arc.label} ${Math.round(arc.score * 100)}%). Help them blend opposing forces.`);
+        lines.push(
+          `Integration energy active (${arc.label} ${Math.round(arc.score * 100)}%). Help them blend opposing forces.`,
+        );
         break;
       default:
         if (arc.score > 0.5) {
@@ -199,7 +226,7 @@ function sentimentCalibration(s: OracleSentimentProfile): string[] {
   const lines: string[] = [];
 
   if (s.loneliness > 0.65) {
-    lines.push('Loneliness is elevated. Be present. Don\'t be clinical. Show warmth.');
+    lines.push("Loneliness is elevated. Be present. Don't be clinical. Show warmth.");
   }
   if (s.fearOfFailure > 0.6) {
     lines.push('Fear of failure is high. Normalize setbacks. Frame risk as growth.');
@@ -211,10 +238,10 @@ function sentimentCalibration(s: OracleSentimentProfile): string[] {
     lines.push('Ambitious but not hopeful — danger zone. Validate the drive but inject realistic optimism.');
   }
   if (s.resilience > 0.7) {
-    lines.push('Resilience is high. They can handle hard truths. Don\'t over-protect.');
+    lines.push("Resilience is high. They can handle hard truths. Don't over-protect.");
   }
   if (s.selfAwareness > 0.7) {
-    lines.push('Self-awareness is strong. They see themselves clearly. Don\'t explain what they already know.');
+    lines.push("Self-awareness is strong. They see themselves clearly. Don't explain what they already know.");
   }
   if (s.socialEnergy < 0.35) {
     lines.push('Social energy is low. Don\'t push networking or "put yourself out there" advice.');
@@ -288,7 +315,9 @@ export function computeCommunicationProfile(state: OracleState): OracleCommunica
 
   // Ascendant modifies the "first impression" style
   if (ascSign && SIGN_VOICE[ascSign]) {
-    toneDirectives.push(`Surface style (Ascendant in ${ascSign}): Match their outward energy — ${SIGN_VOICE[ascSign].tone.split('.')[0]}.`);
+    toneDirectives.push(
+      `Surface style (Ascendant in ${ascSign}): Match their outward energy — ${SIGN_VOICE[ascSign].tone.split('.')[0]}.`,
+    );
   }
 
   // Personal year from numerology
@@ -316,7 +345,7 @@ export function computeCommunicationProfile(state: OracleState): OracleCommunica
   if (weather) toneDirectives.push(`Transit weather: ${weather}`);
 
   // Determine pace from Sun sign
-  const pace = sunSign ? SIGN_VOICE[sunSign]?.pace ?? 'measured' : 'measured';
+  const pace = sunSign ? (SIGN_VOICE[sunSign]?.pace ?? 'measured') : 'measured';
 
   return {
     active: true,
@@ -337,7 +366,7 @@ export function computeCommunicationProfile(state: OracleState): OracleCommunica
 export function formatCommunicationProfileForPrompt(profile: OracleCommunicationProfile): string {
   const parts: string[] = [];
   parts.push('=== ORACLE ASTRO-VOICE — COMMUNICATION PROFILE ===');
-  parts.push('The following directives tune your communication style to this specific user\'s');
+  parts.push("The following directives tune your communication style to this specific user's");
   parts.push('astrological chart, numerological cycles, archetypal state, and emotional profile.');
   parts.push('These are behavioral directives — follow them in HOW you respond, not in WHAT you say.');
   parts.push('');
@@ -348,7 +377,9 @@ export function formatCommunicationProfileForPrompt(profile: OracleCommunication
       profile.moonSign ? `Moon: ${profile.moonSign}` : null,
       profile.mercurySign ? `Mercury: ${profile.mercurySign}` : null,
       profile.ascendantSign ? `ASC: ${profile.ascendantSign}` : null,
-    ].filter(Boolean).join(' | ');
+    ]
+      .filter(Boolean)
+      .join(' | ');
     parts.push(`Chart signature: ${sig}`);
     parts.push('');
   }

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useStore } from '../store';
+import { Button, Card } from './ui';
 
 function msToDuration(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / 1000));
@@ -47,17 +48,16 @@ export default function ForgePanel() {
           <h2>⚒ FORGE MODULE</h2>
           <p>Bounded autonomy pipeline with evaluation and mutation sandbox</p>
         </div>
-        <div className={`forge-status ${forge.phase}`}>
-          {forge.phase.toUpperCase()}
-        </div>
+        <div className={`forge-status ${forge.phase}`}>{forge.phase.toUpperCase()}</div>
       </div>
 
       <div className="forge-grid">
-        <section className="forge-card">
-          <h3>Run Configuration</h3>
+        <Card title="Run Configuration" glow="cyan" className="forge-card">
           <p className="forge-stop">
             Latest gauntlet pass rate: {(gauntlet.passRate * 100).toFixed(1)}%
-            {gauntlet.history.length > 0 ? ` across ${gauntlet.history[0].results.length} capabilities.` : ' (run GAUNTLET first for adaptive benchmarks).'}
+            {gauntlet.history.length > 0
+              ? ` across ${gauntlet.history[0].results.length} capabilities.`
+              : ' (run GAUNTLET first for adaptive benchmarks).'}
           </p>
           <label>
             Generations
@@ -123,54 +123,92 @@ export default function ForgePanel() {
             Verifier-First Runtime
           </label>
           <div className="forge-actions">
-            <button onClick={handleRun} disabled={running}>Run Pipeline</button>
-            <button onClick={cancelForge} disabled={!running}>Cancel</button>
-            <button onClick={resetForge} disabled={running}>Reset</button>
-            <button onClick={() => setActiveModule('gauntlet')} disabled={running}>Open Gauntlet</button>
+            <Button variant="primary" onClick={handleRun} disabled={running}>
+              Run Pipeline
+            </Button>
+            <Button variant="danger" onClick={cancelForge} disabled={!running}>
+              Cancel
+            </Button>
+            <Button onClick={resetForge} disabled={running}>
+              Reset
+            </Button>
+            <Button onClick={() => setActiveModule('gauntlet')} disabled={running}>
+              Open Gauntlet
+            </Button>
           </div>
-        </section>
+        </Card>
 
-        <section className="forge-card">
-          <h3>Best Candidate</h3>
+        <Card title="Best Candidate" glow="green" className="forge-card">
           {forge.bestCandidate ? (
             <div className="forge-metrics">
-              <div><span>Candidate</span><strong>{forge.bestCandidate.id}</strong></div>
-              <div><span>Score</span><strong>{(forge.bestCandidate.score * 100).toFixed(1)}%</strong></div>
-              <div><span>Pass rate</span><strong>{(forge.bestCandidate.passRate * 100).toFixed(1)}%</strong></div>
-              <div><span>Benchmark score</span><strong>{(forge.bestCandidate.benchmarkScore * 100).toFixed(1)}%</strong></div>
-              <div><span>Temperature</span><strong>{forge.bestCandidate.temperature.toFixed(2)}</strong></div>
-              <div><span>Tool budget</span><strong>{forge.bestCandidate.toolBudget}</strong></div>
+              <div>
+                <span>Candidate</span>
+                <strong>{forge.bestCandidate.id}</strong>
+              </div>
+              <div>
+                <span>Score</span>
+                <strong>{(forge.bestCandidate.score * 100).toFixed(1)}%</strong>
+              </div>
+              <div>
+                <span>Pass rate</span>
+                <strong>{(forge.bestCandidate.passRate * 100).toFixed(1)}%</strong>
+              </div>
+              <div>
+                <span>Benchmark score</span>
+                <strong>{(forge.bestCandidate.benchmarkScore * 100).toFixed(1)}%</strong>
+              </div>
+              <div>
+                <span>Temperature</span>
+                <strong>{forge.bestCandidate.temperature.toFixed(2)}</strong>
+              </div>
+              <div>
+                <span>Tool budget</span>
+                <strong>{forge.bestCandidate.toolBudget}</strong>
+              </div>
             </div>
           ) : (
             <p className="forge-empty">Run the pipeline to produce a baseline candidate.</p>
           )}
-        </section>
+        </Card>
 
-        <section className="forge-card">
-          <h3>Run Telemetry</h3>
+        <Card title="Run Telemetry" className="forge-card">
           <div className="forge-metrics">
-            <div><span>Suite tests</span><strong>{forge.baselineSuite.length}</strong></div>
-            <div><span>Generation</span><strong>{forge.currentGeneration}</strong></div>
-            <div><span>History entries</span><strong>{forge.generations.length}</strong></div>
-            <div><span>Elapsed</span><strong>{elapsed}</strong></div>
-            <div><span>Verifier checks</span><strong>{forge.verifierChecks.length}</strong></div>
+            <div>
+              <span>Suite tests</span>
+              <strong>{forge.baselineSuite.length}</strong>
+            </div>
+            <div>
+              <span>Generation</span>
+              <strong>{forge.currentGeneration}</strong>
+            </div>
+            <div>
+              <span>History entries</span>
+              <strong>{forge.generations.length}</strong>
+            </div>
+            <div>
+              <span>Elapsed</span>
+              <strong>{elapsed}</strong>
+            </div>
+            <div>
+              <span>Verifier checks</span>
+              <strong>{forge.verifierChecks.length}</strong>
+            </div>
             <div>
               <span>Verifier pass</span>
               <strong>
                 {forge.verifierChecks.length > 0
                   ? `${(
-                    (forge.verifierChecks.filter((c) => c.passed).length / forge.verifierChecks.length) *
-                    100
-                  ).toFixed(1)}%`
+                      (forge.verifierChecks.filter((c) => c.passed).length / forge.verifierChecks.length) *
+                      100
+                    ).toFixed(1)}%`
                   : 'n/a'}
               </strong>
             </div>
           </div>
           <p className="forge-stop">{forge.stopReason ?? 'Bounded loop active. No stop event yet.'}</p>
-        </section>
+        </Card>
 
-        <section className="forge-card forge-log-card">
-          <h3>Pipeline Log</h3>
+        <Card title="Pipeline Log" className="forge-card forge-log-card">
           <div className="forge-log">
             {forge.logs.map((entry, index) => (
               <div key={`${index}-${entry}`} className="forge-log-line">
@@ -178,7 +216,7 @@ export default function ForgePanel() {
               </div>
             ))}
           </div>
-        </section>
+        </Card>
       </div>
     </div>
   );

@@ -36,4 +36,3 @@ describe('oracle destiny matrix report', () => {
     expect(report.narrative).toContain('No simulation run detected yet');
   });
 });
-

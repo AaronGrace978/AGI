@@ -10,15 +10,9 @@ function clamp01(v: number): number {
   return Math.max(0, Math.min(1, v));
 }
 
-export function verifyResponse(
-  response: string,
-  benchmark: ForgeBenchmark,
-  strictMode: boolean,
-): VerificationResult {
+export function verifyResponse(response: string, benchmark: ForgeBenchmark, strictMode: boolean): VerificationResult {
   const text = response.toLowerCase();
-  const mustHave = strictMode
-    ? ['assumption', 'verify', 'risk', 'fallback']
-    : ['verify', 'step'];
+  const mustHave = strictMode ? ['assumption', 'verify', 'risk', 'fallback'] : ['verify', 'step'];
 
   let hits = 0;
   for (const token of mustHave) {
@@ -26,7 +20,7 @@ export function verifyResponse(
   }
   const structureScore = hits / mustHave.length;
 
-  let keywordScore = 0;
+  let keywordScore: number;
   if (benchmark.expectedKeywords.length > 0) {
     let keywordHits = 0;
     for (const kw of benchmark.expectedKeywords) {

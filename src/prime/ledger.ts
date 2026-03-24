@@ -30,11 +30,7 @@ export function createLedgerRun(kind: string, metadata: Record<string, unknown> 
   };
 }
 
-export function appendLedgerEntry(
-  run: LedgerRun,
-  type: string,
-  payload: Record<string, unknown> = {},
-): LedgerRun {
+export function appendLedgerEntry(run: LedgerRun, type: string, payload: Record<string, unknown> = {}): LedgerRun {
   const prevHash = run.integrity.chainHead || '';
   const base = {
     id: `le_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -57,10 +53,7 @@ export function appendLedgerEntry(
   };
 }
 
-export function finalizeLedgerRun(
-  run: LedgerRun,
-  summary: Record<string, unknown> = {},
-): LedgerRun {
+export function finalizeLedgerRun(run: LedgerRun, summary: Record<string, unknown> = {}): LedgerRun {
   return {
     ...run,
     finishedAt: Date.now(),

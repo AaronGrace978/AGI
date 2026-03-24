@@ -111,9 +111,7 @@ export function buildSystemAddendum(input: SystemAddendumInput): string {
   }
 
   if (input.championPrompt) {
-    chunks.push(
-      `=== EVOLVED COGNITIVE STRATEGY ===\n${input.championPrompt}\n=== END STRATEGY ===`,
-    );
+    chunks.push(`=== EVOLVED COGNITIVE STRATEGY ===\n${input.championPrompt}\n=== END STRATEGY ===`);
   }
 
   if (input.slowBrainDirective) {
@@ -142,10 +140,14 @@ export function buildSystemAddendum(input: SystemAddendumInput): string {
       sparkParts.push(`COGNITIVE PHASE: ${sc.circadianPhase}`);
     }
     if (typeof sc.temperature === 'number') {
-      sparkParts.push(`COGNITIVE TEMPERATURE: ${(sc.temperature * 100).toFixed(0)}° (${sc.temperature > 0.7 ? 'hot — high activity' : sc.temperature > 0.3 ? 'warm — active' : 'cool — resting'})`);
+      sparkParts.push(
+        `COGNITIVE TEMPERATURE: ${(sc.temperature * 100).toFixed(0)}° (${sc.temperature > 0.7 ? 'hot — high activity' : sc.temperature > 0.3 ? 'warm — active' : 'cool — resting'})`,
+      );
     }
     if (typeof sc.entropy === 'number' && sc.entropy > 0.3) {
-      sparkParts.push(`KNOWLEDGE ENTROPY: ${(sc.entropy * 100).toFixed(0)}% (${sc.entropy > 0.6 ? 'HIGH — contradictions and gaps detected' : 'moderate — some uncertainty'})`);
+      sparkParts.push(
+        `KNOWLEDGE ENTROPY: ${(sc.entropy * 100).toFixed(0)}% (${sc.entropy > 0.6 ? 'HIGH — contradictions and gaps detected' : 'moderate — some uncertainty'})`,
+      );
     }
     if (sc.genome) {
       sparkParts.push(`COGNITIVE GENOME: ${genomeToContextString(sc.genome)}`);
@@ -159,7 +161,9 @@ export function buildSystemAddendum(input: SystemAddendumInput): string {
     const nc = input.neuralContext;
     const neuralParts: string[] = ['=== NEURALCORE ==='];
     neuralParts.push(`Neural Engine: ${nc.available ? 'ONLINE' : 'OFFLINE'}`);
-    neuralParts.push(`Trained Models: ${nc.modelsLoaded ? 'LOADED — physics-informed action policies active' : 'NONE — using raw LLM coordinates'}`);
+    neuralParts.push(
+      `Trained Models: ${nc.modelsLoaded ? 'LOADED — physics-informed action policies active' : 'NONE — using raw LLM coordinates'}`,
+    );
     if (nc.lastPredictionConfidence !== undefined) {
       neuralParts.push(`Last Prediction Confidence: ${(nc.lastPredictionConfidence * 100).toFixed(1)}%`);
     }
@@ -167,7 +171,9 @@ export function buildSystemAddendum(input: SystemAddendumInput): string {
       neuralParts.push(`Predictions made: ${nc.predictionCount}`);
     }
     if (nc.trainingSessions !== undefined && nc.trainingSessions > 0) {
-      neuralParts.push(`Training sessions: ${nc.trainingSessions}${nc.bestLoss !== undefined ? ` (best loss: ${nc.bestLoss.toFixed(4)})` : ''}`);
+      neuralParts.push(
+        `Training sessions: ${nc.trainingSessions}${nc.bestLoss !== undefined ? ` (best loss: ${nc.bestLoss.toFixed(4)})` : ''}`,
+      );
     }
     neuralParts.push('=== END NEURALCORE ===');
     chunks.push(neuralParts.join('\n'));
@@ -180,10 +186,7 @@ export function buildSystemAddendum(input: SystemAddendumInput): string {
   return chunks.filter(Boolean).join('\n\n').trim();
 }
 
-export function applySystemAddendum<T extends ChatLikeMessage>(
-  messages: T[],
-  addendum: string,
-): T[] {
+export function applySystemAddendum<T extends ChatLikeMessage>(messages: T[], addendum: string): T[] {
   if (!addendum) return messages;
 
   const injected = [...messages];
@@ -199,4 +202,3 @@ export function applySystemAddendum<T extends ChatLikeMessage>(
   injected.unshift({ role: 'system', content: addendum } as T);
   return injected;
 }
-

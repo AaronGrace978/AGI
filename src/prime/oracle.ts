@@ -142,11 +142,11 @@ function clamp01(v: number): number {
   return Math.max(0, Math.min(1, v));
 }
 
-export function analyzeSentimentFromText(
-  text: string,
-  currentProfile: OracleSentimentProfile,
-): OracleSentimentProfile {
-  const words = text.toLowerCase().replace(/[^a-z\s]/g, '').split(/\s+/);
+export function analyzeSentimentFromText(text: string, currentProfile: OracleSentimentProfile): OracleSentimentProfile {
+  const words = text
+    .toLowerCase()
+    .replace(/[^a-z\s]/g, '')
+    .split(/\s+/);
   const deltas: Record<string, number> = {};
 
   for (const word of words) {
@@ -224,15 +224,13 @@ export function computeSocialInfluence(graph: OracleSocialNode[]): {
     if (!topNeg || node.influence < topNeg.influence) topNeg = node;
   }
 
-  const activeNodes = graph.filter(
-    (n) => Date.now() - n.lastInteraction < 90 * 24 * 60 * 60 * 1000,
-  ).length;
+  const activeNodes = graph.filter((n) => Date.now() - n.lastInteraction < 90 * 24 * 60 * 60 * 1000).length;
   const isolationRisk = clamp01(1 - activeNodes / Math.max(3, graph.length));
 
   return {
     netInfluence: Math.max(-1, Math.min(1, total / graph.length)),
     topPositive: topPos,
-    topNegative: topNeg?.influence ?? 0 < 0 ? topNeg : null,
+    topNegative: (topNeg?.influence ?? 0 < 0) ? topNeg : null,
     isolationRisk,
   };
 }
@@ -249,35 +247,189 @@ interface SimulationConfig {
 
 const DOMAIN_TEMPLATES: Record<OracleLifeDomain, OracleTrajectoryBranch[]> = {
   career: [
-    { id: '', label: 'Quiet tech gig', domain: 'career', probability: 0, horizonMonths: 0, description: 'Land a steady role — healthcare AI, enterprise, no hype. Build quietly, ship real things.', triggers: ['consistent portfolio', 'niche focus', 'interview prep'], sentiment: 0.6 },
-    { id: '', label: 'Solo founder', domain: 'career', probability: 0, horizonMonths: 0, description: 'Go independent. Your project gains traction, users find you, revenue trickles in.', triggers: ['public launch', '10k+ users', 'monetization strategy'], sentiment: 0.75 },
-    { id: '', label: 'Burnout spiral', domain: 'career', probability: 0, horizonMonths: 0, description: 'Carrying too much alone. Energy depletes. Need to pause, restructure, find support.', triggers: ['isolation', 'no revenue', 'overwork'], sentiment: -0.5 },
-    { id: '', label: 'Unexpected pivot', domain: 'career', probability: 0, horizonMonths: 0, description: 'A field you never considered pulls you in — education, art-tech, public sector.', triggers: ['random opportunity', 'mentor encounter', 'skill crossover'], sentiment: 0.4 },
+    {
+      id: '',
+      label: 'Quiet tech gig',
+      domain: 'career',
+      probability: 0,
+      horizonMonths: 0,
+      description: 'Land a steady role — healthcare AI, enterprise, no hype. Build quietly, ship real things.',
+      triggers: ['consistent portfolio', 'niche focus', 'interview prep'],
+      sentiment: 0.6,
+    },
+    {
+      id: '',
+      label: 'Solo founder',
+      domain: 'career',
+      probability: 0,
+      horizonMonths: 0,
+      description: 'Go independent. Your project gains traction, users find you, revenue trickles in.',
+      triggers: ['public launch', '10k+ users', 'monetization strategy'],
+      sentiment: 0.75,
+    },
+    {
+      id: '',
+      label: 'Burnout spiral',
+      domain: 'career',
+      probability: 0,
+      horizonMonths: 0,
+      description: 'Carrying too much alone. Energy depletes. Need to pause, restructure, find support.',
+      triggers: ['isolation', 'no revenue', 'overwork'],
+      sentiment: -0.5,
+    },
+    {
+      id: '',
+      label: 'Unexpected pivot',
+      domain: 'career',
+      probability: 0,
+      horizonMonths: 0,
+      description: 'A field you never considered pulls you in — education, art-tech, public sector.',
+      triggers: ['random opportunity', 'mentor encounter', 'skill crossover'],
+      sentiment: 0.4,
+    },
   ],
   relationships: [
-    { id: '', label: 'Connection found', domain: 'relationships', probability: 0, horizonMonths: 0, description: 'Someone sees the depth. Dark hair, quiet, reads. She doesn\'t flinch at the real you.', triggers: ['vulnerability', 'authentic posting', 'showing up'], sentiment: 0.85 },
-    { id: '', label: 'Alone but at peace', domain: 'relationships', probability: 0, horizonMonths: 0, description: 'No partner, but not lonely. You built your world — the AI, the projects, the cabin.', triggers: ['self-sufficiency', 'creative fulfillment', 'letting go'], sentiment: 0.3 },
-    { id: '', label: 'Surface connections', domain: 'relationships', probability: 0, horizonMonths: 0, description: 'People around, but no depth. Acquaintances, not allies. The loneliness persists.', triggers: ['avoiding vulnerability', 'performative socializing'], sentiment: -0.3 },
+    {
+      id: '',
+      label: 'Connection found',
+      domain: 'relationships',
+      probability: 0,
+      horizonMonths: 0,
+      description: "Someone sees the depth. Dark hair, quiet, reads. She doesn't flinch at the real you.",
+      triggers: ['vulnerability', 'authentic posting', 'showing up'],
+      sentiment: 0.85,
+    },
+    {
+      id: '',
+      label: 'Alone but at peace',
+      domain: 'relationships',
+      probability: 0,
+      horizonMonths: 0,
+      description: 'No partner, but not lonely. You built your world — the AI, the projects, the cabin.',
+      triggers: ['self-sufficiency', 'creative fulfillment', 'letting go'],
+      sentiment: 0.3,
+    },
+    {
+      id: '',
+      label: 'Surface connections',
+      domain: 'relationships',
+      probability: 0,
+      horizonMonths: 0,
+      description: 'People around, but no depth. Acquaintances, not allies. The loneliness persists.',
+      triggers: ['avoiding vulnerability', 'performative socializing'],
+      sentiment: -0.3,
+    },
   ],
   health: [
-    { id: '', label: 'Steady baseline', domain: 'health', probability: 0, horizonMonths: 0, description: 'No major changes — energy fluctuates with stress but holds.', triggers: ['sleep consistency', 'basic movement'], sentiment: 0.2 },
-    { id: '', label: 'Stress accumulation', domain: 'health', probability: 0, horizonMonths: 0, description: 'Chronic tension from uncertainty compounds. Needs intervention — routine, rest, support.', triggers: ['prolonged uncertainty', 'poor sleep', 'isolation'], sentiment: -0.4 },
+    {
+      id: '',
+      label: 'Steady baseline',
+      domain: 'health',
+      probability: 0,
+      horizonMonths: 0,
+      description: 'No major changes — energy fluctuates with stress but holds.',
+      triggers: ['sleep consistency', 'basic movement'],
+      sentiment: 0.2,
+    },
+    {
+      id: '',
+      label: 'Stress accumulation',
+      domain: 'health',
+      probability: 0,
+      horizonMonths: 0,
+      description: 'Chronic tension from uncertainty compounds. Needs intervention — routine, rest, support.',
+      triggers: ['prolonged uncertainty', 'poor sleep', 'isolation'],
+      sentiment: -0.4,
+    },
   ],
   creativity: [
-    { id: '', label: 'Creative surge', domain: 'creativity', probability: 0, horizonMonths: 0, description: 'The weird tools keep coming. DinoClaw, AGI Prime — the obsession becomes the product.', triggers: ['consistent building', 'ignoring critics', 'shipping'], sentiment: 0.8 },
-    { id: '', label: 'Creative block', domain: 'creativity', probability: 0, horizonMonths: 0, description: 'Too many ideas, nothing lands. Paralysis from perfectionism or fear of irrelevance.', triggers: ['comparison', 'scope creep', 'no feedback loop'], sentiment: -0.3 },
+    {
+      id: '',
+      label: 'Creative surge',
+      domain: 'creativity',
+      probability: 0,
+      horizonMonths: 0,
+      description: 'The weird tools keep coming. DinoClaw, AGI Prime — the obsession becomes the product.',
+      triggers: ['consistent building', 'ignoring critics', 'shipping'],
+      sentiment: 0.8,
+    },
+    {
+      id: '',
+      label: 'Creative block',
+      domain: 'creativity',
+      probability: 0,
+      horizonMonths: 0,
+      description: 'Too many ideas, nothing lands. Paralysis from perfectionism or fear of irrelevance.',
+      triggers: ['comparison', 'scope creep', 'no feedback loop'],
+      sentiment: -0.3,
+    },
   ],
   growth: [
-    { id: '', label: 'Gradual ascent', domain: 'growth', probability: 0, horizonMonths: 0, description: 'Skills compound. Each loop adds clarity. You stop begging rooms to notice and start choosing rooms.', triggers: ['consistent effort', 'feedback integration', 'mentorship'], sentiment: 0.6 },
-    { id: '', label: 'Plateau', domain: 'growth', probability: 0, horizonMonths: 0, description: 'Progress stalls. Same loops, same patterns. Need a catalyst — new inputs, new environment.', triggers: ['routine stagnation', 'echo chamber', 'comfort zone'], sentiment: -0.1 },
+    {
+      id: '',
+      label: 'Gradual ascent',
+      domain: 'growth',
+      probability: 0,
+      horizonMonths: 0,
+      description:
+        'Skills compound. Each loop adds clarity. You stop begging rooms to notice and start choosing rooms.',
+      triggers: ['consistent effort', 'feedback integration', 'mentorship'],
+      sentiment: 0.6,
+    },
+    {
+      id: '',
+      label: 'Plateau',
+      domain: 'growth',
+      probability: 0,
+      horizonMonths: 0,
+      description: 'Progress stalls. Same loops, same patterns. Need a catalyst — new inputs, new environment.',
+      triggers: ['routine stagnation', 'echo chamber', 'comfort zone'],
+      sentiment: -0.1,
+    },
   ],
   social: [
-    { id: '', label: 'Small tribe forms', domain: 'social', probability: 0, horizonMonths: 0, description: 'Not a crowd — 3-5 aligned people across different rooms. Builders, not talkers.', triggers: ['open source contributions', 'genuine engagement', 'vulnerability'], sentiment: 0.65 },
-    { id: '', label: 'Digital hermit', domain: 'social', probability: 0, horizonMonths: 0, description: 'Online presence but no real connections. Posts without replies. Scrolling alone.', triggers: ['deleting posts', 'avoiding groups', 'mistrust'], sentiment: -0.35 },
+    {
+      id: '',
+      label: 'Small tribe forms',
+      domain: 'social',
+      probability: 0,
+      horizonMonths: 0,
+      description: 'Not a crowd — 3-5 aligned people across different rooms. Builders, not talkers.',
+      triggers: ['open source contributions', 'genuine engagement', 'vulnerability'],
+      sentiment: 0.65,
+    },
+    {
+      id: '',
+      label: 'Digital hermit',
+      domain: 'social',
+      probability: 0,
+      horizonMonths: 0,
+      description: 'Online presence but no real connections. Posts without replies. Scrolling alone.',
+      triggers: ['deleting posts', 'avoiding groups', 'mistrust'],
+      sentiment: -0.35,
+    },
   ],
   financial: [
-    { id: '', label: 'Stabilize', domain: 'financial', probability: 0, horizonMonths: 0, description: 'Contract, gig, or small role brings breathing room. Not rich, but resourced.', triggers: ['apply consistently', 'bridge job', 'freelance'], sentiment: 0.45 },
-    { id: '', label: 'Scarcity loop', domain: 'financial', probability: 0, horizonMonths: 0, description: 'Money stays tight. Survival mode affects all other domains. Need structural change.', triggers: ['avoidance', 'no applications', 'pride barrier'], sentiment: -0.6 },
+    {
+      id: '',
+      label: 'Stabilize',
+      domain: 'financial',
+      probability: 0,
+      horizonMonths: 0,
+      description: 'Contract, gig, or small role brings breathing room. Not rich, but resourced.',
+      triggers: ['apply consistently', 'bridge job', 'freelance'],
+      sentiment: 0.45,
+    },
+    {
+      id: '',
+      label: 'Scarcity loop',
+      domain: 'financial',
+      probability: 0,
+      horizonMonths: 0,
+      description: 'Money stays tight. Survival mode affects all other domains. Need structural change.',
+      triggers: ['avoidance', 'no applications', 'pride barrier'],
+      sentiment: -0.6,
+    },
   ],
 };
 
@@ -362,9 +514,7 @@ export function computeDomainModifiers(state: OracleState): {
 
   if (state.activeOverlays.archetypes && state.activeArchetypes.length > 0) {
     for (const arc of state.activeArchetypes.slice(0, 6)) {
-      const signed = NEGATIVE_ARCHETYPES.has(arc.id)
-        ? -arc.score * 0.16
-        : arc.score * 0.14;
+      const signed = NEGATIVE_ARCHETYPES.has(arc.id) ? -arc.score * 0.16 : arc.score * 0.14;
       for (const domain of arc.domains) {
         apply(domain, signed);
       }
@@ -459,25 +609,22 @@ export function runMonteCarloSimulation(
   };
 }
 
-function computeSentimentFactorsForDomain(
-  domain: OracleLifeDomain,
-  s: OracleSentimentProfile,
-): number {
+function computeSentimentFactorsForDomain(domain: OracleLifeDomain, s: OracleSentimentProfile): number {
   switch (domain) {
     case 'career':
-      return (s.ambition * 0.35 + s.resilience * 0.25 - s.fearOfFailure * 0.2 + s.hopefulness * 0.2) - 0.3;
+      return s.ambition * 0.35 + s.resilience * 0.25 - s.fearOfFailure * 0.2 + s.hopefulness * 0.2 - 0.3;
     case 'relationships':
-      return (s.hopefulness * 0.3 - s.loneliness * 0.25 + s.socialEnergy * 0.25 + s.selfAwareness * 0.2) - 0.3;
+      return s.hopefulness * 0.3 - s.loneliness * 0.25 + s.socialEnergy * 0.25 + s.selfAwareness * 0.2 - 0.3;
     case 'health':
-      return (s.resilience * 0.4 - s.loneliness * 0.2 + s.hopefulness * 0.2 + s.selfAwareness * 0.2) - 0.3;
+      return s.resilience * 0.4 - s.loneliness * 0.2 + s.hopefulness * 0.2 + s.selfAwareness * 0.2 - 0.3;
     case 'creativity':
-      return (s.creativity * 0.45 + s.ambition * 0.2 - s.fearOfFailure * 0.15 + s.hopefulness * 0.2) - 0.3;
+      return s.creativity * 0.45 + s.ambition * 0.2 - s.fearOfFailure * 0.15 + s.hopefulness * 0.2 - 0.3;
     case 'growth':
-      return (s.selfAwareness * 0.3 + s.resilience * 0.25 + s.ambition * 0.25 + s.hopefulness * 0.2) - 0.3;
+      return s.selfAwareness * 0.3 + s.resilience * 0.25 + s.ambition * 0.25 + s.hopefulness * 0.2 - 0.3;
     case 'social':
-      return (s.socialEnergy * 0.35 - s.loneliness * 0.25 + s.hopefulness * 0.2 + s.selfAwareness * 0.2) - 0.3;
+      return s.socialEnergy * 0.35 - s.loneliness * 0.25 + s.hopefulness * 0.2 + s.selfAwareness * 0.2 - 0.3;
     case 'financial':
-      return (s.ambition * 0.3 + s.resilience * 0.25 - s.fearOfFailure * 0.25 + s.hopefulness * 0.2) - 0.3;
+      return s.ambition * 0.3 + s.resilience * 0.25 - s.fearOfFailure * 0.25 + s.hopefulness * 0.2 - 0.3;
     default:
       return 0;
   }
@@ -485,10 +632,7 @@ function computeSentimentFactorsForDomain(
 
 // ─── Feedback Loop: Calibrate predictions with outcomes ──────
 
-export function applyFeedback(
-  state: OracleState,
-  entry: Omit<OracleFeedbackEntry, 'id'>,
-): OracleState {
+export function applyFeedback(state: OracleState, entry: Omit<OracleFeedbackEntry, 'id'>): OracleState {
   const feedback: OracleFeedbackEntry = {
     ...entry,
     id: `fb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -499,9 +643,7 @@ export function applyFeedback(
   const partial = resolved.filter((f) => f.outcome === 'partial').length + (entry.outcome === 'partial' ? 1 : 0);
   const totalResolved = resolved.length + (entry.outcome !== 'pending' ? 1 : 0);
 
-  const calibration = totalResolved > 0
-    ? (correct + partial * 0.5) / totalResolved
-    : 0.5;
+  const calibration = totalResolved > 0 ? (correct + partial * 0.5) / totalResolved : 0.5;
 
   return {
     ...state,
@@ -518,7 +660,10 @@ export function extractLifeEventsFromText(text: string): OracleLifeEvent[] {
 
   const domainPatterns: Array<{ pattern: RegExp; domain: OracleLifeDomain }> = [
     { pattern: /\b(job|career|work|hired|fired|gig|salary|intern|startup|company|interview)\b/i, domain: 'career' },
-    { pattern: /\b(love|partner|girlfriend|boyfriend|marriage|date|relationship|breakup|alone|lonely)\b/i, domain: 'relationships' },
+    {
+      pattern: /\b(love|partner|girlfriend|boyfriend|marriage|date|relationship|breakup|alone|lonely)\b/i,
+      domain: 'relationships',
+    },
     { pattern: /\b(health|sick|exercise|therapy|mental|anxiety|depression|hospital)\b/i, domain: 'health' },
     { pattern: /\b(create|build|code|design|art|music|write|project|invention|hack)\b/i, domain: 'creativity' },
     { pattern: /\b(learn|grow|school|college|degree|course|skill|mentor|book|read)\b/i, domain: 'growth' },
@@ -527,10 +672,27 @@ export function extractLifeEventsFromText(text: string): OracleLifeEvent[] {
   ];
 
   const sentimentWords: Record<string, number> = {
-    great: 0.6, amazing: 0.8, good: 0.4, happy: 0.7, love: 0.6, proud: 0.7,
-    bad: -0.4, terrible: -0.7, scared: -0.5, afraid: -0.6, lost: -0.4,
-    angry: -0.5, fail: -0.6, hate: -0.7, alone: -0.5, broke: -0.5,
-    hope: 0.5, dream: 0.4, fight: 0.3, survive: 0.2, overcome: 0.6,
+    great: 0.6,
+    amazing: 0.8,
+    good: 0.4,
+    happy: 0.7,
+    love: 0.6,
+    proud: 0.7,
+    bad: -0.4,
+    terrible: -0.7,
+    scared: -0.5,
+    afraid: -0.6,
+    lost: -0.4,
+    angry: -0.5,
+    fail: -0.6,
+    hate: -0.7,
+    alone: -0.5,
+    broke: -0.5,
+    hope: 0.5,
+    dream: 0.4,
+    fight: 0.3,
+    survive: 0.2,
+    overcome: 0.6,
   };
 
   for (const line of lines) {
@@ -582,10 +744,7 @@ export interface OracleRunParams {
   targetYear?: number;
 }
 
-export function runOraclePipeline(
-  state: OracleState,
-  params: OracleRunParams = {},
-): OracleState {
+export function runOraclePipeline(state: OracleState, params: OracleRunParams = {}): OracleState {
   const horizonMonths = params.horizonMonths ?? 60;
   const iterations = params.iterations ?? 5000;
   const transitMonths = params.transitMonths ?? 12;
@@ -686,9 +845,13 @@ export function runOraclePipeline(
       ...updatedState.logs,
       `[${new Date().toISOString()}] Oracle ran ${iterations} iterations over ${horizonMonths}mo horizon. Dominant: ${sim.dominantBranch}.`,
       `[${new Date().toISOString()}] Destiny Matrix report generated (${destinyMatrixReport.sections.length} sections).`,
-      communicationProfile ? `[${new Date().toISOString()}] Astro-voice profile computed (${communicationProfile.toneDirectives.length} directives).` : '',
+      communicationProfile
+        ? `[${new Date().toISOString()}] Astro-voice profile computed (${communicationProfile.toneDirectives.length} directives).`
+        : '',
       ...overlay.narrativeTags.map((tag) => `[Overlay] ${tag}`),
-    ].filter(Boolean).slice(-50),
+    ]
+      .filter(Boolean)
+      .slice(-50),
   };
 
   return updatedState;

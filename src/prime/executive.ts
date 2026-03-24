@@ -29,20 +29,32 @@ function looksLikeExplicitCommand(text: string): boolean {
 function isLikelyImperative(text: string): boolean {
   const t = text.trim().toLowerCase();
   // Not perfect, but catches "do X", "open X", "find X", etc.
-  return /^(do|open|close|search|find|rename|move|copy|paste|create|make|draft|email|research|summarize|clean|organize|download|install|run|execute|delete|remove|update|fix|refactor|build)\b/.test(t);
+  return /^(do|open|close|search|find|rename|move|copy|paste|create|make|draft|email|research|summarize|clean|organize|download|install|run|execute|delete|remove|update|fix|refactor|build)\b/.test(
+    t,
+  );
 }
 
 function isLikelyArenaRequest(text: string): boolean {
   const t = text.toLowerCase();
-  return /\b(arena|debate|argue|two sides|pros and cons|blueprint|architecture)\b/i.test(t) ||
-    /^\/(arena|mind)\b/i.test(text.trim());
+  if (/^\/(arena|mind)\b/i.test(text.trim())) return true;
+  // Require strong arena-specific intent, not casual word overlap.
+  // "debate" and "argue" are strong signals; "architecture" and "blueprint"
+  // only count when combined with a requesting verb (design, plan, build).
+  if (/\b(arena|debate|argue|two sides|pros and cons)\b/i.test(t)) return true;
+  if (/\b(design|plan|build|create|draft)\b.*\b(architecture|blueprint)\b/i.test(t)) return true;
+  if (/\b(architecture|blueprint)\b.*\b(design|plan|build|create|draft)\b/i.test(t)) return true;
+  return false;
 }
 
 function isLikelyImproveRequest(text: string): boolean {
   const t = text.trim().toLowerCase();
-  // Lightweight heuristic: users often type "forge: ..." without a slash.
-  // Keep it conservative so normal conversation doesn't get hijacked.
-  return /^(forge|evolve|improve)\s*[:\-]/i.test(t) || /\b(forge|evolve|self[-\s]?improve|improvement)\b/i.test(t);
+  // Only match when the user is explicitly invoking forge/improve, not
+  // casually mentioning "upgrade" or "improvement" in conversation.
+  if (/^(forge|evolve|improve)\s*[:-]/i.test(t)) return true;
+  if (/\b(forge|self[-\s]?improve)\b/i.test(t)) return true;
+  // "evolve" only when it looks like a command, not conversational
+  if (/^evolve\b/i.test(t)) return true;
+  return false;
 }
 
 export function executiveRoute(params: {
@@ -102,4 +114,3 @@ export function executiveRoute(params: {
 
   return { mode: 'talk', confidence: 0.55, reason: 'Default conversational route', memoryQuery: input };
 }
-

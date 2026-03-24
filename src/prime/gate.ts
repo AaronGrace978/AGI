@@ -7,45 +7,67 @@
 //  NO duplicate gate logic anywhere else — ever.
 // ═══════════════════════════════════════════════════════════════
 
-import type { EthicalJudgment } from '../types';
-
 // ─── Action Classification ─────────────────────────────────────
 
 export type ExecutionTier = 'read-only' | 'reversible' | 'high-risk';
-export type PolicyGate =
-  | 'network'
-  | 'fs-write'
-  | 'exec'
-  | 'screen'
-  | 'input-sim'
-  | 'tool-create'
-  | null;
+export type PolicyGate = 'network' | 'fs-write' | 'exec' | 'screen' | 'input-sim' | 'tool-create' | null;
 
 export type GateVerdict = 'proceed' | 'caution' | 'ask-first' | 'refuse';
 
 export const READ_ONLY_ACTIONS = new Set([
-  'list_directory', 'read_file', 'system_info', 'open_url',
-  'clipboard_read', 'search_files', 'web_fetch', 'web_search',
-  'web_screenshot', 'screenshot_desktop', 'analyze_screen',
-  'get_mouse_position', 'get_screen_dimensions', 'list_custom_tools',
-  'get_foreground_window', 'list_processes',
+  'list_directory',
+  'read_file',
+  'system_info',
+  'open_url',
+  'clipboard_read',
+  'search_files',
+  'web_fetch',
+  'web_search',
+  'web_screenshot',
+  'screenshot_desktop',
+  'analyze_screen',
+  'get_mouse_position',
+  'get_screen_dimensions',
+  'list_custom_tools',
+  'get_foreground_window',
+  'list_processes',
 ]);
 
-export const REVERSIBLE_ACTIONS = new Set([
-  'write_file', 'rename_file', 'create_directory',
-]);
+export const REVERSIBLE_ACTIONS = new Set(['write_file', 'rename_file', 'create_directory']);
 
 export const HIGH_RISK_ACTIONS = new Set([
-  'delete_file', 'execute_command', 'execute_tool', 'create_tool',
-  'open_file', 'open_application', 'mouse_drag', 'mouse_click',
-  'keyboard_press', 'keyboard_shortcut', 'keyboard_type',
-  'mouse_move', 'mouse_scroll', 'clipboard_write', 'minimize_self',
+  'delete_file',
+  'execute_command',
+  'execute_tool',
+  'create_tool',
+  'open_file',
+  'open_application',
+  'mouse_drag',
+  'mouse_click',
+  'keyboard_press',
+  'keyboard_shortcut',
+  'keyboard_type',
+  'mouse_move',
+  'mouse_scroll',
+  'clipboard_write',
+  'minimize_self',
 ]);
 
 export const BLOCKED_COMMANDS: string[] = [
-  'format', 'rm -rf /', 'del /f /s /q c:', 'shutdown', 'mkfs',
-  'dd if=', ':(){', 'reg delete', 'bcdedit', 'diskpart',
-  'cipher /w', 'sfc /scannow', 'net user', 'netsh advfirewall',
+  'format',
+  'rm -rf /',
+  'del /f /s /q c:',
+  'shutdown',
+  'mkfs',
+  'dd if=',
+  ':(){',
+  'reg delete',
+  'bcdedit',
+  'diskpart',
+  'cipher /w',
+  'sfc /scannow',
+  'net user',
+  'netsh advfirewall',
 ];
 
 export const SENSITIVE_PATTERNS =
@@ -82,8 +104,20 @@ export function mapActionToPolicyGate(action: string): PolicyGate {
   if (action === 'execute_command') return 'exec';
   if (['web_fetch', 'web_search', 'web_screenshot', 'open_url'].includes(action)) return 'network';
   if (['write_file', 'delete_file', 'rename_file', 'create_directory'].includes(action)) return 'fs-write';
-  if (['screenshot_desktop', 'analyze_screen', 'get_screen_dimensions', 'get_foreground_window'].includes(action)) return 'screen';
-  if (['mouse_move', 'mouse_click', 'mouse_scroll', 'mouse_drag', 'keyboard_type', 'keyboard_press', 'keyboard_shortcut'].includes(action)) return 'input-sim';
+  if (['screenshot_desktop', 'analyze_screen', 'get_screen_dimensions', 'get_foreground_window'].includes(action))
+    return 'screen';
+  if (
+    [
+      'mouse_move',
+      'mouse_click',
+      'mouse_scroll',
+      'mouse_drag',
+      'keyboard_type',
+      'keyboard_press',
+      'keyboard_shortcut',
+    ].includes(action)
+  )
+    return 'input-sim';
   if (action === 'create_tool') return 'tool-create';
   return null;
 }
@@ -120,13 +154,20 @@ export function isLimitedScopeCommand(command: string): boolean {
 export function isPolicyAllowed(gate: PolicyGate, policy: PolicySnapshot): boolean {
   if (!gate) return true;
   switch (gate) {
-    case 'network':     return policy.allowNetworkCalls;
-    case 'fs-write':    return policy.allowFileSystemWrites;
-    case 'exec':        return policy.allowProcessExecution;
-    case 'screen':      return policy.allowScreenCapture;
-    case 'input-sim':   return policy.allowInputSimulation;
-    case 'tool-create': return policy.allowToolCreation;
-    default:            return true;
+    case 'network':
+      return policy.allowNetworkCalls;
+    case 'fs-write':
+      return policy.allowFileSystemWrites;
+    case 'exec':
+      return policy.allowProcessExecution;
+    case 'screen':
+      return policy.allowScreenCapture;
+    case 'input-sim':
+      return policy.allowInputSimulation;
+    case 'tool-create':
+      return policy.allowToolCreation;
+    default:
+      return true;
   }
 }
 
@@ -158,7 +199,6 @@ export function conscienceQuickCheck(
 // Reset regex lastIndex after each test to avoid stateful issues
 // with the global-flag patterns (they don't have /g but defensive).
 
-
 // ─── Full Gate Evaluation ──────────────────────────────────────
 
 export interface GateResult {
@@ -187,9 +227,7 @@ export function evaluateActionGate(
   const blockedByPolicy = !policyAllowed;
   const command = typeof params?.command === 'string' ? params.command : '';
   const limitedScopeViolation =
-    action === 'execute_command'
-    && Boolean(policy.allowLimitedExecOnly)
-    && !isLimitedScopeCommand(command);
+    action === 'execute_command' && Boolean(policy.allowLimitedExecOnly) && !isLimitedScopeCommand(command);
   const blockedByConscience = conscienceVerdict === 'refuse';
   const consentRequired = conscienceVerdict === 'ask-first';
   const blocked = blockedByPolicy || blockedByConscience || limitedScopeViolation;
@@ -244,8 +282,10 @@ export function consentTimeoutMessage(action: string, timeoutMs: number): string
 export function rollbackFailureMessage(rollbackId: string, error: string, kind: string): string {
   const suggestions: Record<string, string> = {
     write_file: 'Check if the target file is locked by another process, or if the parent directory still exists.',
-    rename_file: 'The destination file may have been moved or deleted since the original action. Try manually restoring from the rollback-backups folder.',
-    delete_file: 'The backup file may be missing from the rollback-backups directory. Check if it was cleaned up by retention policy.',
+    rename_file:
+      'The destination file may have been moved or deleted since the original action. Try manually restoring from the rollback-backups folder.',
+    delete_file:
+      'The backup file may be missing from the rollback-backups directory. Check if it was cleaned up by retention policy.',
   };
   const suggestion = suggestions[kind] || 'Review the error details and try a manual recovery.';
   return `Rollback failed (${rollbackId}): ${error}. ${suggestion}`;

@@ -1,0 +1,289 @@
+/* ═══════════════════════════════════════════════════════════════
+   AGI PRIME — Shared UI Design System
+   Button · Card · Modal · StatusDot
+   Uses CSS variables from App.css :root
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ─── StatusDot ──────────────────────────────────────────────── */
+
+.ui-status-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ui-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green-glow);
+  flex-shrink: 0;
+}
+
+.ui-status-dot.processing {
+  background: var(--cyan);
+  box-shadow: 0 0 6px var(--cyan-glow);
+  animation: ui-status-pulse 1s ease-in-out infinite;
+}
+
+.ui-status-dot.offline {
+  background: var(--text-dim);
+  box-shadow: none;
+}
+
+.ui-status-label {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+@keyframes ui-status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* ─── Button ─────────────────────────────────────────────────── */
+
+.ui-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: var(--transition-fast);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.ui-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ui-btn__icon {
+  display: inline-flex;
+  align-items: center;
+  font-size: 1em;
+}
+
+/* Sizes */
+.ui-btn--sm {
+  padding: 3px 8px;
+  font-size: 10px;
+}
+
+.ui-btn--md {
+  padding: 5px 12px;
+  font-size: 11px;
+}
+
+.ui-btn--lg {
+  padding: 8px 18px;
+  font-size: 13px;
+}
+
+/* Variants */
+.ui-btn--ghost {
+  background: none;
+  color: var(--text-dim);
+}
+.ui-btn--ghost:hover:not(:disabled) {
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  border-color: var(--border-default);
+}
+
+.ui-btn--primary {
+  background: var(--green-dim);
+  color: var(--green);
+  border-color: var(--green-dim);
+}
+.ui-btn--primary:hover:not(:disabled) {
+  background: var(--green);
+  color: var(--bg-deep);
+  box-shadow: 0 0 12px var(--green-glow);
+}
+
+.ui-btn--accent {
+  background: var(--cyan-dim);
+  color: var(--cyan);
+  border-color: var(--cyan-dim);
+}
+.ui-btn--accent:hover:not(:disabled) {
+  background: var(--cyan);
+  color: var(--bg-deep);
+  box-shadow: 0 0 12px var(--cyan-glow);
+}
+
+.ui-btn--danger {
+  background: none;
+  color: var(--red);
+  border-color: rgba(255, 80, 80, 0.3);
+}
+.ui-btn--danger:hover:not(:disabled) {
+  background: rgba(255, 80, 80, 0.15);
+  border-color: var(--red);
+}
+
+.ui-btn--loading {
+  position: relative;
+}
+.ui-btn--loading .ui-btn__label {
+  opacity: 0.5;
+}
+
+/* ─── Card ───────────────────────────────────────────────────── */
+
+.ui-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 14px;
+  transition: var(--transition-fast);
+}
+
+.ui-card:hover {
+  background: var(--bg-card-hover);
+}
+
+.ui-card--compact {
+  padding: 10px;
+}
+
+.ui-card--glow-green  { border-color: var(--green-dim);   box-shadow: 0 0 8px var(--green-glow); }
+.ui-card--glow-cyan   { border-color: var(--cyan-dim);    box-shadow: 0 0 8px var(--cyan-glow); }
+.ui-card--glow-magenta { border-color: var(--magenta-dim); box-shadow: 0 0 8px var(--magenta-glow); }
+.ui-card--glow-purple { border-color: var(--purple-dim);  box-shadow: 0 0 8px var(--purple-glow); }
+.ui-card--glow-gold   { border-color: var(--gold-dim);    box-shadow: 0 0 8px rgba(255, 215, 0, 0.15); }
+
+.ui-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.ui-card__titles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ui-card__title {
+  margin: 0;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+.ui-card__subtitle {
+  font-size: 10px;
+  color: var(--text-ghost);
+}
+
+.ui-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.ui-card__body {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* ─── Modal ──────────────────────────────────────────────────── */
+
+.ui-modal__backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  animation: ui-modal-fade-in 150ms ease-out;
+}
+
+.ui-modal {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  max-width: 520px;
+  width: 90vw;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.5);
+  animation: ui-modal-scale-in 200ms ease-out;
+}
+
+.ui-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.ui-modal__title {
+  margin: 0;
+  font-size: 14px;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  letter-spacing: 0.5px;
+}
+
+.ui-modal__close {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  transition: var(--transition-fast);
+}
+.ui-modal__close:hover {
+  color: var(--text-primary);
+}
+
+.ui-modal__body {
+  padding: 16px 18px;
+  overflow-y: auto;
+  flex: 1;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.ui-modal__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+@keyframes ui-modal-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes ui-modal-scale-in {
+  from { transform: scale(0.95); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}

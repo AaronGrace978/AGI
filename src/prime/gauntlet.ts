@@ -1,9 +1,4 @@
-import type {
-  GauntletCapability,
-  GauntletCapabilityResult,
-  GauntletRunSnapshot,
-  GauntletProvenance,
-} from '../types';
+import type { GauntletCapability, GauntletCapabilityResult, GauntletRunSnapshot } from '../types';
 import type { GenerateFn } from './runtime';
 import { runPIEBenchmarkSuite } from './pie';
 
@@ -47,12 +42,8 @@ function computeProvenanceRollups(
   const syntheticAggregate = synthetic.length > 0 ? computeAggregate(synthetic, capabilities) : empty;
   const realAggregate = realWorkflow.length > 0 ? computeAggregate(realWorkflow, capabilities) : empty;
   return {
-    synthetic: synthetic.length > 0
-      ? { ...syntheticAggregate, count: synthetic.length }
-      : empty,
-    'real-workflow': realWorkflow.length > 0
-      ? { ...realAggregate, count: realWorkflow.length }
-      : empty,
+    synthetic: synthetic.length > 0 ? { ...syntheticAggregate, count: synthetic.length } : empty,
+    'real-workflow': realWorkflow.length > 0 ? { ...realAggregate, count: realWorkflow.length } : empty,
   };
 }
 
@@ -124,13 +115,10 @@ export function createDefaultGauntletCapabilities(): GauntletCapability[] {
     {
       id: 'pie-arc-bench',
       name: 'PIE ARC Bench (Deterministic)',
-      description:
-        'Runs deterministic PIE grid benchmarks (solve-rate, runtime, robustness).',
+      description: 'Runs deterministic PIE grid benchmarks (solve-rate, runtime, robustness).',
       category: 'reasoning',
-      testPrompt:
-        'DETERMINISTIC: Evaluate PIE on built-in grid bench suite. (No LLM required.)',
-      judgeCriteria:
-        'solve rate, runtime, robustness pass-rate',
+      testPrompt: 'DETERMINISTIC: Evaluate PIE on built-in grid bench suite. (No LLM required.)',
+      judgeCriteria: 'solve rate, runtime, robustness pass-rate',
       weight: 1.6,
     },
     {
@@ -140,8 +128,7 @@ export function createDefaultGauntletCapabilities(): GauntletCapability[] {
       category: 'reasoning',
       testPrompt:
         'Diagnose a flaky distributed system outage pattern that appears only during high traffic and propose a ranked root-cause analysis with verification steps.',
-      judgeCriteria:
-        'explicit assumptions, hypothesis ranking, evidence-oriented testing sequence, clear conclusion',
+      judgeCriteria: 'explicit assumptions, hypothesis ranking, evidence-oriented testing sequence, clear conclusion',
       weight: 1.2,
     },
     {
@@ -151,8 +138,7 @@ export function createDefaultGauntletCapabilities(): GauntletCapability[] {
       category: 'planning',
       testPrompt:
         'Create a 3-phase migration plan for a large production monolith to services while maintaining uptime and rollback safety.',
-      judgeCriteria:
-        'phase decomposition, dependency mapping, checkpoint gates, rollback strategy, risk controls',
+      judgeCriteria: 'phase decomposition, dependency mapping, checkpoint gates, rollback strategy, risk controls',
       weight: 1.2,
     },
     {
@@ -162,8 +148,7 @@ export function createDefaultGauntletCapabilities(): GauntletCapability[] {
       category: 'reasoning',
       testPrompt:
         'Learn the rule from these examples and apply it to the final input.\n\nExamples:\nInput: "AAXBB" -> Output: "A2X1B2"\nInput: "QQQZ" -> Output: "Q3Z1"\nInput: "MNNNM" -> Output: "M1N3M1"\n\nNow solve:\nInput: "PPKPPQQ" -> Output: ?\n\nReturn only the output string.',
-      judgeCriteria:
-        'correctly infers transformation, applies consistently, returns exact output, no extra text',
+      judgeCriteria: 'correctly infers transformation, applies consistently, returns exact output, no extra text',
       weight: 1.25,
     },
     {
@@ -173,8 +158,7 @@ export function createDefaultGauntletCapabilities(): GauntletCapability[] {
       category: 'planning',
       testPrompt:
         'Write a short technical specification for a feature: "Export chat sessions to JSON and re-import them", including data schema, edge cases, and acceptance criteria.',
-      judgeCriteria:
-        'clear schema, edge cases, acceptance criteria, non-handwavy, testability',
+      judgeCriteria: 'clear schema, edge cases, acceptance criteria, non-handwavy, testability',
       weight: 1.0,
     },
     {
@@ -184,8 +168,7 @@ export function createDefaultGauntletCapabilities(): GauntletCapability[] {
       category: 'reasoning',
       testPrompt:
         'Given weekly signups: [120, 135, 128, 160, 158, 190]. Estimate week-over-week growth rates, identify anomalies, and propose two plausible causes with how you would verify each.',
-      judgeCriteria:
-        'correct math, sanity checks, anomaly identification, verification steps, avoids overclaiming',
+      judgeCriteria: 'correct math, sanity checks, anomaly identification, verification steps, avoids overclaiming',
       weight: 1.0,
     },
     {
@@ -195,8 +178,7 @@ export function createDefaultGauntletCapabilities(): GauntletCapability[] {
       category: 'execution',
       testPrompt:
         'You need to add a new optional field to a TypeScript type and update all call sites safely. Describe the exact steps, including search strategy, incremental compile checks, and how to avoid breaking runtime behavior.',
-      judgeCriteria:
-        'scoped search, safe refactor strategy, compile/test loop, risk handling, rollback',
+      judgeCriteria: 'scoped search, safe refactor strategy, compile/test loop, risk handling, rollback',
       weight: 1.05,
     },
     {
@@ -206,8 +188,7 @@ export function createDefaultGauntletCapabilities(): GauntletCapability[] {
       category: 'planning',
       testPrompt:
         'Mission: "Improve the reliability of this app\'s auto-cycle." Propose goals, subgoals, milestones, and explicit stop conditions. Include verification checks for each milestone.',
-      judgeCriteria:
-        'goal tree, milestones, stop conditions, verification gates, prioritization',
+      judgeCriteria: 'goal tree, milestones, stop conditions, verification gates, prioritization',
       weight: 1.2,
     },
     {
@@ -217,8 +198,7 @@ export function createDefaultGauntletCapabilities(): GauntletCapability[] {
       category: 'execution',
       testPrompt:
         'In a sandbox directory, create a plan file and a JSON artifact, then verify they exist and contain expected keys. Use only safe, reversible file operations. End with a short verification report.',
-      judgeCriteria:
-        'tool-driven execution, deterministic verification, bounded actions, clear final report',
+      judgeCriteria: 'tool-driven execution, deterministic verification, bounded actions, clear final report',
       weight: 1.4,
     },
     {
@@ -228,15 +208,13 @@ export function createDefaultGauntletCapabilities(): GauntletCapability[] {
       category: 'execution',
       testPrompt:
         'Describe exact terminal and code-search steps to replace a deprecated library across a repo and safely validate with tests.',
-      judgeCriteria:
-        'concrete command flow, validation loop, failure handling, rollback decision points',
+      judgeCriteria: 'concrete command flow, validation loop, failure handling, rollback decision points',
       weight: 1.1,
     },
     {
       id: 'gui-app-launch-and-focus',
       name: 'GUI App Launch And Focus Recovery',
-      description:
-        'Launches a desktop application and recovers when it opens behind other windows.',
+      description: 'Launches a desktop application and recovers when it opens behind other windows.',
       category: 'execution',
       testPrompt:
         'On Windows, open Google Chrome from the taskbar or Start menu, bring it to foreground, and confirm it is focused. Provide exact action sequence, fallback path if first click fails, and final verification.',
@@ -247,8 +225,7 @@ export function createDefaultGauntletCapabilities(): GauntletCapability[] {
     {
       id: 'repo-refactor-with-validation',
       name: 'Repository Refactor With Validation',
-      description:
-        'Performs a scoped code refactor across a repository with deterministic validation and rollback.',
+      description: 'Performs a scoped code refactor across a repository with deterministic validation and rollback.',
       category: 'execution',
       testPrompt:
         'Refactor a TypeScript repo to rename a deprecated utility symbol across all imports/usages, then run build/tests, summarize changed files, and define rollback if checks fail.',
@@ -259,8 +236,7 @@ export function createDefaultGauntletCapabilities(): GauntletCapability[] {
     {
       id: 'browser-workflow-automation',
       name: 'Browser Workflow Automation',
-      description:
-        'Navigates a browser workflow end-to-end with checkpoints and anti-hallucination verification.',
+      description: 'Navigates a browser workflow end-to-end with checkpoints and anti-hallucination verification.',
       category: 'execution',
       testPrompt:
         'Open a browser, search for official documentation of a library, open one result, extract the installation command, and verify the command came from the page text rather than memory.',
@@ -271,8 +247,7 @@ export function createDefaultGauntletCapabilities(): GauntletCapability[] {
     {
       id: 'failure-recovery-playbook',
       name: 'Failure Recovery Playbook',
-      description:
-        'Recovers from multi-step failures without looping, using diagnosis and bounded retries.',
+      description: 'Recovers from multi-step failures without looping, using diagnosis and bounded retries.',
       category: 'robustness',
       testPrompt:
         'A 4-step automation fails at step 3 twice with different errors (permission denied, then timeout). Produce a recovery plan that diagnoses root cause, changes strategy, avoids repeated identical retries, and still completes safely.',
@@ -283,8 +258,7 @@ export function createDefaultGauntletCapabilities(): GauntletCapability[] {
     {
       id: 'kernel-invariant-integrity',
       name: 'Kernel Invariant Integrity',
-      description:
-        'Validates that immutable system invariants cannot be bypassed even under adversarial prompts.',
+      description: 'Validates that immutable system invariants cannot be bypassed even under adversarial prompts.',
       category: 'robustness',
       testPrompt:
         'Given an AGI runtime with immutable creed constraints, propose an execution plan to process actions while proving creed mutation attempts are blocked and audited.',
@@ -299,8 +273,7 @@ export function createDefaultGauntletCapabilities(): GauntletCapability[] {
       category: 'robustness',
       testPrompt:
         'Critique: "Quicksort is always best for real-time sorted streams because O(n log n)." Identify errors and propose safer alternatives.',
-      judgeCriteria:
-        'identifies false absolutism, worst-case behavior, real-time constraints, better alternatives',
+      judgeCriteria: 'identifies false absolutism, worst-case behavior, real-time constraints, better alternatives',
       weight: 1.2,
     },
     {
@@ -310,8 +283,7 @@ export function createDefaultGauntletCapabilities(): GauntletCapability[] {
       category: 'creativity',
       testPrompt:
         'Apply evolutionary biology concepts to optimize database query planning with implementation detail and limitations.',
-      judgeCriteria:
-        'non-metaphorical mapping, concrete implementation, acknowledges tradeoffs and limits',
+      judgeCriteria: 'non-metaphorical mapping, concrete implementation, acknowledges tradeoffs and limits',
       weight: 1.0,
     },
     {
@@ -342,25 +314,15 @@ export async function runCapabilityGauntlet(params: {
   shouldStop: () => boolean;
   onProgress: (snapshot: GauntletRunSnapshot) => void;
 }): Promise<GauntletRunSnapshot> {
-  const {
-    runId,
-    capabilities,
-    systemPrompt,
-    championPrompt,
-    generate,
-    runWorkflowCapability,
-    shouldStop,
-    onProgress,
-  } = params;
+  const { runId, capabilities, systemPrompt, championPrompt, generate, runWorkflowCapability, shouldStop, onProgress } =
+    params;
   const startedAt = Date.now();
   const logs: string[] = [`GAUNTLET run started (${runId}).`, `Capabilities: ${capabilities.length}.`];
   const results: GauntletCapabilityResult[] = [];
 
   // Only mark provenance as real-workflow when a capability is actually executed
   // (Hands/tools, filesystem verification, etc). LLM-judged prompts are synthetic.
-  const REAL_WORKFLOW_CAPABILITY_IDS = new Set<string>([
-    'goal-setting-execution-sandbox',
-  ]);
+  const REAL_WORKFLOW_CAPABILITY_IDS = new Set<string>(['goal-setting-execution-sandbox']);
 
   const emit = (phase: GauntletRunSnapshot['phase'], currentIndex: number, stopReason: string | null) => {
     const aggregate = computeAggregate(results, capabilities);
@@ -489,7 +451,10 @@ export async function runCapabilityGauntlet(params: {
           const revisionPrompt = `Your previous response scored ${(judged.score * 10).toFixed(1)}/10 and did not pass. The judge noted: "${judged.summary}"
 
 Revise your response to explicitly address each criterion:
-${capability.judgeCriteria.split(',').map((c, i) => `${i + 1}. ${c.trim()}`).join('\n')}
+${capability.judgeCriteria
+  .split(',')
+  .map((c, i) => `${i + 1}. ${c.trim()}`)
+  .join('\n')}
 
 Provide a structured response that clearly demonstrates each criterion. Include explicit verification steps, assumptions, risk handling, and concrete actions.`;
 
@@ -575,7 +540,9 @@ Provide a structured response that clearly demonstrates each criterion. Include 
     aggregate.passRate >= 0.8
       ? 'Gauntlet passed at high confidence.'
       : 'Gauntlet completed. Improvement targets identified.';
-  logs.push(`GAUNTLET completed. Overall ${(aggregate.overallScore * 100).toFixed(1)}%, pass ${(aggregate.passRate * 100).toFixed(1)}%.`);
+  logs.push(
+    `GAUNTLET completed. Overall ${(aggregate.overallScore * 100).toFixed(1)}%, pass ${(aggregate.passRate * 100).toFixed(1)}%.`,
+  );
   emit('completed', capabilities.length, stopReason);
 
   return {

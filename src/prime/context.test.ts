@@ -48,4 +48,3 @@ describe('context pack', () => {
     expect(out[0].content).toContain('extra');
   });
 });
-

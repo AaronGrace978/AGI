@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  createEnvelope,
-  isOrchestratorCommandType,
-  isOrchestratorEventType,
-} from './orchestrator-contracts';
+import { createEnvelope, isOrchestratorCommandType, isOrchestratorEventType } from './orchestrator-contracts';
 
 describe('orchestrator contracts', () => {
   it('creates a strongly shaped envelope', () => {
@@ -29,4 +25,3 @@ describe('orchestrator contracts', () => {
     expect(isOrchestratorEventType('invalid')).toBe(false);
   });
 });
-

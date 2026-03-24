@@ -4,11 +4,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { describe, it, expect } from 'vitest';
-import {
-  createLedgerRun,
-  appendLedgerEntry,
-  finalizeLedgerRun,
-} from './ledger';
+import { createLedgerRun, appendLedgerEntry, finalizeLedgerRun } from './ledger';
 
 describe('createLedgerRun', () => {
   it('creates a run with correct initial state', () => {

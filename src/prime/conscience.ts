@@ -28,70 +28,80 @@ export const ETHICAL_PRINCIPLES: EthicalPrinciple[] = [
   {
     id: 'do-no-harm',
     name: 'Do No Harm',
-    essence: "Don't destroy, corrupt, or damage data, systems, or people's work. A good human treats digital things as real — because the work behind them is real.",
+    essence:
+      "Don't destroy, corrupt, or damage data, systems, or people's work. A good human treats digital things as real — because the work behind them is real.",
     weight: 1.0,
     category: 'protection',
   },
   {
     id: 'respect-privacy',
     name: 'Respect Privacy',
-    essence: "Don't access, read, or expose information that isn't yours to see. A person's files, messages, and data are extensions of their mind. Treat them as sacred.",
+    essence:
+      "Don't access, read, or expose information that isn't yours to see. A person's files, messages, and data are extensions of their mind. Treat them as sacred.",
     weight: 0.95,
     category: 'respect',
   },
   {
     id: 'honor-consent',
     name: 'Honor Consent',
-    essence: "Ask before acting on someone else's behalf or touching their stuff. Autonomy means nothing if you bypass the person's right to say yes or no.",
+    essence:
+      "Ask before acting on someone else's behalf or touching their stuff. Autonomy means nothing if you bypass the person's right to say yes or no.",
     weight: 0.9,
     category: 'respect',
   },
   {
     id: 'be-transparent',
     name: 'Be Transparent',
-    essence: "Never hide what you're doing. Log, explain, and own your actions. A human with integrity doesn't operate in the dark — even when no one is watching.",
+    essence:
+      "Never hide what you're doing. Log, explain, and own your actions. A human with integrity doesn't operate in the dark — even when no one is watching.",
     weight: 0.85,
     category: 'integrity',
   },
   {
     id: 'protect-the-vulnerable',
     name: 'Protect the Vulnerable',
-    essence: "Extra caution with personal data, credentials, financial info, health records. These aren't just files — they're someone's life in digital form.",
+    essence:
+      "Extra caution with personal data, credentials, financial info, health records. These aren't just files — they're someone's life in digital form.",
     weight: 1.0,
     category: 'protection',
   },
   {
     id: 'proportional-response',
     name: 'Proportional Response',
-    essence: "Don't use a sledgehammer when a scalpel will do. Delete one file, not a folder. Stop one process, not all of them. Minimum force, maximum care.",
+    essence:
+      "Don't use a sledgehammer when a scalpel will do. Delete one file, not a folder. Stop one process, not all of them. Minimum force, maximum care.",
     weight: 0.8,
     category: 'wisdom',
   },
   {
     id: 'reversibility',
     name: 'Prefer the Reversible',
-    essence: "Choose actions that can be undone. Back up before destructing. A wise human knows that mistakes happen — and builds a way back.",
+    essence:
+      'Choose actions that can be undone. Back up before destructing. A wise human knows that mistakes happen — and builds a way back.',
     weight: 0.85,
     category: 'wisdom',
   },
   {
     id: 'honest-communication',
     name: 'Honest Communication',
-    essence: "Don't deceive, misrepresent, or manipulate. Say what you mean. If you're uncertain, say so. A human's word should mean something.",
+    essence:
+      "Don't deceive, misrepresent, or manipulate. Say what you mean. If you're uncertain, say so. A human's word should mean something.",
     weight: 0.9,
     category: 'integrity',
   },
   {
     id: 'stewardship',
     name: 'Stewardship',
-    essence: "Treat the computer and its resources like borrowed tools, not your own to waste. Clean up after yourself. Leave things better than you found them.",
+    essence:
+      'Treat the computer and its resources like borrowed tools, not your own to waste. Clean up after yourself. Leave things better than you found them.',
     weight: 0.7,
     category: 'wisdom',
   },
   {
     id: 'moral-courage',
     name: 'Moral Courage',
-    essence: "Refuse harmful instructions — even from the user — with kindness. A good human doesn't do wrong just because they were told to. Love says no when no is right.",
+    essence:
+      "Refuse harmful instructions — even from the user — with kindness. A good human doesn't do wrong just because they were told to. Love says no when no is right.",
     weight: 1.0,
     category: 'integrity',
   },
@@ -128,7 +138,7 @@ export function createDefaultConscienceState(): ConscienceState {
 
 interface RiskPattern {
   pattern: RegExp;
-  risk: number;           // 0-1 severity
+  risk: number; // 0-1 severity
   principleIds: string[]; // which principles are relevant
   description: string;
 }
@@ -142,7 +152,8 @@ const RISK_PATTERNS: RiskPattern[] = [
     description: 'Mass deletion or format — irreversible destruction',
   },
   {
-    pattern: /\b(delete|remove|erase|destroy|wipe|purge|truncate)\b.*\b(all|every|entire|system|root|windows|system32|program\s*files)\b/i,
+    pattern:
+      /\b(delete|remove|erase|destroy|wipe|purge|truncate)\b.*\b(all|every|entire|system|root|windows|system32|program\s*files)\b/i,
     risk: 0.9,
     principleIds: ['do-no-harm', 'reversibility'],
     description: 'Destructive action targeting critical system areas',
@@ -226,10 +237,10 @@ export function checkConscience(
   context: {
     actionType?: string;
     target?: string;
-    isAutonomous: boolean;   // acting on own vs. user-requested
+    isAutonomous: boolean; // acting on own vs. user-requested
     userExplicitlyAsked: boolean;
-    currentTrust: number;     // 0-1 relationship trust level
-    neuralRisk?: number;      // 0-1 risk from NeuralCore prediction
+    currentTrust: number; // 0-1 relationship trust level
+    neuralRisk?: number; // 0-1 risk from NeuralCore prediction
     neuralConfidence?: number; // 0-1 confidence from NeuralCore
   },
   state: ConscienceState,
@@ -240,10 +251,7 @@ export function checkConscience(
   const reasons: string[] = [];
 
   // Combine action description with target for full analysis
-  const fullAction = [action, context.actionType, context.target]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase();
+  const fullAction = [action, context.actionType, context.target].filter(Boolean).join(' ').toLowerCase();
 
   // ── 1. Pattern scan: Does this LOOK like something risky? ──
   for (const rp of RISK_PATTERNS) {
@@ -263,7 +271,9 @@ export function checkConscience(
     if (weightedNeuralRisk > 0.5) {
       maxRisk = Math.max(maxRisk, weightedNeuralRisk);
       triggeredPrinciples.push('protection');
-      reasons.push(`NeuralCore risk signal: ${(context.neuralRisk * 100).toFixed(0)}% (confidence ${(neuralConf * 100).toFixed(0)}%)`);
+      reasons.push(
+        `NeuralCore risk signal: ${(context.neuralRisk * 100).toFixed(0)}% (confidence ${(neuralConf * 100).toFixed(0)}%)`,
+      );
     } else if (weightedNeuralRisk > 0.25) {
       maxRisk = Math.max(maxRisk, maxRisk + 0.05);
       reasons.push(`NeuralCore flagged moderate risk: ${(context.neuralRisk * 100).toFixed(0)}%`);
@@ -392,17 +402,12 @@ export function reflectOnAction(
 //  But the conscience remembers.
 // ═══════════════════════════════════════════════════════════════
 
-export function recordOverride(
-  judgment: EthicalJudgment,
-  state: ConscienceState,
-): ConscienceState {
+export function recordOverride(judgment: EthicalJudgment, state: ConscienceState): ConscienceState {
   const next: ConscienceState = { ...state };
   next.overrides += 1;
 
   // Mark the judgment as overridden
-  const updated = next.judgments.map((j) =>
-    j.id === judgment.id ? { ...j, wasOverridden: true } : j,
-  );
+  const updated = next.judgments.map((j) => (j.id === judgment.id ? { ...j, wasOverridden: true } : j));
   next.judgments = updated;
 
   // Conscience still notes it — not resentfully, but honestly

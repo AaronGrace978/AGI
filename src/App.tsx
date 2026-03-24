@@ -45,10 +45,14 @@ function TitleBar() {
       </div>
       <div className="titlebar-controls">
         <button className="titlebar-btn minimize" onClick={() => window.api.window.minimize()}>
-          <svg width="10" height="1"><rect width="10" height="1" fill="currentColor" /></svg>
+          <svg width="10" height="1">
+            <rect width="10" height="1" fill="currentColor" />
+          </svg>
         </button>
         <button className="titlebar-btn maximize" onClick={() => window.api.window.maximize()}>
-          <svg width="10" height="10"><rect width="10" height="10" fill="none" stroke="currentColor" strokeWidth="1" /></svg>
+          <svg width="10" height="10">
+            <rect width="10" height="10" fill="none" stroke="currentColor" strokeWidth="1" />
+          </svg>
         </button>
         <button className="titlebar-btn close" onClick={() => window.api.window.close()}>
           <svg width="10" height="10">
@@ -66,20 +70,47 @@ const ActivePanel = memo(function ActivePanel() {
 
   let panel: React.ReactNode;
   switch (activeModule) {
-    case 'nexus':    panel = <NexusPanel />; break;
-    case 'memory':   panel = <MemoryPanel />; break;
-    case 'heart':    panel = <HeartPanel />; break;
-    case 'mind':     panel = <MindPanel />; break;
-    case 'hands':    panel = <HandsPanel />; break;
-    case 'forge':    panel = <ForgePanel />; break;
-    case 'gauntlet': panel = <GauntletPanel />; break;
-    case 'sovereign': panel = <SovereignPanel />; break;
-    case 'spark':    panel = <SparkPanel />; break;
-    case 'voice':    panel = <VoiceBox />; break;
-    case 'oracle':   panel = <OraclePanel />; break;
-    case 'creed':    panel = <CreedPanel />; break;
-    case 'settings': panel = <SettingsPanel />; break;
-    default:         panel = <NexusPanel />;
+    case 'nexus':
+      panel = <NexusPanel />;
+      break;
+    case 'memory':
+      panel = <MemoryPanel />;
+      break;
+    case 'heart':
+      panel = <HeartPanel />;
+      break;
+    case 'mind':
+      panel = <MindPanel />;
+      break;
+    case 'hands':
+      panel = <HandsPanel />;
+      break;
+    case 'forge':
+      panel = <ForgePanel />;
+      break;
+    case 'gauntlet':
+      panel = <GauntletPanel />;
+      break;
+    case 'sovereign':
+      panel = <SovereignPanel />;
+      break;
+    case 'spark':
+      panel = <SparkPanel />;
+      break;
+    case 'voice':
+      panel = <VoiceBox />;
+      break;
+    case 'oracle':
+      panel = <OraclePanel />;
+      break;
+    case 'creed':
+      panel = <CreedPanel />;
+      break;
+    case 'settings':
+      panel = <SettingsPanel />;
+      break;
+    default:
+      panel = <NexusPanel />;
   }
 
   return <Suspense fallback={<PanelLoader />}>{panel}</Suspense>;
@@ -102,13 +133,17 @@ export default function App() {
         </AppErrorBoundary>
         <AppErrorBoundary>
           <main className="main-content">
-            {initialized ? <ActivePanel /> : (
+            {initialized ? (
+              <ActivePanel />
+            ) : (
               <div className="boot-screen">
                 <div className="boot-logo">
                   <img src={agiPrimeLogo} alt="AGI PRIME logo" className="boot-logo-image" />
                 </div>
                 <div className="boot-text">INITIALIZING AGI PRIME</div>
-                <div className="boot-bar"><div className="boot-bar-fill" /></div>
+                <div className="boot-bar">
+                  <div className="boot-bar-fill" />
+                </div>
                 <div className="boot-status">Loading consciousness modules...</div>
               </div>
             )}

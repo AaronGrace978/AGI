@@ -25,6 +25,21 @@ describe('executiveRoute', () => {
     expect(d.mode).toBe('talk');
   });
 
+  it('does NOT route casual "architecture" mentions to arena', () => {
+    const d = executiveRoute({ input: 'How do you feel, I gave you an architecture upgrade<3' });
+    expect(d.mode).toBe('talk');
+  });
+
+  it('does NOT route casual "improvement" mentions to improve', () => {
+    const d = executiveRoute({ input: 'The improvement to your code was great!' });
+    expect(d.mode).toBe('talk');
+  });
+
+  it('DOES route "design an architecture" to arena', () => {
+    const d = executiveRoute({ input: 'Design a microservices architecture for our backend' });
+    expect(d.mode).toBe('arena');
+  });
+
   it('routes imperatives to act when confident enough', () => {
     const d = executiveRoute({ input: 'Clean my desktop and organize files into folders.' });
     // This is a deliberately action-like request; router should prefer Hands.
@@ -32,4 +47,3 @@ describe('executiveRoute', () => {
     if (d.mode === 'act') expect(d.confidence).toBeGreaterThanOrEqual(0.65);
   });
 });
-

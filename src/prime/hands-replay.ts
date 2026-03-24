@@ -1,6 +1,12 @@
 export interface HandsReplayEntry {
   type: string;
-  payload?: Record<string, unknown>;
+  payload?: Record<string, unknown> & {
+    success?: boolean;
+    blocked?: boolean;
+    action?: string;
+    actionType?: string;
+    actionResult?: { success?: boolean };
+  };
 }
 
 export interface HandsReplayMetrics {

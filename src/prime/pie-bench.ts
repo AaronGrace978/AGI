@@ -121,4 +121,3 @@ export const PIE_BENCH_SUITE: PIEBenchTask[] = [
     ],
   },
 ];
-

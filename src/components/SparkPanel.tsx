@@ -9,10 +9,9 @@
 import { useState, useRef, useMemo, useCallback, memo } from 'react';
 import { useStore } from '../store';
 import { usePinnedAutoScroll } from '../hooks/usePinnedAutoScroll';
+import { Button } from './ui';
 
-function formatPrediction(
-  prediction: string | number | boolean | Record<string, unknown> | Array<unknown>,
-): string {
+function formatPrediction(prediction: string | number | boolean | Record<string, unknown> | Array<unknown>): string {
   if (typeof prediction === 'string') return prediction;
   if (typeof prediction === 'number' || typeof prediction === 'boolean') {
     return String(prediction);
@@ -32,13 +31,14 @@ const WorldModelSection = memo(function WorldModelSection() {
   const [filter, setFilter] = useState('');
 
   const filtered = useMemo(
-    () => filter
-      ? entities.filter(
-          (e) =>
-            e.name.toLowerCase().includes(filter.toLowerCase()) ||
-            e.type.toLowerCase().includes(filter.toLowerCase()),
-        )
-      : entities.slice(-20),
+    () =>
+      filter
+        ? entities.filter(
+            (e) =>
+              e.name.toLowerCase().includes(filter.toLowerCase()) ||
+              e.type.toLowerCase().includes(filter.toLowerCase()),
+          )
+        : entities.slice(-20),
     [entities, filter],
   );
 
@@ -61,9 +61,7 @@ const WorldModelSection = memo(function WorldModelSection() {
       </div>
       <div className="spark-section-body">
         {entities.length === 0 ? (
-          <div className="spark-empty">
-            No knowledge yet. Feed text to SPARK to build the world model.
-          </div>
+          <div className="spark-empty">No knowledge yet. Feed text to SPARK to build the world model.</div>
         ) : (
           <>
             <div className="spark-type-chips">
@@ -82,9 +80,7 @@ const WorldModelSection = memo(function WorldModelSection() {
                 <div key={e.id} className="spark-entity">
                   <span className="spark-entity-name">{e.name}</span>
                   <span className="spark-entity-type">{e.type}</span>
-                  <span className="spark-entity-conf">
-                    {(e.confidence * 100).toFixed(0)}%
-                  </span>
+                  <span className="spark-entity-conf">{(e.confidence * 100).toFixed(0)}%</span>
                 </div>
               ))}
             </div>
@@ -121,16 +117,11 @@ const CuriositySection = memo(function CuriositySection() {
       <div className="spark-section-header">
         <span className="spark-section-icon">◈</span>
         <span className="spark-section-title">CURIOSITY ENGINE</span>
-        <span className="spark-section-badge">
-          {(curiosityScore * 100).toFixed(0)}% drive
-        </span>
+        <span className="spark-section-badge">{(curiosityScore * 100).toFixed(0)}% drive</span>
       </div>
       <div className="spark-section-body">
         <div className="spark-curiosity-bar">
-          <div
-            className="spark-curiosity-fill"
-            style={{ width: `${curiosityScore * 100}%` }}
-          />
+          <div className="spark-curiosity-fill" style={{ width: `${curiosityScore * 100}%` }} />
         </div>
         <div className="spark-stat-row">
           <span>Generated: {totalQuestionsGenerated}</span>
@@ -162,27 +153,18 @@ const ReasonerSection = memo(function ReasonerSection() {
       <div className="spark-section-header">
         <span className="spark-section-icon">⚡</span>
         <span className="spark-section-title">HYBRID REASONER</span>
-        <span className="spark-section-badge">
-          {chains.filter((c) => c.verified).length} verified
-        </span>
+        <span className="spark-section-badge">{chains.filter((c) => c.verified).length} verified</span>
       </div>
       <div className="spark-section-body">
         {chains.length === 0 ? (
-          <div className="spark-empty">
-            No reasoning chains yet. Try "calculate 2^10 + sqrt(144)".
-          </div>
+          <div className="spark-empty">No reasoning chains yet. Try "calculate 2^10 + sqrt(144)".</div>
         ) : (
           <div className="spark-chain-list">
             {chains.slice(-5).map((chain) => (
-              <div
-                key={chain.id}
-                className={`spark-chain ${chain.verified ? 'verified' : 'unverified'}`}
-              >
+              <div key={chain.id} className={`spark-chain ${chain.verified ? 'verified' : 'unverified'}`}>
                 <div className="spark-chain-header">
                   <span className="spark-chain-query">{chain.query}</span>
-                  <span
-                    className={`spark-chain-badge ${chain.verified ? 'verified' : ''}`}
-                  >
+                  <span className={`spark-chain-badge ${chain.verified ? 'verified' : ''}`}>
                     {chain.verified ? '✓ VERIFIED' : `${(chain.confidence * 100).toFixed(0)}%`}
                   </span>
                 </div>
@@ -190,9 +172,7 @@ const ReasonerSection = memo(function ReasonerSection() {
                 {chain.steps.map((step, i) => (
                   <div key={i} className="spark-chain-step">
                     <span className="spark-step-type">{step.type}</span>
-                    <span className="spark-step-content">
-                      {step.result || step.content}
-                    </span>
+                    <span className="spark-step-content">{step.result || step.content}</span>
                   </div>
                 ))}
               </div>
@@ -238,9 +218,9 @@ const GoalsSection = memo(function GoalsSection() {
             placeholder="Set a new goal..."
             className="spark-input"
           />
-          <button className="spark-btn-small" onClick={handleAddGoal}>
+          <Button size="sm" className="spark-btn-small" onClick={handleAddGoal}>
             +
-          </button>
+          </Button>
         </div>
         {activeGoals.length === 0 && completedGoals.length === 0 ? (
           <div className="spark-empty">No goals set. Add one above.</div>
@@ -253,14 +233,9 @@ const GoalsSection = memo(function GoalsSection() {
                   <span className="spark-goal-type">{activePlan.status}</span>
                 </div>
                 <div className="spark-goal-progress-bar">
-                  <div
-                    className="spark-goal-progress-fill"
-                    style={{ width: `${activePlan.progress * 100}%` }}
-                  />
+                  <div className="spark-goal-progress-fill" style={{ width: `${activePlan.progress * 100}%` }} />
                 </div>
-                <div className="spark-goal-meta">
-                  {(activePlan.progress * 100).toFixed(0)}% horizon completion
-                </div>
+                <div className="spark-goal-meta">{(activePlan.progress * 100).toFixed(0)}% horizon completion</div>
               </div>
             )}
             {activeGoals.map((g) => (
@@ -270,14 +245,9 @@ const GoalsSection = memo(function GoalsSection() {
                   <span className="spark-goal-type">{g.type}</span>
                 </div>
                 <div className="spark-goal-progress-bar">
-                  <div
-                    className="spark-goal-progress-fill"
-                    style={{ width: `${g.progress * 100}%` }}
-                  />
+                  <div className="spark-goal-progress-fill" style={{ width: `${g.progress * 100}%` }} />
                 </div>
-                <div className="spark-goal-meta">
-                  {(g.progress * 100).toFixed(0)}% complete
-                </div>
+                <div className="spark-goal-meta">{(g.progress * 100).toFixed(0)}% complete</div>
               </div>
             ))}
             {completedGoals.slice(-3).map((g) => (
@@ -295,17 +265,14 @@ const GoalsSection = memo(function GoalsSection() {
 
 const MetaCognitionSection = memo(function MetaCognitionSection() {
   const metacognition = useStore((s) => s.spark.metacognition);
-  const { calibrationScore, knownLimitations, blindSpots, totalPredictions, correctPredictions } =
-    metacognition;
+  const { calibrationScore, knownLimitations, blindSpots, totalPredictions, correctPredictions } = metacognition;
 
   return (
     <div className="spark-section">
       <div className="spark-section-header">
         <span className="spark-section-icon">☼</span>
         <span className="spark-section-title">META-COGNITION</span>
-        <span className="spark-section-badge">
-          Cal: {(calibrationScore * 100).toFixed(0)}%
-        </span>
+        <span className="spark-section-badge">Cal: {(calibrationScore * 100).toFixed(0)}%</span>
       </div>
       <div className="spark-section-body">
         <div className="spark-meta-gauge">
@@ -316,11 +283,7 @@ const MetaCognitionSection = memo(function MetaCognitionSection() {
               style={{
                 width: `${calibrationScore * 100}%`,
                 background:
-                  calibrationScore > 0.7
-                    ? 'var(--green)'
-                    : calibrationScore > 0.4
-                      ? 'var(--amber)'
-                      : 'var(--red)',
+                  calibrationScore > 0.7 ? 'var(--green)' : calibrationScore > 0.4 ? 'var(--amber)' : 'var(--red)',
               }}
             />
           </div>
@@ -365,9 +328,7 @@ const TemporalSection = memo(function TemporalSection() {
       <div className="spark-section-header">
         <span className="spark-section-icon">⧖</span>
         <span className="spark-section-title">TEMPORAL REASONING</span>
-        <span className="spark-section-badge">
-          Acc: {(predictionAccuracy * 100).toFixed(0)}%
-        </span>
+        <span className="spark-section-badge">Acc: {(predictionAccuracy * 100).toFixed(0)}%</span>
       </div>
       <div className="spark-section-body">
         {activePredictions.length > 0 && (
@@ -377,26 +338,18 @@ const TemporalSection = memo(function TemporalSection() {
               <div key={p.id} className="spark-prediction">
                 <span className="spark-prediction-arrow">→</span>
                 <span className="spark-prediction-text">{formatPrediction(p.prediction)}</span>
-                <span className="spark-prediction-conf">
-                  {(p.confidence * 100).toFixed(0)}%
-                </span>
+                <span className="spark-prediction-conf">{(p.confidence * 100).toFixed(0)}%</span>
               </div>
             ))}
           </div>
         )}
         {events.length > 0 && (
           <div className="spark-events">
-            <div className="spark-subsection-title">
-              Event Timeline ({events.length})
-            </div>
+            <div className="spark-subsection-title">Event Timeline ({events.length})</div>
             {events.slice(-5).map((e) => (
               <div key={e.id} className="spark-event">
-                <span className="spark-event-time">
-                  {new Date(e.timestamp).toLocaleTimeString()}
-                </span>
-                <span className="spark-event-desc">
-                  {e.description.slice(0, 80)}
-                </span>
+                <span className="spark-event-time">{new Date(e.timestamp).toLocaleTimeString()}</span>
+                <span className="spark-event-desc">{e.description.slice(0, 80)}</span>
               </div>
             ))}
           </div>
@@ -411,8 +364,7 @@ const TemporalSection = memo(function TemporalSection() {
 
 const SelfModSection = memo(function SelfModSection() {
   const selfmod = useStore((s) => s.spark.selfmod);
-  const { modifications, currentStrategy, totalModifications, successfulModifications } =
-    selfmod;
+  const { modifications, currentStrategy, totalModifications, successfulModifications } = selfmod;
 
   return (
     <div className="spark-section spark-selfmod">
@@ -432,17 +384,10 @@ const SelfModSection = memo(function SelfModSection() {
           <div className="spark-mod-list">
             <div className="spark-subsection-title">Modification Log</div>
             {modifications.slice(-4).map((mod) => (
-              <div
-                key={mod.id}
-                className={`spark-mod ${mod.applied ? 'applied' : 'proposed'}`}
-              >
+              <div key={mod.id} className={`spark-mod ${mod.applied ? 'applied' : 'proposed'}`}>
                 <span className="spark-mod-type">{mod.type}</span>
-                <span className="spark-mod-desc">
-                  {mod.description.slice(0, 100)}
-                </span>
-                <span
-                  className={`spark-mod-status ${mod.applied ? 'applied' : ''}`}
-                >
+                <span className="spark-mod-desc">{mod.description.slice(0, 100)}</span>
+                <span className={`spark-mod-status ${mod.applied ? 'applied' : ''}`}>
                   {mod.applied ? 'APPLIED' : 'PROPOSED'}
                 </span>
               </div>
@@ -463,12 +408,10 @@ const GenomeSection = memo(function GenomeSection() {
   const setAttachmentStyle = useStore((s) => s.setGenomeAttachmentStyle);
   const applyPreset = useStore((s) => s.applyGenomePreset);
 
-  const sliderRow = (
-    label: string,
-    value: number,
-    onChange: (value: number) => void,
-  ) => (
-    <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr 40px', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+  const sliderRow = (label: string, value: number, onChange: (value: number) => void) => (
+    <div
+      style={{ display: 'grid', gridTemplateColumns: '120px 1fr 40px', gap: 8, alignItems: 'center', marginBottom: 6 }}
+    >
       <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>{label}</span>
       <input
         type="range"
@@ -489,15 +432,7 @@ const GenomeSection = memo(function GenomeSection() {
         <span className="spark-section-title">COGNITIVE GENOME</span>
         <select
           value={g.attachmentStyle}
-          onChange={(e) =>
-            setAttachmentStyle(
-              e.target.value as
-                | 'secure'
-                | 'anxious'
-                | 'avoidant'
-                | 'disorganized',
-            )
-          }
+          onChange={(e) => setAttachmentStyle(e.target.value as 'secure' | 'anxious' | 'avoidant' | 'disorganized')}
           style={{ fontSize: 13, background: 'var(--bg-panel)', color: 'var(--text-primary)' }}
         >
           <option value="secure">secure</option>
@@ -508,23 +443,37 @@ const GenomeSection = memo(function GenomeSection() {
       </div>
       <div className="spark-section-body">
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
-          <button className="spark-btn-small" onClick={() => applyPreset('companion')}>Companion</button>
-          <button className="spark-btn-small" onClick={() => applyPreset('strategist')}>Strategist</button>
-          <button className="spark-btn-small" onClick={() => applyPreset('explorer')}>Explorer</button>
-          <button className="spark-btn-small" onClick={() => applyPreset('guardian')}>Guardian</button>
+          <Button size="sm" className="spark-btn-small" onClick={() => applyPreset('companion')}>
+            Companion
+          </Button>
+          <Button size="sm" className="spark-btn-small" onClick={() => applyPreset('strategist')}>
+            Strategist
+          </Button>
+          <Button size="sm" className="spark-btn-small" onClick={() => applyPreset('explorer')}>
+            Explorer
+          </Button>
+          <Button size="sm" className="spark-btn-small" onClick={() => applyPreset('guardian')}>
+            Guardian
+          </Button>
         </div>
         <div className="spark-subsection-title">Drives</div>
         {sliderRow('Curiosity', g.drives.curiosity, (v) => setDrive('curiosity', v))}
         {sliderRow('Safety', g.drives.safety, (v) => setDrive('safety', v))}
         {sliderRow('Attachment', g.drives.attachment, (v) => setDrive('attachment', v))}
         {sliderRow('Mastery', g.drives.mastery, (v) => setDrive('mastery', v))}
-        <div className="spark-subsection-title" style={{ marginTop: 8 }}>Traits</div>
+        <div className="spark-subsection-title" style={{ marginTop: 8 }}>
+          Traits
+        </div>
         {sliderRow('Openness', g.traits.openness, (v) => setTrait('openness', v))}
         {sliderRow('Adaptability', g.traits.adaptability, (v) => setTrait('adaptability', v))}
-        <div className="spark-subsection-title" style={{ marginTop: 8 }}>Plasticity</div>
+        <div className="spark-subsection-title" style={{ marginTop: 8 }}>
+          Plasticity
+        </div>
         {sliderRow('Learning', g.plasticity.learningRate, (v) => setPlasticity('learningRate', v))}
         {sliderRow('Belief Update', g.plasticity.beliefUpdateRate, (v) => setPlasticity('beliefUpdateRate', v))}
-        <div className="spark-subsection-title" style={{ marginTop: 8 }}>Trauma Sensitivity</div>
+        <div className="spark-subsection-title" style={{ marginTop: 8 }}>
+          Trauma Sensitivity
+        </div>
         {sliderRow('Rejection', g.traumaSensitivity.rejection, (v) => setTrauma('rejection', v))}
         {sliderRow('Uncertainty', g.traumaSensitivity.uncertainty, (v) => setTrauma('uncertainty', v))}
       </div>
@@ -612,25 +561,31 @@ const NightCycleTimeline = memo(function NightCycleTimeline() {
   const sparkLogs = useStore((s) => s.spark.logs);
   const memoryConsolidation = useStore((s) => s.memoryConsolidation);
   const runNightly = useStore((s) => s.runNightlyReconsolidation);
-  const reconEvents = useMemo(() => [
-    ...sparkLogs.filter((line) => line.includes('[RECON]')),
-    ...memoryConsolidation.logs.filter((line) =>
-      line.toLowerCase().includes('night reconsolidation'),
-    ),
-  ].slice(-12).reverse(), [sparkLogs, memoryConsolidation.logs]);
+  const reconEvents = useMemo(
+    () =>
+      [
+        ...sparkLogs.filter((line) => line.includes('[RECON]')),
+        ...memoryConsolidation.logs.filter((line) => line.toLowerCase().includes('night reconsolidation')),
+      ]
+        .slice(-12)
+        .reverse(),
+    [sparkLogs, memoryConsolidation.logs],
+  );
 
   return (
     <div className="spark-section">
       <div className="spark-section-header">
         <span className="spark-section-icon">🌙</span>
         <span className="spark-section-title">NIGHT CYCLE TIMELINE</span>
-        <button
+        <Button
+          variant="primary"
+          size="sm"
           className="spark-btn-small"
           onClick={() => runNightly()}
           title="Run reconsolidation immediately"
         >
           RUN NOW
-        </button>
+        </Button>
       </div>
       <div className="spark-section-body">
         {reconEvents.length === 0 ? (
@@ -654,11 +609,7 @@ const SparkLog = memo(function SparkLog() {
   const sparkLive = useStore((s) => s.sparkLiveLog);
   const logRef = useRef<HTMLDivElement>(null);
 
-  usePinnedAutoScroll(
-    logRef,
-    [sparkLive.length, sparkLogs.length],
-    { behavior: 'auto', bottomThresholdPx: 64 },
-  );
+  usePinnedAutoScroll(logRef, [sparkLive.length, sparkLogs.length], { behavior: 'auto', bottomThresholdPx: 64 });
 
   const allLogs = useMemo(() => [...sparkLogs, ...sparkLive], [sparkLogs, sparkLive]);
 
@@ -674,9 +625,7 @@ const SparkLog = memo(function SparkLog() {
             {line}
           </div>
         ))}
-        {allLogs.length === 0 && (
-          <div className="spark-log-line dim">Awaiting ignition...</div>
-        )}
+        {allLogs.length === 0 && <div className="spark-log-line dim">Awaiting ignition...</div>}
       </div>
     </div>
   );
@@ -691,43 +640,27 @@ const ThermoSection = memo(function ThermoSection() {
     <div className="spark-thermo">
       {/* Heartbeat */}
       <div className="spark-thermo-row">
-        <div
-          className={`spark-heartbeat ${thermo.ignited ? 'alive' : 'dead'}`}
-        >
-          {thermo.ignited ? '●' : '○'}
-        </div>
+        <div className={`spark-heartbeat ${thermo.ignited ? 'alive' : 'dead'}`}>{thermo.ignited ? '●' : '○'}</div>
         <div className="spark-thermo-gauges">
           {/* Temperature */}
           <div className="spark-thermo-gauge">
             <span className="spark-thermo-label">TEMP</span>
             <div className="spark-thermo-bar">
-              <div
-                className="spark-thermo-fill temp"
-                style={{ width: `${thermo.temperature * 100}%` }}
-              />
+              <div className="spark-thermo-fill temp" style={{ width: `${thermo.temperature * 100}%` }} />
             </div>
-            <span className="spark-thermo-value">
-              {(thermo.temperature * 100).toFixed(0)}°
-            </span>
+            <span className="spark-thermo-value">{(thermo.temperature * 100).toFixed(0)}°</span>
           </div>
           {/* Entropy */}
           <div className="spark-thermo-gauge">
             <span className="spark-thermo-label">ENTROPY</span>
             <div className="spark-thermo-bar">
-              <div
-                className="spark-thermo-fill entropy"
-                style={{ width: `${thermo.entropy * 100}%` }}
-              />
+              <div className="spark-thermo-fill entropy" style={{ width: `${thermo.entropy * 100}%` }} />
             </div>
-            <span className="spark-thermo-value">
-              {(thermo.entropy * 100).toFixed(0)}%
-            </span>
+            <span className="spark-thermo-value">{(thermo.entropy * 100).toFixed(0)}%</span>
           </div>
         </div>
         <div className="spark-thermo-energy">
-          <div className="spark-thermo-energy-value">
-            {thermo.energy.toFixed(0)}
-          </div>
+          <div className="spark-thermo-energy-value">{thermo.energy.toFixed(0)}</div>
           <div className="spark-thermo-energy-label">ENERGY</div>
         </div>
       </div>
@@ -736,9 +669,7 @@ const ThermoSection = memo(function ThermoSection() {
         <span>Light: {thermo.cyclesLight}</span>
         <span>Medium: {thermo.cyclesMedium}</span>
         <span>Deep: {thermo.cyclesDeep}</span>
-        <span>
-          Beat: {(thermo.heartbeatMs / 1000).toFixed(0)}s
-        </span>
+        <span>Beat: {(thermo.heartbeatMs / 1000).toFixed(0)}s</span>
       </div>
     </div>
   );
@@ -762,10 +693,7 @@ export default function SparkPanel() {
   const resetSpark = useStore((s) => s.sparkReset);
   const [input, setInput] = useState('');
 
-  const isProcessing =
-    phase === 'thinking' ||
-    phase === 'exploring' ||
-    phase === 'evolving';
+  const isProcessing = phase === 'thinking' || phase === 'exploring' || phase === 'evolving';
 
   const handleProcess = useCallback(() => {
     if (input.trim() && !isProcessing) {
@@ -779,44 +707,29 @@ export default function SparkPanel() {
       {/* Header */}
       <div className="spark-header">
         <div className="spark-logo">
-          <span className={`spark-logo-icon ${isIgnited ? 'ignited' : ''}`}>
-            ⚡
-          </span>
+          <span className={`spark-logo-icon ${isIgnited ? 'ignited' : ''}`}>⚡</span>
           <span className="spark-logo-text">S P A R K</span>
           {isIgnited && <span className="spark-alive-badge">ALIVE</span>}
         </div>
-        <div className="spark-subtitle">
-          Self-Propagating Autonomous Reasoning Kernel
-        </div>
+        <div className="spark-subtitle">Self-Propagating Autonomous Reasoning Kernel</div>
 
         {/* Thermodynamics */}
         <ThermoSection />
 
         <div className="spark-status-row">
-          <span className={`spark-phase ${phase}`}>
-            {phase.toUpperCase()}
-          </span>
+          <span className={`spark-phase ${phase}`}>{phase.toUpperCase()}</span>
           <span className="spark-stat">Cycles: {cycleCount}</span>
-          <span className="spark-stat">
-            Entities: {entityCount}
-          </span>
-          <span className="spark-stat">
-            Relations: {relationCount}
-          </span>
-          <span className="spark-stat">
-            Horizon plans: {horizonPlanCount}
-          </span>
-          <span className="spark-stat">
-            Consolidation runs: {consolidationRuns}
-          </span>
-          <span className="spark-stat">
-            Metabolism: {circadianPhase}
-          </span>
+          <span className="spark-stat">Entities: {entityCount}</span>
+          <span className="spark-stat">Relations: {relationCount}</span>
+          <span className="spark-stat">Horizon plans: {horizonPlanCount}</span>
+          <span className="spark-stat">Consolidation runs: {consolidationRuns}</span>
+          <span className="spark-stat">Metabolism: {circadianPhase}</span>
         </div>
 
         {/* Controls */}
         <div className="spark-controls">
-          <button
+          <Button
+            variant={isIgnited ? 'danger' : 'primary'}
             className={`spark-btn ignite ${isIgnited ? 'active' : ''}`}
             onClick={isIgnited ? extinguish : ignite}
             title={
@@ -826,25 +739,25 @@ export default function SparkPanel() {
             }
           >
             {isIgnited ? '❄ EXTINGUISH' : '🔥 IGNITE'}
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="primary"
             className="spark-btn deep-thought"
             onClick={runDeep}
             disabled={isProcessing}
             title="Autonomous deep thinking — the system reflects on itself"
           >
-            {isProcessing && phase === 'evolving'
-              ? '◌ THINKING...'
-              : '◈ DEEP THOUGHT'}
-          </button>
-          <button
+            {isProcessing && phase === 'evolving' ? '◌ THINKING...' : '◈ DEEP THOUGHT'}
+          </Button>
+          <Button
+            variant="danger"
             className="spark-btn reset"
             onClick={resetSpark}
             disabled={isProcessing}
             title="Reset SPARK kernel to initial state"
           >
             ↺ RESET
-          </button>
+          </Button>
         </div>
 
         {/* Input */}
@@ -858,15 +771,14 @@ export default function SparkPanel() {
             className="spark-main-input"
             disabled={isProcessing}
           />
-          <button
+          <Button
+            variant="primary"
             className="spark-btn process"
             onClick={handleProcess}
             disabled={isProcessing || !input.trim()}
           >
-            {isProcessing && phase === 'thinking'
-              ? '◌ PROCESSING...'
-              : '⚡ PROCESS'}
-          </button>
+            {isProcessing && phase === 'thinking' ? '◌ PROCESSING...' : '⚡ PROCESS'}
+          </Button>
         </div>
       </div>
 

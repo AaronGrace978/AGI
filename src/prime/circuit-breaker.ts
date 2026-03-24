@@ -43,10 +43,7 @@ export class CircuitBreaker {
     return typeof this.state.openUntil === 'number' && this.state.openUntil > now;
   }
 
-  async execute<T>(
-    operation: () => Promise<T>,
-    onEvent?: (event: CircuitBreakerEvent) => void,
-  ): Promise<T> {
+  async execute<T>(operation: () => Promise<T>, onEvent?: (event: CircuitBreakerEvent) => void): Promise<T> {
     const now = Date.now();
     if (this.isOpen(now)) {
       onEvent?.({
@@ -133,5 +130,5 @@ export async function withRetryBudget<T>(
     }
   }
 
-  throw (lastError instanceof Error ? lastError : new Error('Retry budget exhausted'));
+  throw lastError instanceof Error ? lastError : new Error('Retry budget exhausted');
 }

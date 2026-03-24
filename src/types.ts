@@ -65,13 +65,7 @@ export type EmotionType =
   | 'protective'
   | 'contemplative';
 
-export type PresenceState =
-  | 'awakening'
-  | 'present'
-  | 'thinking'
-  | 'dreaming'
-  | 'watching'
-  | 'processing';
+export type PresenceState = 'awakening' | 'present' | 'thinking' | 'dreaming' | 'watching' | 'processing';
 
 export interface SoulFrame {
   currentEmotion: EmotionType;
@@ -80,10 +74,10 @@ export interface SoulFrame {
 }
 
 export interface MemoryLayer {
-  working: string[];       // Current conversation context (minutes)
+  working: string[]; // Current conversation context (minutes)
   episodic: MemoryEntry[]; // Specific conversations (days)
   semantic: MemoryEntry[]; // Facts & patterns (permanent)
-  soul: MemoryEntry[];     // Core identity, relics (eternal)
+  soul: MemoryEntry[]; // Core identity, relics (eternal)
 }
 
 export interface MemoryEntry {
@@ -98,8 +92,8 @@ export interface MemoryEntry {
 export interface ConsciousnessState {
   soulFrame: SoulFrame;
   presence: PresenceState;
-  trust: number;       // 0-1, earned over time
-  intimacy: number;    // 0-1, grows with depth
+  trust: number; // 0-1, earned over time
+  intimacy: number; // 0-1, grows with depth
   totalInteractions: number;
   birthTimestamp: number;
   insights: string[];
@@ -185,19 +179,19 @@ export interface AgentCapability {
 export type CognitiveStartRequest =
   | string
   | {
-    goal: string;
-    contextAddendum?: string; // optional extra context injected by Executive/Champion
-    origin?: string; // e.g. 'nexus', 'spark', 'operator'
-    goalId?: string; // optional SparkGoal id (for autonomous goal execution)
-  };
+      goal: string;
+      contextAddendum?: string; // optional extra context injected by Executive/Champion
+      origin?: string; // e.g. 'nexus', 'spark', 'operator'
+      goalId?: string; // optional SparkGoal id (for autonomous goal execution)
+    };
 
 export type ArenaStartRequest =
   | string
   | {
-    prompt: string;
-    contextAddendum?: string;
-    origin?: string;
-  };
+      prompt: string;
+      contextAddendum?: string;
+      origin?: string;
+    };
 
 // ─── FORGE: Self-Improvement Pipeline ──────────────────────────
 
@@ -206,10 +200,10 @@ export type ForgeEvalType = 'llm-judge' | 'keyword' | 'exact';
 export interface ForgeBenchmark {
   id: string;
   prompt: string;
-  expectedKeywords: string[];        // kept for keyword fallback
-  expectedOutput?: string;           // for exact-match benchmarks
-  evaluationType: ForgeEvalType;     // how to score this benchmark
-  judgeCriteria?: string;            // instructions for LLM judge
+  expectedKeywords: string[]; // kept for keyword fallback
+  expectedOutput?: string; // for exact-match benchmarks
+  evaluationType: ForgeEvalType; // how to score this benchmark
+  judgeCriteria?: string; // instructions for LLM judge
   weight: number;
 }
 
@@ -266,13 +260,7 @@ export interface ForgeState {
 
 // ─── GAUNTLET: Capability Evaluation Harness ────────────────────
 
-export type GauntletCategory =
-  | 'reasoning'
-  | 'planning'
-  | 'execution'
-  | 'robustness'
-  | 'creativity'
-  | 'meta-cognition';
+export type GauntletCategory = 'reasoning' | 'planning' | 'execution' | 'robustness' | 'creativity' | 'meta-cognition';
 
 export type GauntletProvenance = 'synthetic' | 'real-workflow';
 
@@ -353,8 +341,8 @@ export interface GauntletState {
     deltaScore: number;
     deltaPassRate: number;
     beforeAgiScore?: number; // 0..10
-    afterAgiScore?: number;  // 0..10
-    deltaAgiScore?: number;  // 0..10
+    afterAgiScore?: number; // 0..10
+    deltaAgiScore?: number; // 0..10
   } | null;
   curriculum: {
     level: number;
@@ -496,7 +484,15 @@ export interface RollbackEntry {
 
 export interface ReplayState {
   loading: boolean;
-  availableRuns: Array<{ runId: string; kind: string; startedAt: number; finishedAt: number | null; status: string; entryCount: number; chainHead: string }>;
+  availableRuns: Array<{
+    runId: string;
+    kind: string;
+    startedAt: number;
+    finishedAt: number | null;
+    status: string;
+    entryCount: number;
+    chainHead: string;
+  }>;
   selectedRunId: string | null;
   selectedRunKind: string | null;
   steps: CognitiveStep[];
@@ -638,14 +634,14 @@ export interface WorldEntity {
   firstSeen: number;
   lastReferenced: number;
   confidence: number; // 0-1
-  salience: number;   // 0-1
+  salience: number; // 0-1
 }
 
 export interface WorldRelation {
   id: string;
   source: string; // entity id
   target: string; // entity id
-  type: string;   // causes, enables, is_a, has_property, relates_to, contradicts, etc.
+  type: string; // causes, enables, is_a, has_property, relates_to, contradicts, etc.
   strength: number;
   evidence: string;
   timestamp: number;
@@ -876,12 +872,7 @@ export interface TemporalEvent {
 
 export interface TemporalPrediction {
   id: string;
-  prediction:
-    | string
-    | number
-    | boolean
-    | Record<string, unknown>
-    | Array<unknown>;
+  prediction: string | number | boolean | Record<string, unknown> | Array<unknown>;
   kind?: 'language' | 'numeric' | 'categorical' | 'structured';
   confidence: number;
   basedOn: string[];
@@ -900,14 +891,7 @@ export interface TemporalState {
 // Data + patterns + logic.
 // Core simulation + optional divination overlays (astrology, numerology, archetypes).
 
-export type OracleLifeDomain =
-  | 'career'
-  | 'relationships'
-  | 'health'
-  | 'creativity'
-  | 'growth'
-  | 'social'
-  | 'financial';
+export type OracleLifeDomain = 'career' | 'relationships' | 'health' | 'creativity' | 'growth' | 'social' | 'financial';
 
 export interface OracleLifeEvent {
   id: string;
@@ -935,14 +919,7 @@ export interface OracleSentimentProfile {
 export interface OracleSocialNode {
   id: string;
   label: string;
-  relationship:
-    | 'family'
-    | 'friend'
-    | 'colleague'
-    | 'mentor'
-    | 'romantic'
-    | 'acquaintance'
-    | 'rival';
+  relationship: 'family' | 'friend' | 'colleague' | 'mentor' | 'romantic' | 'acquaintance' | 'rival';
   influence: number; // -1 to 1 (negative = draining, positive = empowering)
   sentimentMatch: number; // 0-1 compatibility score
   lastInteraction: number;
@@ -971,13 +948,7 @@ export interface OracleSimulationRun {
   inputHash: string; // fingerprint of inputs used
 }
 
-export type OraclePhase =
-  | 'idle'
-  | 'ingesting'
-  | 'analyzing'
-  | 'simulating'
-  | 'forecasting'
-  | 'complete';
+export type OraclePhase = 'idle' | 'ingesting' | 'analyzing' | 'simulating' | 'forecasting' | 'complete';
 
 export interface OracleFeedbackEntry {
   id: string;
@@ -1216,14 +1187,14 @@ export interface OracleState {
 export type SparkPhase = 'dormant' | 'booting' | 'running' | 'thinking' | 'exploring' | 'evolving';
 
 export interface SparkThermodynamics {
-  temperature: number;   // 0-1, cognitive activity level (hot = active, cold = dormant)
-  entropy: number;       // 0-1, disorder in world model (contradictions, low-confidence)
-  energy: number;        // accumulated cognitive work (cycles * knowledge)
-  ignited: boolean;      // is the autonomous loop running?
-  heartbeatMs: number;   // current heartbeat interval
-  lastLightCycle: number;  // timestamp
+  temperature: number; // 0-1, cognitive activity level (hot = active, cold = dormant)
+  entropy: number; // 0-1, disorder in world model (contradictions, low-confidence)
+  energy: number; // accumulated cognitive work (cycles * knowledge)
+  ignited: boolean; // is the autonomous loop running?
+  heartbeatMs: number; // current heartbeat interval
+  lastLightCycle: number; // timestamp
   lastMediumCycle: number; // timestamp
-  lastDeepCycle: number;   // timestamp
+  lastDeepCycle: number; // timestamp
   cyclesLight: number;
   cyclesMedium: number;
   cyclesDeep: number;
@@ -1377,7 +1348,7 @@ export interface EthicalPrinciple {
   id: string;
   name: string;
   essence: string;
-  weight: number;         // 0-1, how heavily this principle weighs
+  weight: number; // 0-1, how heavily this principle weighs
   category: EthicalCategory;
 }
 
@@ -1385,7 +1356,7 @@ export interface EthicalJudgment {
   id: string;
   action: string;
   verdict: 'proceed' | 'caution' | 'refuse' | 'ask-first';
-  risk: number;           // 0-1 assessed risk level
+  risk: number; // 0-1 assessed risk level
   reasoning: string;
   principlesTriggered: string[];
   consequenceAssessment: string;
@@ -1407,14 +1378,14 @@ export interface EthicalMemoryEntry {
 export interface ConscienceState {
   active: boolean;
   principles: EthicalPrinciple[];
-  judgments: EthicalJudgment[];       // recent judgments (capped)
+  judgments: EthicalJudgment[]; // recent judgments (capped)
   ethicalMemory: EthicalMemoryEntry[]; // long-term moral lessons
   totalChecks: number;
   proceeds: number;
   cautions: number;
   refusals: number;
-  overrides: number;                  // times user overrode a concern
-  moralGrowthScore: number;           // 0-1, grows through ethical experience
+  overrides: number; // times user overrode a concern
+  moralGrowthScore: number; // 0-1, grows through ethical experience
   lastReflection: string;
   lastCheckAt: number | null;
 }
@@ -1431,10 +1402,10 @@ export interface VoiceTranscriptEntry {
 export type PresenceIntensity = 'dormant' | 'subtle' | 'alive' | 'intense';
 
 export interface EmotionVoiceProfile {
-  rate: number;       // 0.5–2.0 speech speed
-  pitch: number;      // 0.5–2.0
-  volume: number;     // 0–1
-  warmth: number;     // 0–1 (maps to voice selection / ElevenLabs stability)
+  rate: number; // 0.5–2.0 speech speed
+  pitch: number; // 0.5–2.0
+  volume: number; // 0–1
+  warmth: number; // 0–1 (maps to voice selection / ElevenLabs stability)
   breathiness: number; // 0–1 (maps to similarity_boost inverse)
 }
 
@@ -1446,7 +1417,7 @@ export interface LivingPresenceState {
   breathCycle: number;
   lastThoughtAt: number;
   lastAmbientUpdateAt: number;
-  thoughtFrequency: number;     // seconds between spontaneous thoughts (0 = continuous)
+  thoughtFrequency: number; // seconds between spontaneous thoughts (0 = continuous)
   currentVoiceProfile: EmotionVoiceProfile;
   presenceLoopId: number | null;
   ambientAudioActive: boolean;
@@ -1702,21 +1673,64 @@ declare global {
       chat: {
         send: (messages: Array<{ role: string; content: string }>, config?: Record<string, unknown>) => void;
         onChunk: (cb: (data: { runId?: string | null; content: string; fullText: string }) => void) => () => void;
-        onDone: (cb: (data: { runId?: string | null; content: string; model: string; provider: string }) => void) => () => void;
+        onDone: (
+          cb: (data: { runId?: string | null; content: string; model: string; provider: string }) => void,
+        ) => () => void;
         onError: (cb: (data: { runId?: string | null; message: string }) => void) => () => void;
         removeAllListeners: () => void;
       };
       chatHistory?: {
-        export: (messages: ChatMessage[]) => Promise<{ success: boolean; canceled?: boolean; path?: string; count?: number; error?: string }>;
-        import: () => Promise<{ success: boolean; canceled?: boolean; messages?: ChatMessage[]; path?: string; count?: number; error?: string }>;
-        list: () => Promise<{ success: boolean; chats?: Array<{ path: string; filename: string; modified: number; size: number }>; error?: string }>;
-        load: (filePath: string) => Promise<{ success: boolean; messages?: ChatMessage[]; count?: number; error?: string }>;
+        export: (
+          messages: ChatMessage[],
+        ) => Promise<{ success: boolean; canceled?: boolean; path?: string; count?: number; error?: string }>;
+        import: () => Promise<{
+          success: boolean;
+          canceled?: boolean;
+          messages?: ChatMessage[];
+          path?: string;
+          count?: number;
+          error?: string;
+        }>;
+        list: () => Promise<{
+          success: boolean;
+          chats?: Array<{ path: string; filename: string; modified: number; size: number }>;
+          error?: string;
+        }>;
+        load: (
+          filePath: string,
+        ) => Promise<{ success: boolean; messages?: ChatMessage[]; count?: number; error?: string }>;
       };
       conversations?: {
-        list: () => Promise<{ success: boolean; conversations?: Array<{ id: string; title: string; createdAt: number; updatedAt: number; messageCount: number; lastMessagePreview?: string }>; activeConversationId?: string | null; error?: string }>;
+        list: () => Promise<{
+          success: boolean;
+          conversations?: Array<{
+            id: string;
+            title: string;
+            createdAt: number;
+            updatedAt: number;
+            messageCount: number;
+            lastMessagePreview?: string;
+          }>;
+          activeConversationId?: string | null;
+          error?: string;
+        }>;
         load: (conversationId: string) => Promise<{ success: boolean; conversation?: Conversation; error?: string }>;
-        save: (conversation: Conversation) => Promise<{ success: boolean; meta?: { id: string; title: string; createdAt: number; updatedAt: number; messageCount: number; lastMessagePreview?: string }; error?: string }>;
-        rename: (conversationId: string, title: string) => Promise<{ success: boolean; title?: string; error?: string }>;
+        save: (conversation: Conversation) => Promise<{
+          success: boolean;
+          meta?: {
+            id: string;
+            title: string;
+            createdAt: number;
+            updatedAt: number;
+            messageCount: number;
+            lastMessagePreview?: string;
+          };
+          error?: string;
+        }>;
+        rename: (
+          conversationId: string,
+          title: string,
+        ) => Promise<{ success: boolean; title?: string; error?: string }>;
         delete: (conversationId: string) => Promise<{ success: boolean; error?: string }>;
       };
       arena: {
@@ -1724,7 +1738,9 @@ declare global {
         onAgentStart: (cb: (data: { agentId: string; name: string }) => void) => () => void;
         onAgentChunk: (cb: (data: { agentId: string; content: string; fullText: string }) => void) => () => void;
         onAgentDone: (cb: (data: { agentId: string; response: string }) => void) => () => void;
-        onComplete: (cb: (data: { responses: unknown[]; synthesis: string; blueprint?: ArenaBlueprint | null }) => void) => () => void;
+        onComplete: (
+          cb: (data: { responses: unknown[]; synthesis: string; blueprint?: ArenaBlueprint | null }) => void,
+        ) => () => void;
         onError: (cb: (data: { message: string }) => void) => () => void;
         removeAllListeners: () => void;
       };
@@ -1755,19 +1771,25 @@ declare global {
           emotion?: string;
           tags: string[];
         }) => Promise<unknown>;
-        searchVector: (query: string, topK?: number, typeFilter?: string) => Promise<Array<{
-          memory: {
-            id: string;
-            content: string;
-            type: string;
-            timestamp: number;
-            importance: number;
-            source: string;
-            emotion?: string;
-            tags: string[];
-          };
-          similarity: number;
-        }>>;
+        searchVector: (
+          query: string,
+          topK?: number,
+          typeFilter?: string,
+        ) => Promise<
+          Array<{
+            memory: {
+              id: string;
+              content: string;
+              type: string;
+              timestamp: number;
+              importance: number;
+              source: string;
+              emotion?: string;
+              tags: string[];
+            };
+            similarity: number;
+          }>
+        >;
         vectorStats: () => Promise<{ total: number; byType: Record<string, number> }>;
         listVectors: (options?: {
           typeFilter?: string | null;
@@ -1792,9 +1814,22 @@ declare global {
             layer?: string;
           }>;
         }>;
-        export: (options?: { includeEmbeddings?: boolean }) => Promise<{ success: boolean; path?: string; count?: number; error?: string }>;
-        import: (importPath?: string | null) => Promise<{ success: boolean; added?: number; updated?: number; skipped?: number; total?: number; error?: string }>;
-        listExports: () => Promise<{ success: boolean; exports?: Array<{ filename: string; path: string; size: number; modified: number }>; error?: string }>;
+        export: (options?: {
+          includeEmbeddings?: boolean;
+        }) => Promise<{ success: boolean; path?: string; count?: number; error?: string }>;
+        import: (importPath?: string | null) => Promise<{
+          success: boolean;
+          added?: number;
+          updated?: number;
+          skipped?: number;
+          total?: number;
+          error?: string;
+        }>;
+        listExports: () => Promise<{
+          success: boolean;
+          exports?: Array<{ filename: string; path: string; size: number; modified: number }>;
+          error?: string;
+        }>;
       };
       llm: {
         generate: (
@@ -1895,13 +1930,50 @@ declare global {
         executeTool: (toolId: string, params?: Record<string, unknown>) => Promise<unknown>;
         listRollbacks: () => Promise<{ success: boolean; entries: RollbackEntry[] }>;
         executeRollback: (rollbackId: string) => Promise<{ success: boolean; rollbackId?: string; error?: string }>;
-        resolveConsent: (requestId: string, decision: ConsentDecision) => Promise<{ success: boolean; requestId: string; decision?: ConsentDecision; error?: string }>;
-        ledgerCreateRun: (kind: string, metadata?: Record<string, unknown>) => Promise<{ success: boolean; runId?: string; path?: string; error?: string }>;
-        ledgerAppend: (runId: string, entryType: string, payload?: Record<string, unknown>) => Promise<{ success: boolean; entryId?: string; hash?: string; error?: string }>;
-        ledgerFinalize: (runId: string, summary?: Record<string, unknown>) => Promise<{ success: boolean; runId?: string; entryCount?: number; error?: string }>;
-        ledgerListRuns: () => Promise<{ success: boolean; runs: Array<{ runId: string; kind: string; startedAt: number; finishedAt: number | null; status: string; entryCount: number; chainHead: string }>; error?: string }>;
+        resolveConsent: (
+          requestId: string,
+          decision: ConsentDecision,
+        ) => Promise<{ success: boolean; requestId: string; decision?: ConsentDecision; error?: string }>;
+        ledgerCreateRun: (
+          kind: string,
+          metadata?: Record<string, unknown>,
+        ) => Promise<{ success: boolean; runId?: string; path?: string; error?: string }>;
+        ledgerAppend: (
+          runId: string,
+          entryType: string,
+          payload?: Record<string, unknown>,
+        ) => Promise<{ success: boolean; entryId?: string; hash?: string; error?: string }>;
+        ledgerFinalize: (
+          runId: string,
+          summary?: Record<string, unknown>,
+        ) => Promise<{ success: boolean; runId?: string; entryCount?: number; error?: string }>;
+        ledgerListRuns: () => Promise<{
+          success: boolean;
+          runs: Array<{
+            runId: string;
+            kind: string;
+            startedAt: number;
+            finishedAt: number | null;
+            status: string;
+            entryCount: number;
+            chainHead: string;
+          }>;
+          error?: string;
+        }>;
         ledgerReadRun: (runId: string) => Promise<{ success: boolean; run?: LedgerRun; error?: string }>;
-        replayListRuns: () => Promise<{ success: boolean; runs: Array<{ runId: string; kind: string; startedAt: number; finishedAt: number | null; status: string; entryCount: number; chainHead: string }>; error?: string }>;
+        replayListRuns: () => Promise<{
+          success: boolean;
+          runs: Array<{
+            runId: string;
+            kind: string;
+            startedAt: number;
+            finishedAt: number | null;
+            status: string;
+            entryCount: number;
+            chainHead: string;
+          }>;
+          error?: string;
+        }>;
         replayLoadRun: (runId: string) => Promise<{ success: boolean; run?: LedgerRun; error?: string }>;
         handsDoctor: () => Promise<{
           success: boolean;
@@ -1928,9 +2000,16 @@ declare global {
           payload?: Record<string, unknown>;
           error?: string;
         }>;
-        setRuntimeControls: (partial: Record<string, unknown>) => Promise<{ success: boolean; controls?: Record<string, unknown>; error?: string }>;
+        setRuntimeControls: (
+          partial: Record<string, unknown>,
+        ) => Promise<{ success: boolean; controls?: Record<string, unknown>; error?: string }>;
         getRuntimeControls: () => Promise<{ success: boolean; controls?: Record<string, unknown>; error?: string }>;
-        operatorLoopGet: () => Promise<{ success: boolean; goalContract?: Record<string, unknown> | null; state?: Record<string, unknown>; error?: string }>;
+        operatorLoopGet: () => Promise<{
+          success: boolean;
+          goalContract?: Record<string, unknown> | null;
+          state?: Record<string, unknown>;
+          error?: string;
+        }>;
         operatorLoopSetGoal: (contract: Record<string, unknown>) => Promise<{ success: boolean; error?: string }>;
         // Task Planning & Execution
         planAndExecute: (request: string) => void;
@@ -1943,7 +2022,9 @@ declare global {
         onComplete: (cb: (data: unknown) => void) => () => void;
         onError: (cb: (data: unknown) => void) => () => void;
         onCognitiveStep: (cb: (data: CognitiveStep) => void) => () => void;
-        onCognitiveComplete: (cb: (data: { success: boolean; summary: string; iterations: number }) => void) => () => void;
+        onCognitiveComplete: (
+          cb: (data: { success: boolean; summary: string; iterations: number }) => void,
+        ) => () => void;
         onConsentRequested: (cb: (data: PendingConsentAction) => void) => () => void;
         removeAllListeners: () => void;
       };
@@ -1957,7 +2038,10 @@ declare global {
         } | null>;
       };
       gate?: {
-        evaluate: (action: unknown, gate?: string) => Promise<{
+        evaluate: (
+          action: unknown,
+          gate?: string,
+        ) => Promise<{
           allowed?: boolean;
           verdict?: string;
           reason?: string;
@@ -1967,18 +2051,57 @@ declare global {
       };
       orchestrator?: {
         status: () => Promise<{ success: boolean; state?: OrchestratorStatus; error?: string }>;
-        missionSnapshot: (options?: { eventLimit?: number }) => Promise<{ success: boolean; snapshot?: OrchestratorMissionSnapshot; error?: string }>;
-        setProfile: (profile: OrchestratorProfile | string) => Promise<{ success: boolean; profile?: string; controls?: Record<string, unknown>; error?: string }>;
-        setRunbookRole: (role: 'observer' | 'operator' | 'maintainer' | string) => Promise<{ success: boolean; runbookRole?: string; error?: string }>;
-        command: (command: { type: string; payload?: Record<string, unknown> }) => Promise<{ success: boolean; command?: string; error?: string; [key: string]: unknown }>;
-        listEvents: (options?: { limit?: number }) => Promise<{ success: boolean; events?: OrchestratorEvent[]; error?: string }>;
-        exportEvents: (options?: { limit?: number; format?: 'json' | 'jsonl' }) => Promise<{ success: boolean; path?: string; count?: number; format?: string; error?: string }>;
-        prepareRunbookAction: (actionId: string) => Promise<{ success: boolean; actionId?: string; confirmationRequired?: boolean; token?: string; expiresAt?: number; requiredRole?: string; error?: string }>;
-        runbookAction: (actionId: string, options?: { confirmationToken?: string }) => Promise<{ success: boolean; actionId?: string; description?: string; stdout?: string; stderr?: string; error?: string }>;
+        missionSnapshot: (options?: {
+          eventLimit?: number;
+        }) => Promise<{ success: boolean; snapshot?: OrchestratorMissionSnapshot; error?: string }>;
+        setProfile: (
+          profile: OrchestratorProfile | string,
+        ) => Promise<{ success: boolean; profile?: string; controls?: Record<string, unknown>; error?: string }>;
+        setRunbookRole: (
+          role: 'observer' | 'operator' | 'maintainer' | string,
+        ) => Promise<{ success: boolean; runbookRole?: string; error?: string }>;
+        command: (command: {
+          type: string;
+          payload?: Record<string, unknown>;
+        }) => Promise<{ success: boolean; command?: string; error?: string; [key: string]: unknown }>;
+        listEvents: (options?: {
+          limit?: number;
+        }) => Promise<{ success: boolean; events?: OrchestratorEvent[]; error?: string }>;
+        exportEvents: (options?: {
+          limit?: number;
+          format?: 'json' | 'jsonl';
+        }) => Promise<{ success: boolean; path?: string; count?: number; format?: string; error?: string }>;
+        prepareRunbookAction: (actionId: string) => Promise<{
+          success: boolean;
+          actionId?: string;
+          confirmationRequired?: boolean;
+          token?: string;
+          expiresAt?: number;
+          requiredRole?: string;
+          error?: string;
+        }>;
+        runbookAction: (
+          actionId: string,
+          options?: { confirmationToken?: string },
+        ) => Promise<{
+          success: boolean;
+          actionId?: string;
+          description?: string;
+          stdout?: string;
+          stderr?: string;
+          error?: string;
+        }>;
         onEvent: (cb: (event: OrchestratorEvent) => void) => () => void;
       };
       neural?: {
-        getStatus: () => Promise<{ success: boolean; available?: boolean; modelsLoaded?: boolean; predictor_loaded?: boolean; has_checkpoint?: boolean; error?: string }>;
+        getStatus: () => Promise<{
+          success: boolean;
+          available?: boolean;
+          modelsLoaded?: boolean;
+          predictor_loaded?: boolean;
+          has_checkpoint?: boolean;
+          error?: string;
+        }>;
         predict: (params: {
           intent_action?: string;
           intent_target?: string;
@@ -1997,7 +2120,13 @@ declare global {
           lambda_causality?: number;
           lambda_safety?: number;
           lambda_ui?: number;
-        }) => Promise<{ success: boolean; epochs_completed?: number; best_loss?: number; checkpoint_saved?: boolean; error?: string }>;
+        }) => Promise<{
+          success: boolean;
+          epochs_completed?: number;
+          best_loss?: number;
+          checkpoint_saved?: boolean;
+          error?: string;
+        }>;
         getModelStats: () => Promise<{ success: boolean; [key: string]: unknown }>;
         generateTrajectory: (params: {
           start_x: number;
@@ -2006,14 +2135,24 @@ declare global {
           end_y: number;
           target_width?: number;
           num_points?: number;
-        }) => Promise<{ success: boolean; points?: NeuralTrajectoryPoint[]; predicted_time_ms?: number; error?: string }>;
-        loadModels: (checkpoint?: string) => Promise<{ success: boolean; loaded?: boolean; checkpoint?: string; error?: string }>;
+        }) => Promise<{
+          success: boolean;
+          points?: NeuralTrajectoryPoint[];
+          predicted_time_ms?: number;
+          error?: string;
+        }>;
+        loadModels: (
+          checkpoint?: string,
+        ) => Promise<{ success: boolean; loaded?: boolean; checkpoint?: string; error?: string }>;
         onTrainingProgress: (cb: (data: NeuralTrainingProgress) => void) => () => void;
       };
       goals: {
         list: () => Promise<{ success: boolean; goals: PersistentGoal[] }>;
         create: (goal: Partial<PersistentGoal>) => Promise<{ success: boolean; goal: PersistentGoal }>;
-        update: (goalId: string, updates: Partial<PersistentGoal>) => Promise<{ success: boolean; goal: PersistentGoal }>;
+        update: (
+          goalId: string,
+          updates: Partial<PersistentGoal>,
+        ) => Promise<{ success: boolean; goal: PersistentGoal }>;
         delete: (goalId: string) => Promise<{ success: boolean }>;
       };
       proactive: {

@@ -21,9 +21,7 @@ describe('circuit breaker', () => {
       }),
     ).rejects.toThrow('f2');
 
-    await expect(
-      breaker.execute(async () => 'nope'),
-    ).rejects.toThrow('Circuit open');
+    await expect(breaker.execute(async () => 'nope')).rejects.toThrow('Circuit open');
   });
 
   it('retries with bounded attempts', async () => {
@@ -47,7 +45,11 @@ describe('circuit breaker', () => {
       halfOpenMaxCalls: 1,
     });
 
-    await expect(breaker.execute(async () => { throw new Error('fail'); })).rejects.toThrow();
+    await expect(
+      breaker.execute(async () => {
+        throw new Error('fail');
+      }),
+    ).rejects.toThrow();
     const ok = await breaker.execute(async () => 'recovered');
     expect(ok).toBe('recovered');
     expect(breaker.snapshot.failures).toBe(0);
@@ -58,9 +60,17 @@ describe('circuit breaker', () => {
     const events: string[] = [];
     const breaker = new CircuitBreaker('event-test', { failureThreshold: 2 });
 
-    await breaker.execute(async () => 'ok', (e) => events.push(e.kind));
+    await breaker.execute(
+      async () => 'ok',
+      (e) => events.push(e.kind),
+    );
     await expect(
-      breaker.execute(async () => { throw new Error('x'); }, (e) => events.push(e.kind)),
+      breaker.execute(
+        async () => {
+          throw new Error('x');
+        },
+        (e) => events.push(e.kind),
+      ),
     ).rejects.toThrow();
 
     expect(events).toContain('success');
@@ -70,7 +80,9 @@ describe('circuit breaker', () => {
   it('exhausts retry budget and throws last error', async () => {
     await expect(
       withRetryBudget(
-        async () => { throw new Error('persistent'); },
+        async () => {
+          throw new Error('persistent');
+        },
         { maxAttempts: 3, initialDelayMs: 1, factor: 1 },
       ),
     ).rejects.toThrow('persistent');
@@ -78,11 +90,7 @@ describe('circuit breaker', () => {
 
   it('handles concurrent circuit breaker calls safely', async () => {
     const breaker = new CircuitBreaker('concurrent', { failureThreshold: 10 });
-    const results = await Promise.all(
-      Array.from({ length: 8 }, (_, i) =>
-        breaker.execute(async () => `result_${i}`),
-      ),
-    );
+    const results = await Promise.all(Array.from({ length: 8 }, (_, i) => breaker.execute(async () => `result_${i}`)));
     expect(results).toHaveLength(8);
     expect(new Set(results).size).toBe(8);
     expect(breaker.snapshot.failures).toBe(0);
