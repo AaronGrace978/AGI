@@ -229,9 +229,15 @@ function listOrchestratorEvents(limit = 200) {
   } catch (_) { return []; }
 }
 
+function summarizeAuditEntries(limit = 300) {
+  const entries = Array.isArray(ctx.auditLog?.entries) ? ctx.auditLog.entries.slice(-limit) : [];
+  return summarizeRuntimeIssuesFromEntries(entries);
+}
+
 ctx.appendAuditEvent = appendAuditEvent;
 ctx.emitOrchestratorEvent = emitOrchestratorEvent;
 ctx.listOrchestratorEvents = listOrchestratorEvents;
+ctx.summarizeAuditEntries = summarizeAuditEntries;
 
 // Rollback helpers
 function saveRollbackRegistry() { saveJSON(ctx.rollbackRegistryFile, ctx.rollbackRegistry); }

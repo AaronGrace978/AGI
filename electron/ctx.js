@@ -74,6 +74,7 @@ module.exports = {
   llmGenerateMultimodal: null,
   checkOllama: null,
   appendAuditEvent: null,
+  summarizeAuditEntries: null,
   emitOrchestratorEvent: null,
   listOrchestratorEvents: null,
   saveRollbackRegistry: null,
