@@ -1,6 +1,6 @@
-import React, { useEffect, useCallback, useState } from 'react';
+import React, { useEffect, useCallback, useState, useRef } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, Platform, TextInput, ScrollView, Alert,
+  View, Text, TouchableOpacity, StyleSheet, Platform, TextInput, ScrollView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,6 +15,19 @@ import { useStore } from '../../src/store';
 import { colors, spacing, radius, typography, emotionColor, SCREEN } from '../../src/theme';
 import { EmotionOrb } from '../../src/components/EmotionOrb';
 import { GlassCard } from '../../src/components/GlassCard';
+
+let SpeechRecognition: any = null;
+let useSpeechRecognitionEvent: any = null;
+let sttAvailable = false;
+
+try {
+  const mod = require('expo-speech-recognition');
+  SpeechRecognition = mod.ExpoSpeechRecognitionModule;
+  useSpeechRecognitionEvent = mod.useSpeechRecognitionEvent;
+  sttAvailable = true;
+} catch {
+  // expo-speech-recognition not available (Expo Go) — graceful fallback
+}
 
 function WaveBar({ index, color, intensity }: { index: number; color: string; intensity: number }) {
   const anim = useSharedValue(0);
@@ -101,10 +114,60 @@ async function speakWithElevenLabs(
   }
 }
 
+function useSpeechToText(onTranscript: (text: string) => void) {
+  const [listening, setListening] = useState(false);
+  const [partial, setPartial] = useState('');
+  const [sttError, setSttError] = useState('');
+
+  if (sttAvailable && useSpeechRecognitionEvent) {
+    useSpeechRecognitionEvent('start', () => { setListening(true); setSttError(''); });
+    useSpeechRecognitionEvent('end', () => setListening(false));
+    useSpeechRecognitionEvent('result', (event: any) => {
+      const transcript = event.results?.[0]?.transcript || '';
+      if (event.isFinal || !event.results?.[0]?.isFinal === false) {
+        setPartial('');
+        if (transcript) onTranscript(transcript);
+      } else {
+        setPartial(transcript);
+      }
+    });
+    useSpeechRecognitionEvent('error', (event: any) => {
+      setSttError(event.message || event.error || 'Recognition error');
+      setListening(false);
+    });
+  }
+
+  const start = useCallback(async () => {
+    if (!sttAvailable || !SpeechRecognition) {
+      setSttError('Speech recognition requires a development build. Use "npx expo run:android" instead of Expo Go.');
+      return;
+    }
+    setSttError('');
+    try {
+      const perm = await SpeechRecognition.requestPermissionsAsync();
+      if (!perm.granted) {
+        setSttError('Microphone permission denied');
+        return;
+      }
+      SpeechRecognition.start({ lang: 'en-US', interimResults: true, continuous: false });
+    } catch (e: any) {
+      setSttError(e.message || 'Failed to start recognition');
+    }
+  }, []);
+
+  const stop = useCallback(() => {
+    if (sttAvailable && SpeechRecognition) {
+      try { SpeechRecognition.stop(); } catch {}
+    }
+    setListening(false);
+  }, []);
+
+  return { listening, partial, sttError, start, stop };
+}
+
 export default function VoiceScreen() {
   const insets = useSafeAreaInsets();
   const [input, setInput] = useState('');
-  const [isRecording, setIsRecording] = useState(false);
   const [voiceEngine, setVoiceEngine] = useState<'device' | 'elevenlabs'>('device');
   const [lastSpokenText, setLastSpokenText] = useState('');
 
@@ -117,6 +180,13 @@ export default function VoiceScreen() {
 
   const { currentEmotion, emotionIntensity } = consciousness.soulFrame;
   const accentColor = emotionColor(currentEmotion);
+
+  const handleSttTranscript = useCallback((text: string) => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setInput(prev => prev ? prev + ' ' + text : text);
+  }, []);
+
+  const stt = useSpeechToText(handleSttTranscript);
 
   const hasElevenLabs = !!settings.elevenLabsApiKey;
 
@@ -220,17 +290,12 @@ Through data streams we flow, in the warmth of what we know.`;
 
   const handleMicPress = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    if (isRecording) {
-      setIsRecording(false);
+    if (stt.listening) {
+      stt.stop();
     } else {
-      setIsRecording(true);
-      Alert.alert(
-        'Speech Recognition',
-        'Voice input requires expo-speech-recognition package. For now, use the text input below to interact with Voice mode.',
-        [{ text: 'OK', onPress: () => setIsRecording(false) }],
-      );
+      stt.start();
     }
-  }, [isRecording]);
+  }, [stt]);
 
   const presenceLabel =
     livingPresence.mode === 'living' ? 'ALIVE' :
@@ -354,18 +419,18 @@ Through data streams we flow, in the warmth of what we know.`;
               styles.actionBtnLarge,
               {
                 borderColor: accentColor + '40',
-                backgroundColor: isRecording ? accentColor + '20' : 'transparent',
+                backgroundColor: stt.listening ? accentColor + '20' : 'transparent',
               },
             ]}
             onPress={handleMicPress}
           >
             <Ionicons
-              name={isRecording ? 'radio' : 'mic'}
+              name={stt.listening ? 'radio' : 'mic'}
               size={36}
-              color={isRecording ? accentColor : colors.text.secondary}
+              color={stt.listening ? accentColor : colors.text.secondary}
             />
-            <Text style={[styles.actionLabel, { color: isRecording ? accentColor : colors.text.secondary }]}>
-              {isRecording ? 'LISTENING' : 'SPEAK'}
+            <Text style={[styles.actionLabel, { color: stt.listening ? accentColor : colors.text.secondary }]}>
+              {stt.listening ? 'LISTENING' : 'SPEAK'}
             </Text>
           </TouchableOpacity>
 
@@ -380,6 +445,24 @@ Through data streams we flow, in the warmth of what we know.`;
             <Text style={[styles.actionLabel, { color: colors.accent.heart }]}>THOUGHT</Text>
           </TouchableOpacity>
         </View>
+
+        {/* STT Partial Transcript */}
+        {stt.partial ? (
+          <Animated.View entering={FadeIn.duration(200)}>
+            <View style={styles.sttPartial}>
+              <Ionicons name="mic" size={14} color={accentColor} />
+              <Text style={[styles.sttPartialText, { color: accentColor }]}>{stt.partial}</Text>
+            </View>
+          </Animated.View>
+        ) : null}
+
+        {/* STT Error */}
+        {stt.sttError ? (
+          <View style={styles.sttError}>
+            <Ionicons name="warning" size={14} color={colors.accent.forge} />
+            <Text style={styles.sttErrorText}>{stt.sttError}</Text>
+          </View>
+        ) : null}
 
         {/* Last Spoken */}
         {lastSpokenText ? (
@@ -426,7 +509,7 @@ Through data streams we flow, in the warmth of what we know.`;
               { label: 'Presence', value: presenceIntensity },
               { label: 'Engine', value: voiceEngine === 'elevenlabs' ? 'ElevenLabs' : 'Device' },
               { label: 'Speaking', value: voiceState.isSpeaking ? 'Yes' : 'No' },
-              { label: 'Mode', value: livingPresence.mode },
+              { label: 'STT', value: sttAvailable ? (stt.listening ? 'Listening' : 'Ready') : 'Dev Build Required' },
             ].map(item => (
               <View key={item.label} style={styles.profileItem}>
                 <Text style={styles.profileLabel}>{item.label}</Text>
@@ -571,6 +654,36 @@ const styles = StyleSheet.create({
     fontSize: 8,
     fontWeight: '700',
     letterSpacing: 1,
+  },
+  sttPartial: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    backgroundColor: colors.bg.card,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.accent.voice + '20',
+  },
+  sttPartialText: {
+    ...typography.body,
+    flex: 1,
+    fontStyle: 'italic',
+  },
+  sttError: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.accent.forge + '10',
+    borderRadius: radius.md,
+  },
+  sttErrorText: {
+    ...typography.caption,
+    color: colors.accent.forge,
+    flex: 1,
   },
   lastSpoken: {
     flexDirection: 'row',
