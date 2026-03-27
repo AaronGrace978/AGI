@@ -53,6 +53,7 @@ import type { RuntimeSignal } from './prime/observability';
 import type { SovereignPhase } from './prime/sovereign';
 import type { OracleRunParams } from './prime/oracle';
 import type { HardeningReport } from './prime/hardening';
+import type { LearnerStats, LearnerConfig } from './prime/autonomous-learner';
 
 import { createChatSlice } from './store/slices/chat';
 import { createConsciousnessSlice } from './store/slices/consciousness';
@@ -269,6 +270,14 @@ export interface AGIStore {
   setGenomeTraumaSensitivity: (key: keyof SparkState['genome']['traumaSensitivity'], value: number) => void;
   setGenomeAttachmentStyle: (style: SparkState['genome']['attachmentStyle']) => void;
   applyGenomePreset: (preset: 'companion' | 'strategist' | 'explorer' | 'guardian') => void;
+
+  learnerActive: boolean;
+  learnerStats: LearnerStats | null;
+  learnerLastLog: string[];
+  setLearnerActive: (active: boolean) => void;
+  getLearnerStats: () => LearnerStats | null;
+  updateLearnerConfig: (partial: Partial<LearnerConfig>) => void;
+  triggerLearningSession: () => Promise<void>;
 
   // ORACLE
   oracle: OracleState;

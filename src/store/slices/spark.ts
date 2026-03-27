@@ -18,6 +18,17 @@ import { deriveTransferHeuristicsFromProceduralMemories } from '../../prime/tran
 import { buildSystemAddendum } from '../../prime/context';
 import { generateSpontaneousThought, shouldSingSpontaneously } from '../../prime/voice';
 import type { GenerateFn } from '../../prime/runtime';
+import {
+  runLearningSession,
+  selectQuestionForResearch,
+  canRunSession,
+  setActive as setLearnerActive,
+  isActive as isLearnerActive,
+  getStats as getLearnerStats,
+  updateConfig as updateLearnerConfig,
+} from '../../prime/autonomous-learner';
+import type { LearnerStats, LearnerConfig } from '../../prime/autonomous-learner';
+import { mergeWorldModelIncremental } from '../../prime/world-model';
 
 // ─── Utilities ──────────────────────────────────────────────────
 let messageCounter = 0;
@@ -195,6 +206,108 @@ export function createSparkSlice(set: StoreSet, get: StoreGet) {
       cooldownMs: 5 * 60 * 1000,
     },
 
+    // ─── Autonomous Learner ─────────────────────────────────
+    learnerActive: false,
+    learnerStats: null as LearnerStats | null,
+    learnerLastLog: [] as string[],
+
+    setLearnerActive: (active: boolean) => {
+      setLearnerActive(active);
+      set({ learnerActive: active });
+      set((s: any) => ({
+        sparkLiveLog: [
+          ...s.sparkLiveLog.slice(-49),
+          active ? '📚 Autonomous Learner ACTIVATED' : '📚 Autonomous Learner deactivated',
+        ],
+      }));
+    },
+
+    getLearnerStats: (): LearnerStats | null => {
+      try {
+        return getLearnerStats();
+      } catch {
+        return null;
+      }
+    },
+
+    updateLearnerConfig: (partial: Partial<LearnerConfig>) => {
+      updateLearnerConfig(partial);
+    },
+
+    triggerLearningSession: async () => {
+      const state = get();
+      if (!isLearnerActive()) return;
+      if (!window.api?.agent?.webFetch || !window.api?.agent?.webSearch) return;
+      if (!window.api?.llm?.generate) return;
+
+      const question = selectQuestionForResearch(state.spark.curiosity.questions);
+      if (!question) return;
+
+      set((s: any) => ({
+        sparkLiveLog: [...s.sparkLiveLog.slice(-49), `📚 Learning: "${question.question.slice(0, 80)}..."`],
+      }));
+
+      try {
+        const session = await runLearningSession(
+          question,
+          state.spark.worldModel,
+          llmGenerate,
+          (url: string, opts?: Record<string, unknown>) => window.api.agent.webFetch(url, opts),
+          (q: string, opts?: Record<string, unknown>) => window.api.agent.webSearch(q, opts),
+          (msg: string) => {
+            set((s: any) => ({
+              sparkLiveLog: [...s.sparkLiveLog.slice(-50), `  📖 ${msg}`],
+            }));
+          },
+        );
+
+        if (session.status === 'complete' && session.extractedKnowledge.entities.length > 0) {
+          set((s: any) => {
+            const merged = mergeWorldModelIncremental({
+              current: s.spark.worldModel,
+              incomingEntities: session.extractedKnowledge.entities,
+              incomingRelations: session.extractedKnowledge.relations,
+            });
+            return {
+              spark: {
+                ...s.spark,
+                worldModel: merged,
+                curiosity: {
+                  ...s.spark.curiosity,
+                  questions: s.spark.curiosity.questions.map((q: any) =>
+                    q.id === question.id ? { ...q, status: 'answered' as const } : q,
+                  ),
+                  totalQuestionsAnswered: s.spark.curiosity.totalQuestionsAnswered + 1,
+                },
+                logs: [
+                  ...s.spark.logs,
+                  `[LEARNER] Acquired: +${session.extractedKnowledge.entities.length}E / +${session.extractedKnowledge.relations.length}R from "${question.question.slice(0, 60)}"`,
+                ].slice(-100),
+              },
+              learnerStats: getLearnerStats(),
+              learnerLastLog: session.log.slice(-20),
+              sparkLiveLog: [
+                ...s.sparkLiveLog.slice(-49),
+                `📚 Learned +${session.extractedKnowledge.entities.length} entities, +${session.extractedKnowledge.relations.length} relations`,
+              ],
+            };
+          });
+
+          window.api?.spark?.saveState?.(get().spark).catch((e: unknown) => logNonFatal('spark.saveState.learner', e));
+        } else {
+          set((s: any) => ({
+            learnerLastLog: session.log.slice(-20),
+            sparkLiveLog: [...s.sparkLiveLog.slice(-49), `📚 Learning session: no new knowledge extracted`],
+          }));
+        }
+      } catch (e) {
+        logNonFatal('autonomousLearner', e);
+        set((s: any) => ({
+          sparkLiveLog: [...s.sparkLiveLog.slice(-49), `📚 Learning session error: ${e}`],
+        }));
+      }
+    },
+
     sparkIgnite: () => {
       const existing = get().sparkHeartbeatId;
       if (existing !== null) return;
@@ -334,6 +447,17 @@ export function createSparkSlice(set: StoreSet, get: StoreGet) {
             enqueueSparkLearningEpisodes(set, get, prevSpark, nextState, 'autonomy:deep');
             window.api?.spark?.saveState?.(nextState).catch((e: unknown) => logNonFatal('spark.saveState', e));
             maybeDispatchAutonomousHands(nextState);
+
+            // Autonomous learning: after deep thought generates curiosity questions, try to answer one
+            if (
+              isLearnerActive() &&
+              canRunSession() &&
+              nextState.curiosity.questions.some((q: any) => q.status === 'open')
+            ) {
+              get()
+                .triggerLearningSession()
+                .catch((e: unknown) => logNonFatal('autonomousLearner.auto', e));
+            }
           } catch {
             // non-fatal
           }

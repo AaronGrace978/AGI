@@ -16,6 +16,8 @@ try {
 
 module.exports = {
   expo: {
+    // Must match your Expo username (expo.dev) so the project shows under your account after `eas init`
+    owner: 'aarongrace',
     name: 'AGI Prime',
     slug: 'agiprime-mobile',
     version: '1.0.0',

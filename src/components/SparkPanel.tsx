@@ -691,6 +691,9 @@ export default function SparkPanel() {
   const ignite = useStore((s) => s.sparkIgnite);
   const extinguish = useStore((s) => s.sparkExtinguish);
   const resetSpark = useStore((s) => s.sparkReset);
+  const learnerActive = useStore((s) => s.learnerActive);
+  const setLearnerActive = useStore((s) => s.setLearnerActive);
+  const triggerLearningSession = useStore((s) => s.triggerLearningSession);
   const [input, setInput] = useState('');
 
   const isProcessing = phase === 'thinking' || phase === 'exploring' || phase === 'evolving';
@@ -757,6 +760,42 @@ export default function SparkPanel() {
             title="Reset SPARK kernel to initial state"
           >
             ↺ RESET
+          </Button>
+        </div>
+
+        {/* Autonomous web learning — curiosity-driven, curated sources */}
+        <div className="spark-learning-row">
+          <label className="spark-learning-label" htmlFor="spark-learner-switch">
+            <div className="spark-learning-copy">
+              <span className="spark-learning-title">AUTONOMOUS WEB LEARNING</span>
+              <span className="spark-learning-hint">
+                After deep-thought cycles, researches open curiosity questions on trusted science sources (journals,
+                gov, universities). Requires network + LLM. Off by default.
+              </span>
+            </div>
+            <span className="spark-switch">
+              <input
+                id="spark-learner-switch"
+                type="checkbox"
+                role="switch"
+                aria-checked={learnerActive}
+                checked={learnerActive}
+                onChange={(e) => setLearnerActive(e.target.checked)}
+              />
+              <span className="spark-switch-track" aria-hidden>
+                <span className="spark-switch-thumb" />
+              </span>
+            </span>
+          </label>
+          <Button
+            size="sm"
+            variant="primary"
+            className="spark-learning-run spark-btn-small"
+            disabled={!learnerActive || isProcessing}
+            onClick={() => triggerLearningSession()}
+            title="Fetch and verify one curiosity question now (uses web search + fetch)"
+          >
+            📚 Learn now
           </Button>
         </div>
 

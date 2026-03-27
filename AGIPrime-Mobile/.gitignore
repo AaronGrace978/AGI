@@ -35,6 +35,9 @@ yarn-error.*
 .env.*
 .env*.local
 
+# Expo CLI access token (never commit)
+.expo-token
+
 # typescript
 *.tsbuildinfo
 

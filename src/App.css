@@ -4670,6 +4670,107 @@ select:focus-visible {
   margin-bottom: 12px;
 }
 
+/* Autonomous learner toggle — SPARK panel */
+.spark-learning-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.spark-learning-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+  user-select: none;
+}
+
+.spark-learning-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.spark-learning-title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.8px;
+  color: var(--text-secondary);
+}
+
+.spark-learning-hint {
+  font-size: 10px;
+  color: var(--text-ghost);
+  line-height: 1.35;
+}
+
+.spark-switch {
+  position: relative;
+  width: 46px;
+  height: 26px;
+  flex-shrink: 0;
+}
+
+.spark-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+.spark-switch-track {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-dim);
+  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.spark-switch-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition: transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+.spark-switch input:focus-visible + .spark-switch-track {
+  outline: 2px solid var(--spark);
+  outline-offset: 2px;
+}
+
+.spark-switch input:checked + .spark-switch-track {
+  background: rgba(255, 140, 0, 0.18);
+  border-color: rgba(255, 140, 0, 0.45);
+  box-shadow: 0 0 12px rgba(255, 140, 0, 0.12);
+}
+
+.spark-switch input:checked + .spark-switch-track .spark-switch-thumb {
+  transform: translateX(20px);
+  background: var(--spark);
+  box-shadow: 0 0 10px var(--spark-glow);
+}
+
+.spark-learning-run {
+  flex-shrink: 0;
+}
+
 .spark-btn {
   padding: 6px 16px;
   border: 1px solid var(--border-dim);
