@@ -54,6 +54,7 @@ import type { SovereignPhase } from './prime/sovereign';
 import type { OracleRunParams } from './prime/oracle';
 import type { HardeningReport } from './prime/hardening';
 import type { LearnerStats, LearnerConfig } from './prime/autonomous-learner';
+import type { RepoCandidate, RepoIngestConfig, RepoIngestResult } from './prime/repo-ingestor';
 
 import { createChatSlice } from './store/slices/chat';
 import { createConsciousnessSlice } from './store/slices/consciousness';
@@ -63,6 +64,7 @@ import { createForgeSlice } from './store/slices/forge';
 import { createGauntletScoreSlice } from './store/slices/gauntlet-score';
 import { createSovereignSlice } from './store/slices/sovereign';
 import { createSparkSlice } from './store/slices/spark';
+import { createRepoIngestorSlice } from './store/slices/repo-ingestor';
 import { createOracleSlice } from './store/slices/oracle';
 import { createVoiceSlice } from './store/slices/voice';
 import { createConscienceSlice } from './store/slices/conscience';
@@ -279,6 +281,36 @@ export interface AGIStore {
   updateLearnerConfig: (partial: Partial<LearnerConfig>) => void;
   triggerLearningSession: () => Promise<void>;
 
+  // REPO INGESTOR
+  repoIngestor: {
+    phase: 'idle' | 'discovering' | 'ingesting' | 'complete' | 'error';
+    running: boolean;
+    topic: string;
+    selectedCandidates: string[];
+    candidates: RepoCandidate[];
+    results: RepoIngestResult[];
+    stats: {
+      scanned: number;
+      accepted: number;
+      rejected: number;
+      storedMemories: number;
+      dedupedMemories: number;
+    };
+    config: RepoIngestConfig;
+    logs: string[];
+    lastError: string | null;
+    lastRunAt: number | null;
+  };
+  repoIngestorSetTopic: (topic: string) => void;
+  repoIngestorUpdateConfig: (partial: Partial<RepoIngestConfig>) => void;
+  repoIngestorToggleCandidate: (fullName: string) => void;
+  repoIngestorSelectAllCandidates: () => void;
+  repoIngestorClearSelection: () => void;
+  repoIngestorClearLogs: () => void;
+  repoIngestorStop: () => void;
+  repoIngestorDiscover: (topicOverride?: string) => Promise<void>;
+  repoIngestorIngestSelected: () => Promise<void>;
+
   // ORACLE
   oracle: OracleState;
   oracleSetSubject: (
@@ -355,6 +387,7 @@ export const useStore = create<AGIStore>()(
       ...createGauntletScoreSlice(set as any, get as any),
       ...createSovereignSlice(set as any, get as any),
       ...createSparkSlice(set as any, get as any),
+      ...createRepoIngestorSlice(set as any, get as any),
       ...createOracleSlice(set as any, get as any),
       ...createVoiceSlice(set as any, get as any),
       ...createConscienceSlice(set as any, get as any),

@@ -127,6 +127,14 @@ contextBridge.exposeInMainWorld('api', {
     ingestDocument: (filePath) => ipcRenderer.invoke('memory:ingestDocument', filePath),
   },
 
+  // ─── GitHub Repository Intelligence ────────────────────
+  github: {
+    searchRepos: (queryOrOptions, options) => ipcRenderer.invoke('github:searchRepos', queryOrOptions, options),
+    fetchRepoMeta: (repoInput, options) => ipcRenderer.invoke('github:fetchRepoMeta', repoInput, options),
+    fetchRepoTree: (params) => ipcRenderer.invoke('github:fetchRepoTree', params),
+    fetchFileContent: (params) => ipcRenderer.invoke('github:fetchFileContent', params),
+  },
+
   // ─── LLM (Non-Streaming) ─────────────────────────────
   llm: {
     generate: (messages, config) => ipcRenderer.invoke('llm:generate', messages, config),

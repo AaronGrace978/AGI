@@ -16,6 +16,7 @@ export type ModuleId =
   | 'gauntlet'
   | 'sovereign'
   | 'spark'
+  | 'repo'
   | 'voice'
   | 'oracle'
   | 'creed'
@@ -1833,6 +1834,35 @@ declare global {
           exports?: Array<{ filename: string; path: string; size: number; modified: number }>;
           error?: string;
         }>;
+      };
+      github?: {
+        searchRepos: (
+          queryOrOptions: string | Record<string, unknown>,
+          options?: Record<string, unknown>,
+        ) => Promise<{
+          success: boolean;
+          items?: Array<Record<string, unknown>>;
+          repos?: Array<Record<string, unknown>>;
+          totalCount?: number;
+          query?: string;
+          error?: string;
+        }>;
+        fetchRepoMeta: (
+          repoInput: string | { owner: string; repo: string },
+          options?: Record<string, unknown>,
+        ) => Promise<{ success: boolean; repo?: Record<string, unknown>; error?: string }>;
+        fetchRepoTree: (params: {
+          owner: string;
+          repo: string;
+          ref?: string;
+          recursive?: boolean;
+        }) => Promise<{ success: boolean; tree?: Array<Record<string, unknown>>; truncated?: boolean; error?: string }>;
+        fetchFileContent: (params: {
+          owner: string;
+          repo: string;
+          path: string;
+          ref?: string;
+        }) => Promise<{ success: boolean; content?: string; binary?: boolean; path?: string; error?: string }>;
       };
       llm: {
         generate: (

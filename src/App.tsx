@@ -18,6 +18,7 @@ const ForgePanel = lazy(() => import('./components/ForgePanel'));
 const GauntletPanel = lazy(() => import('./components/GauntletPanel'));
 const SovereignPanel = lazy(() => import('./components/SovereignPanel'));
 const SparkPanel = lazy(() => import('./components/SparkPanel'));
+const RepoIngestorPanel = lazy(() => import('./components/RepoIngestorPanel'));
 const VoiceBox = lazy(() => import('./components/VoiceBox'));
 const OraclePanel = lazy(() => import('./components/OraclePanel'));
 const CreedPanel = lazy(() => import('./components/CreedPanel'));
@@ -96,6 +97,9 @@ const ActivePanel = memo(function ActivePanel() {
       break;
     case 'spark':
       panel = <SparkPanel />;
+      break;
+    case 'repo':
+      panel = <RepoIngestorPanel />;
       break;
     case 'voice':
       panel = <VoiceBox />;

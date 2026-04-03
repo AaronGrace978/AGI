@@ -45,6 +45,7 @@ export function createChatSlice(set: StoreSet, get: StoreGet) {
       gauntlet: 'online',
       sovereign: 'online',
       spark: 'online',
+      repo: 'online',
       voice: 'online',
       oracle: 'online',
       creed: 'online',

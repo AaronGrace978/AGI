@@ -7539,3 +7539,305 @@ select:focus-visible {
 .oracle-voice-avoid {
   color: rgba(244, 114, 182, 0.7);
 }
+
+/* ─── REPO INGESTOR Sidebar Button ───────────────────── */
+.sidebar-btn.repo-btn.active {
+  color: #22d3ee;
+  text-shadow: 0 0 12px rgba(34, 211, 238, 0.55);
+}
+
+.sidebar-btn.repo-btn:hover {
+  color: #67e8f9;
+  background: rgba(34, 211, 238, 0.14);
+}
+
+/* ─── REPO INGESTOR Panel ─────────────────────────────── */
+.repo-ingestor-panel {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px 22px 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.repo-ingestor-header h2 {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 16px;
+  letter-spacing: 1.2px;
+  color: #a5f3fc;
+}
+
+.repo-ingestor-header p {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.repo-ingestor-controls {
+  display: grid;
+  gap: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-dim);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.repo-ingestor-control-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.repo-ingestor-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.8px;
+  color: var(--text-dim);
+}
+
+.repo-ingestor-input {
+  flex: 1;
+  min-width: 280px;
+}
+
+.repo-ingestor-slider {
+  width: 180px;
+}
+
+.repo-ingestor-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.repo-ingestor-path-input {
+  min-width: 260px;
+  max-width: 420px;
+}
+
+.repo-ingestor-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.repo-ingestor-stat-card {
+  border: 1px solid rgba(34, 211, 238, 0.2);
+  background: rgba(34, 211, 238, 0.07);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.repo-ingestor-stat-label {
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+.repo-ingestor-stat-value {
+  color: #cffafe;
+  font-family: var(--font-mono);
+  font-size: 15px;
+}
+
+.repo-ingestor-content-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.repo-ingestor-section {
+  border: 1px solid var(--border-dim);
+  background: var(--bg-card);
+  border-radius: 10px;
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+}
+
+.repo-ingestor-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.repo-ingestor-section-header h3 {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.7px;
+  font-family: var(--font-mono);
+}
+
+.repo-ingestor-section-header span {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+}
+
+.repo-ingestor-table {
+  overflow: auto;
+  padding: 8px 10px 10px;
+  display: grid;
+  gap: 7px;
+}
+
+.repo-ingestor-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 9px;
+  align-items: start;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: rgba(2, 6, 23, 0.34);
+}
+
+.repo-ingestor-row input[type='checkbox'] {
+  margin-top: 2px;
+}
+
+.repo-ingestor-row-main {
+  display: grid;
+  gap: 4px;
+}
+
+.repo-ingestor-row-main a {
+  color: #67e8f9;
+  text-decoration: none;
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
+.repo-ingestor-row-main a:hover {
+  text-decoration: underline;
+}
+
+.repo-ingestor-row-main span {
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.repo-ingestor-row-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+}
+
+.repo-ingestor-history {
+  overflow: auto;
+  padding: 8px 10px 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.repo-ingestor-history-item {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: grid;
+  gap: 5px;
+}
+
+.repo-ingestor-history-item.accepted {
+  border-color: rgba(34, 197, 94, 0.35);
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.repo-ingestor-history-item.rejected {
+  border-color: rgba(244, 63, 94, 0.35);
+  background: rgba(244, 63, 94, 0.08);
+}
+
+.repo-ingestor-history-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.repo-ingestor-history-top a {
+  color: var(--text-primary);
+  text-decoration: none;
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
+.repo-ingestor-pill {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.repo-ingestor-pill.accepted {
+  color: #4ade80;
+  border: 1px solid rgba(34, 197, 94, 0.4);
+}
+
+.repo-ingestor-pill.rejected {
+  color: #fb7185;
+  border: 1px solid rgba(244, 63, 94, 0.4);
+}
+
+.repo-ingestor-history-meta {
+  display: flex;
+  gap: 9px;
+  flex-wrap: wrap;
+  font-size: 10px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+}
+
+.repo-ingestor-reason {
+  font-size: 11px;
+  color: #fecdd3;
+  line-height: 1.4;
+}
+
+.repo-ingestor-note {
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+.repo-ingestor-logs {
+  min-height: 220px;
+}
+
+.repo-ingestor-log-stream {
+  overflow: auto;
+  padding: 8px 10px 10px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-secondary);
+  display: grid;
+  gap: 4px;
+}
+
+.repo-ingestor-log-line {
+  border-left: 2px solid rgba(34, 211, 238, 0.28);
+  padding-left: 7px;
+  line-height: 1.5;
+}
+
+.repo-ingestor-empty {
+  color: var(--text-dim);
+  font-size: 11px;
+  padding: 12px;
+}

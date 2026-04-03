@@ -574,6 +574,379 @@ ipcMain.handle('llm:generate', async (_, messages, config) => {
   }
 });
 
+// ─── GitHub Repository Intelligence IPC ─────────────────────────
+const GITHUB_API_BASE = 'https://api.github.com';
+const GITHUB_API_VERSION = '2022-11-28';
+const GITHUB_USER_AGENT = 'AGI-PRIME/1.0';
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function clampInt(value, min, max, fallback) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, Math.floor(n)));
+}
+
+function parseRepoIdentity(input) {
+  if (!input) return { owner: '', repo: '' };
+
+  if (typeof input === 'string') {
+    const trimmed = input.trim();
+    if (!trimmed) return { owner: '', repo: '' };
+
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      try {
+        const parsed = new URL(trimmed);
+        const parts = parsed.pathname.split('/').filter(Boolean);
+        return {
+          owner: parts[0] || '',
+          repo: (parts[1] || '').replace(/\.git$/i, ''),
+        };
+      } catch {
+        return { owner: '', repo: '' };
+      }
+    }
+
+    const parts = trimmed.split('/').filter(Boolean);
+    return {
+      owner: parts[0] || '',
+      repo: (parts[1] || '').replace(/\.git$/i, ''),
+    };
+  }
+
+  const owner = String(input.owner || input.org || '').trim();
+  const repo = String(input.repo || input.name || '').trim().replace(/\.git$/i, '');
+  return { owner, repo };
+}
+
+function encodeRepoPath(filePath) {
+  return String(filePath || '')
+    .split('/')
+    .map((part) => encodeURIComponent(part))
+    .join('/');
+}
+
+function getGitHubToken(explicitToken) {
+  if (typeof explicitToken === 'string' && explicitToken.trim()) return explicitToken.trim();
+  const envToken = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || '';
+  if (envToken.trim()) return envToken.trim();
+  const settingsToken = typeof settings?.githubToken === 'string' ? settings.githubToken : '';
+  return settingsToken.trim();
+}
+
+function computeGitHubRetryDelayMs(response, attempt) {
+  const retryAfter = Number(response.headers.get('retry-after') || 0);
+  if (Number.isFinite(retryAfter) && retryAfter > 0) {
+    return Math.max(250, retryAfter * 1000);
+  }
+
+  const remaining = Number(response.headers.get('x-ratelimit-remaining'));
+  const resetEpochSeconds = Number(response.headers.get('x-ratelimit-reset'));
+  if (remaining === 0 && Number.isFinite(resetEpochSeconds) && resetEpochSeconds > 0) {
+    return Math.max(250, resetEpochSeconds * 1000 - Date.now() + 300);
+  }
+
+  return Math.min(10000, 500 * (2 ** attempt));
+}
+
+async function githubApiRequest(endpoint, options = {}) {
+  const {
+    method = 'GET',
+    token = '',
+    body = undefined,
+    timeoutMs = 15000,
+    accept = 'application/vnd.github+json',
+  } = options;
+
+  const maxRetries = 3;
+  const requestUrl = endpoint.startsWith('http://') || endpoint.startsWith('https://')
+    ? endpoint
+    : `${GITHUB_API_BASE}${endpoint}`;
+
+  const headers = {
+    Accept: accept,
+    'X-GitHub-Api-Version': GITHUB_API_VERSION,
+    'User-Agent': GITHUB_USER_AGENT,
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  if (body !== undefined) {
+    headers['Content-Type'] = 'application/json';
+  }
+
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    try {
+      const response = await fetch(requestUrl, {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+
+      if (response.ok) {
+        if (response.status === 204) return null;
+        const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+        if (contentType.includes('application/json')) {
+          return await response.json();
+        }
+        return await response.text();
+      }
+
+      const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+      let payload = null;
+      try {
+        payload = contentType.includes('application/json')
+          ? await response.json()
+          : await response.text();
+      } catch {
+        payload = null;
+      }
+
+      const shouldRetry =
+        (response.status === 403 || response.status === 429 || response.status >= 500) && attempt < maxRetries;
+      if (shouldRetry) {
+        const delayMs = computeGitHubRetryDelayMs(response, attempt);
+        await sleep(delayMs);
+        continue;
+      }
+
+      const message = typeof payload === 'object' && payload && payload.message
+        ? String(payload.message)
+        : typeof payload === 'string' && payload.trim()
+          ? payload.slice(0, 400)
+          : `GitHub request failed (${response.status})`;
+      const err = new Error(message);
+      err.status = response.status;
+      throw err;
+    } catch (error) {
+      if (attempt >= maxRetries) throw error;
+      await sleep(Math.min(6000, 400 * (2 ** attempt)));
+    }
+  }
+
+  throw new Error('GitHub request failed after retries');
+}
+
+function mapRepoSummary(repo) {
+  return {
+    id: repo.id,
+    fullName: repo.full_name,
+    owner: repo.owner?.login || '',
+    name: repo.name,
+    htmlUrl: repo.html_url,
+    description: repo.description || '',
+    stars: repo.stargazers_count || 0,
+    forks: repo.forks_count || 0,
+    watchers: repo.watchers_count || 0,
+    openIssues: repo.open_issues_count || 0,
+    language: repo.language || '',
+    topics: Array.isArray(repo.topics) ? repo.topics : [],
+    archived: Boolean(repo.archived),
+    disabled: Boolean(repo.disabled),
+    fork: Boolean(repo.fork),
+    defaultBranch: repo.default_branch || 'main',
+    pushedAt: repo.pushed_at || null,
+    updatedAt: repo.updated_at || null,
+    createdAt: repo.created_at || null,
+    size: repo.size || 0,
+    license: repo.license?.spdx_id || repo.license?.name || null,
+    score: Number(repo.score || 0),
+  };
+}
+
+ipcMain.handle('github:searchRepos', async (_, queryOrOptions, maybeOptions) => {
+  try {
+    const merged = typeof queryOrOptions === 'string'
+      ? { query: queryOrOptions, ...(maybeOptions || {}) }
+      : { ...(queryOrOptions || {}) };
+
+    const query = String(merged.query || '').trim();
+    if (!query) {
+      return { success: false, error: 'Query is required.', items: [], totalCount: 0 };
+    }
+
+    const perPage = clampInt(merged.perPage, 1, 50, 20);
+    const page = clampInt(merged.page, 1, 100, 1);
+    const sort = ['stars', 'forks', 'updated'].includes(String(merged.sort || ''))
+      ? String(merged.sort)
+      : 'stars';
+    const order = String(merged.order || 'desc').toLowerCase() === 'asc' ? 'asc' : 'desc';
+    const minStars = clampInt(merged.minStars, 0, 1000000, 0);
+    const language = String(merged.language || '').trim();
+
+    const filters = [];
+    if (language) filters.push(`language:${language}`);
+    if (minStars > 0) filters.push(`stars:>=${minStars}`);
+    if (merged.excludeForks !== false) filters.push('fork:false');
+    const finalQuery = [query, ...filters].join(' ').trim();
+
+    const token = getGitHubToken(merged.token);
+    const endpoint =
+      `/search/repositories?q=${encodeURIComponent(finalQuery)}&sort=${sort}&order=${order}&per_page=${perPage}&page=${page}`;
+    const result = await githubApiRequest(endpoint, { token });
+
+    const items = Array.isArray(result?.items) ? result.items.map(mapRepoSummary) : [];
+    return {
+      success: true,
+      query: finalQuery,
+      totalCount: Number(result?.total_count || 0),
+      incompleteResults: Boolean(result?.incomplete_results),
+      items,
+    };
+  } catch (e) {
+    return { success: false, error: e?.message || String(e), items: [], totalCount: 0 };
+  }
+});
+
+ipcMain.handle('github:fetchRepoMeta', async (_, repoInput, options = {}) => {
+  try {
+    const repoIdentity = typeof repoInput === 'object' && repoInput ? repoInput : parseRepoIdentity(repoInput);
+    const owner = String(repoIdentity.owner || '').trim();
+    const repo = String(repoIdentity.repo || repoIdentity.name || '').trim();
+    if (!owner || !repo) {
+      return { success: false, error: 'Valid owner/repo is required.' };
+    }
+
+    const token = getGitHubToken(options.token);
+    const data = await githubApiRequest(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, { token });
+
+    return {
+      success: true,
+      repo: mapRepoSummary(data),
+      defaultBranch: data.default_branch || 'main',
+      networkCount: Number(data.network_count || 0),
+      subscribersCount: Number(data.subscribers_count || 0),
+      topics: Array.isArray(data.topics) ? data.topics : [],
+    };
+  } catch (e) {
+    return { success: false, error: e?.message || String(e) };
+  }
+});
+
+ipcMain.handle('github:fetchRepoTree', async (_, params = {}) => {
+  try {
+    const repoIdentity = parseRepoIdentity(params);
+    const owner = String(repoIdentity.owner || '').trim();
+    const repo = String(repoIdentity.repo || '').trim();
+    if (!owner || !repo) {
+      return { success: false, error: 'Valid owner/repo is required.' };
+    }
+
+    const token = getGitHubToken(params.token);
+    let ref = String(params.ref || params.treeSha || '').trim();
+    if (!ref) {
+      const meta = await githubApiRequest(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, { token });
+      ref = String(meta.default_branch || 'main');
+    }
+
+    const recursive = params.recursive !== false;
+    const treeEndpoint =
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees/${encodeURIComponent(ref)}`
+      + (recursive ? '?recursive=1' : '');
+    const treeData = await githubApiRequest(treeEndpoint, { token });
+    const tree = Array.isArray(treeData?.tree)
+      ? treeData.tree.map((item) => ({
+        path: item.path,
+        type: item.type,
+        mode: item.mode,
+        size: Number(item.size || 0),
+        sha: item.sha,
+        url: item.url,
+      }))
+      : [];
+
+    const fileCount = tree.filter((item) => item.type === 'blob').length;
+    const dirCount = tree.filter((item) => item.type === 'tree').length;
+    return {
+      success: true,
+      owner,
+      repo,
+      ref,
+      truncated: Boolean(treeData?.truncated),
+      fileCount,
+      dirCount,
+      tree,
+    };
+  } catch (e) {
+    return { success: false, error: e?.message || String(e), tree: [] };
+  }
+});
+
+ipcMain.handle('github:fetchFileContent', async (_, params = {}) => {
+  try {
+    const repoIdentity = parseRepoIdentity(params);
+    const owner = String(repoIdentity.owner || '').trim();
+    const repo = String(repoIdentity.repo || '').trim();
+    const filePath = String(params.path || params.filePath || '').trim().replace(/^\/+/, '');
+    if (!owner || !repo || !filePath) {
+      return { success: false, error: 'Valid owner/repo/path is required.' };
+    }
+
+    const token = getGitHubToken(params.token);
+    const ref = String(params.ref || '').trim();
+    const endpoint =
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodeRepoPath(filePath)}`
+      + (ref ? `?ref=${encodeURIComponent(ref)}` : '');
+
+    const fileData = await githubApiRequest(endpoint, { token });
+    if (Array.isArray(fileData)) {
+      return { success: false, error: 'Path points to a directory, not a file.' };
+    }
+
+    if (fileData?.content && String(fileData.encoding || '').toLowerCase() === 'base64') {
+      const rawBuffer = Buffer.from(String(fileData.content).replace(/\n/g, ''), 'base64');
+      const hasBinaryNull = rawBuffer.includes(0);
+      return {
+        success: true,
+        owner,
+        repo,
+        path: fileData.path || filePath,
+        sha: fileData.sha,
+        size: Number(fileData.size || rawBuffer.length),
+        ref: ref || null,
+        binary: hasBinaryNull,
+        encoding: hasBinaryNull ? 'base64' : 'utf8',
+        content: hasBinaryNull ? rawBuffer.toString('base64') : rawBuffer.toString('utf8'),
+      };
+    }
+
+    if (fileData?.download_url) {
+      const response = await fetch(fileData.download_url, {
+        method: 'GET',
+        headers: {
+          'User-Agent': GITHUB_USER_AGENT,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to download raw content (HTTP ${response.status})`);
+      }
+      const rawBuffer = Buffer.from(await response.arrayBuffer());
+      const hasBinaryNull = rawBuffer.includes(0);
+      return {
+        success: true,
+        owner,
+        repo,
+        path: fileData.path || filePath,
+        sha: fileData.sha || null,
+        size: Number(fileData.size || rawBuffer.length),
+        ref: ref || null,
+        binary: hasBinaryNull,
+        encoding: hasBinaryNull ? 'base64' : 'utf8',
+        content: hasBinaryNull ? rawBuffer.toString('base64') : rawBuffer.toString('utf8'),
+      };
+    }
+
+    return { success: false, error: 'File content unavailable for this path.' };
+  } catch (e) {
+    return { success: false, error: e?.message || String(e) };
+  }
+});
+
 // Persist merged settings
 if (settings.disableConscience) ctx.runtimeControls.conscienceEnabled = false;
 saveJSON(ctx.settingsFile, settings);
