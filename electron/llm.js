@@ -323,6 +323,7 @@ function clampMaxTokensForProvider(provider, model, requestedMaxTokens) {
 // Cloud API: https://ollama.com — requires OLLAMA_API_KEY in .env (see https://docs.ollama.com/cloud)
 // Direct ollama.com API expects model names WITHOUT the cloud suffix:
 //   qwen3-coder:480b-cloud  →  qwen3-coder:480b   (strip -cloud)
+//   gemma4:31b-cloud        →  gemma4:31b         (strip -cloud)
 //   glm-5:cloud              →  glm-5               (strip :cloud)
 function isOllamaCloud(url) {
   return url && String(url).replace(/\/$/, '').toLowerCase().includes('ollama.com');

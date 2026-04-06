@@ -57,6 +57,7 @@ const OLLAMA_CLOUD_MODELS = [
   { name: 'kimi-k2.5:cloud', label: 'Kimi K2.5 (Cloud)' },
   { name: 'kimi-k2-thinking:cloud', label: 'Kimi K2 Thinking (Cloud)' },
   { name: 'qwen3-vl:cloud', label: 'Qwen3-VL (Cloud)' },
+  { name: 'gemma4:31b-cloud', label: 'Gemma 4 31B (Cloud)' },
   { name: 'minimax-m2.5:cloud', label: 'MiniMax M2.5 (Cloud)' },
   { name: 'minimax-m2.1:cloud', label: 'MiniMax M2.1 (Cloud)' },
   { name: 'minimax-m2:cloud', label: 'MiniMax M2 (Cloud)' },
