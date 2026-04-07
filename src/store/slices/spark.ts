@@ -15,7 +15,7 @@ import { createInitialHorizonPlan, advanceHorizonPlan } from '../../prime/horizo
 import { consolidateEpisodes } from '../../prime/memory-consolidation';
 import { runNightlyReconsolidation as runNightlyReconsolidationPass } from '../../prime/reconsolidation';
 import { deriveTransferHeuristicsFromProceduralMemories } from '../../prime/transfer-learning';
-import { buildSystemAddendum } from '../../prime/context';
+import { buildSystemAddendum, heartSnapshotFromConsciousness } from '../../prime/context';
 import { generateSpontaneousThought, shouldSingSpontaneously } from '../../prime/voice';
 import type { GenerateFn } from '../../prime/runtime';
 import {
@@ -369,6 +369,7 @@ export function createSparkSlice(set: StoreSet, get: StoreGet) {
         const contextAddendum = buildSystemAddendum({
           conscienceState: st.conscience,
           championPrompt: st.championPrompt,
+          heartContext: heartSnapshotFromConsciousness(st.consciousness),
         });
         st.startCognitive({
           goal: goal.description,

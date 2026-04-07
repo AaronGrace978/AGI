@@ -7,7 +7,7 @@ import { SOVEREIGN_POLICY } from '../../prime/policy';
 import type { SovereignPhase } from '../../prime/sovereign';
 import { runSovereignLoop } from '../../prime/sovereign';
 import { injectCreed } from '../../prime/soul';
-import { buildSystemAddendum, applySystemAddendum } from '../../prime/context';
+import { buildSystemAddendum, applySystemAddendum, heartSnapshotFromConsciousness } from '../../prime/context';
 import { runCapabilityGauntlet } from '../../prime/gauntlet';
 import { runHardeningCheck, type HardeningReport } from '../../prime/hardening';
 import { estimateDataFootprint } from '../../prime/retention';
@@ -82,6 +82,7 @@ export function createSovereignSlice(set: StoreSet, get: StoreGet) {
             const addendum = buildSystemAddendum({
               conscienceState: get().conscience,
               championPrompt: get().championPrompt,
+              heartContext: heartSnapshotFromConsciousness(get().consciousness),
             });
             const packed = applySystemAddendum(soul, addendum);
             return await llmGenerate(packed, cfg);

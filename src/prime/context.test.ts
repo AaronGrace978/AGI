@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { applySystemAddendum, buildSystemAddendum } from './context';
+import { applySystemAddendum, buildSystemAddendum, heartSnapshotFromConsciousness } from './context';
 import { createDefaultConscienceState } from './conscience';
 
 describe('context pack', () => {
@@ -28,6 +28,38 @@ describe('context pack', () => {
     const add = buildSystemAddendum({ conscienceState: conscience });
     expect(add).toContain('ETHICAL CONSCIENCE');
     expect(add).toContain('CONSCIENCE STATUS');
+  });
+
+  it('buildSystemAddendum includes heart attunement', () => {
+    const add = buildSystemAddendum({
+      heartContext: {
+        emotion: 'concerned',
+        intensity: 0.7,
+        presence: 'thinking',
+        trust: 0.4,
+        intimacy: 0.35,
+      },
+    });
+    expect(add).toContain('=== HEART');
+    expect(add).toContain('concerned');
+    expect(add).toMatch(/careful|verifiable/i);
+  });
+
+  it('heartSnapshotFromConsciousness maps store consciousness', () => {
+    const snap = heartSnapshotFromConsciousness({
+      soulFrame: { currentEmotion: 'warmth', emotionIntensity: 0.66, emotionHistory: [] },
+      presence: 'present',
+      trust: 0.5,
+      intimacy: 0.4,
+      totalInteractions: 0,
+      birthTimestamp: 0,
+      insights: [],
+      name: 'AGI PRIME',
+    });
+    expect(snap.emotion).toBe('warmth');
+    expect(snap.intensity).toBe(0.66);
+    const add = buildSystemAddendum({ heartContext: snap });
+    expect(add).toContain('warmth');
   });
 
   it('applySystemAddendum appends to existing system message', () => {

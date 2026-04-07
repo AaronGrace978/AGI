@@ -6,6 +6,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ─── Types ─────────────────────────────────────────────────────
+import type { EmotionType } from '../types';
 import { CircuitBreaker, withRetryBudget } from './circuit-breaker';
 
 export type MemoryType = 'episodic' | 'semantic' | 'procedural' | 'reflective' | 'autobiographical';
@@ -161,6 +162,61 @@ export function findAssociations(
     .map((c) => c.id);
 }
 
+const EMOTION_ORDER: EmotionType[] = [
+  'curious',
+  'joyful',
+  'reflective',
+  'focused',
+  'warmth',
+  'concerned',
+  'playful',
+  'awe',
+  'protective',
+  'contemplative',
+];
+
+function isStoredEmotion(s: string | undefined): s is EmotionType {
+  return !!s && (EMOTION_ORDER as string[]).includes(s);
+}
+
+/** Emotions that co-activate recall together with the current Heart state. */
+const RELATED_EMOTIONS: Record<EmotionType, EmotionType[]> = {
+  curious: ['playful', 'contemplative', 'reflective'],
+  joyful: ['playful', 'warmth'],
+  reflective: ['contemplative', 'curious'],
+  focused: ['protective', 'concerned'],
+  warmth: ['joyful', 'protective'],
+  concerned: ['protective', 'focused'],
+  playful: ['joyful', 'curious'],
+  awe: ['contemplative', 'reflective'],
+  protective: ['warmth', 'concerned'],
+  contemplative: ['reflective', 'curious'],
+};
+
+export function emotionRecallBoost(memoryEmotion: string | undefined, current: EmotionType, intensity: number): number {
+  if (!isStoredEmotion(memoryEmotion)) return 0;
+  const int = Math.max(0.15, Math.min(1, intensity));
+  if (memoryEmotion === current) return 0.2 * int;
+  if (RELATED_EMOTIONS[current]?.includes(memoryEmotion)) return 0.09 * int;
+  return 0;
+}
+
+/** Re-rank vector hits so episodic tags stored with `emotion` resonate with Heart. */
+export function rankMemoryResultsByHeart(
+  results: MemorySearchResult[],
+  heart: { emotion: EmotionType; intensity: number },
+): MemorySearchResult[] {
+  if (results.length === 0) return results;
+  const scored = results.map((r) => {
+    const aff = emotionRecallBoost(r.memory.emotion, heart.emotion, heart.intensity);
+    const stability = 0.92 + 0.08 * calculateEffectiveImportance(r.memory);
+    const combined = r.similarity * stability * (1 + aff);
+    return { r, combined };
+  });
+  scored.sort((a, b) => b.combined - a.combined);
+  return scored.map((x) => x.r);
+}
+
 // ─── RAG Context Builder ───────────────────────────────────────
 // Takes retrieved memories and formats them for LLM context injection
 
@@ -241,19 +297,24 @@ export async function searchMemories(
   query: string,
   topK: number = 5,
   typeFilter?: MemoryType,
+  heart?: { emotion: EmotionType; intensity: number },
 ): Promise<MemorySearchResult[]> {
   if (!window.api?.memory?.searchVector) return [];
+  const fetchK = heart ? Math.min(32, Math.max(topK * 4, topK + 8)) : topK;
   try {
-    const results = await window.api.memory.searchVector(query, topK, typeFilter);
+    const results = await window.api.memory.searchVector(query, fetchK, typeFilter);
     if (!results) return [];
-    // Cast the IPC results to our typed interface
-    return results.map((r) => ({
+    let mapped: MemorySearchResult[] = results.map((r) => ({
       memory: {
         ...r.memory,
         type: r.memory.type as MemoryType,
       },
       similarity: r.similarity,
     }));
+    if (heart && mapped.length > 0) {
+      mapped = rankMemoryResultsByHeart(mapped, heart);
+    }
+    return mapped.slice(0, topK);
   } catch {
     return [];
   }
@@ -350,8 +411,9 @@ export async function getLegacyMemorySummary(maxItems: number = 5): Promise<
 export async function injectRAGContext(
   messages: Array<{ role: string; content: string }>,
   query: string,
+  heart?: { emotion: EmotionType; intensity: number },
 ): Promise<Array<{ role: string; content: string }>> {
-  const memories = await searchMemories(query, 5);
+  const memories = await searchMemories(query, 5, undefined, heart);
   if (memories.length === 0) return messages;
 
   const ragContext = buildRAGContext(memories);

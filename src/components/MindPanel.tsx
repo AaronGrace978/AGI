@@ -42,7 +42,7 @@ export default function MindPanel() {
   const agentsContainerRef = useRef<HTMLDivElement>(null);
   const synthRef = useRef<HTMLDivElement>(null);
 
-  const isRunning = arena.phase === 'debating' || arena.phase === 'synthesizing';
+  const isRunning = arena.phase === 'debating' || arena.phase === 'deliberating' || arena.phase === 'synthesizing';
   const blueprint = arena.blueprint;
 
   const handleStart = () => {
@@ -148,7 +148,7 @@ export default function MindPanel() {
             fontFamily: 'var(--font-mono)',
           }}
         >
-          Using {settings.provider.toUpperCase()} / {settings.model} · 4 agents will analyze your question
+          Using {settings.provider.toUpperCase()} / {settings.model} · 3 specialists + debate moderator + synthesizer
         </div>
       </div>
 
@@ -189,6 +189,30 @@ export default function MindPanel() {
               );
             })}
           </div>
+
+          {!!arena.moderatorNotes?.trim() && (
+            <div className="arena-moderator">
+              <div className="arena-synthesis-title">◇ MODERATOR MAP</div>
+              <p style={{ fontSize: 11, color: 'var(--text-secondary)', margin: '0 0 8px' }}>
+                Agreements, conflicts, and open questions — before unified synthesis.
+              </p>
+              <div
+                className="arena-moderator-content"
+                style={{
+                  whiteSpace: 'pre-wrap',
+                  fontSize: 13,
+                  lineHeight: 1.45,
+                  color: 'var(--text-primary)',
+                  padding: '12px 14px',
+                  borderRadius: 8,
+                  border: '1px solid var(--border-subtle)',
+                  background: 'var(--bg-elevated)',
+                }}
+              >
+                {arena.moderatorNotes.trim()}
+              </div>
+            </div>
+          )}
 
           {/* Synthesis */}
           {(arena.synthesis || arena.phase === 'synthesizing' || arena.phase === 'complete') && (

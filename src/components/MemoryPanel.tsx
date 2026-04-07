@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { MemoryType, VectorMemory } from '../prime/memory';
 import { getLegacyMemorySummary, getMemoryStats, listVectorMemories, searchMemories } from '../prime/memory';
+import { useStore } from '../store';
 import { Button, Card } from './ui';
 
 type FilterType = 'all' | MemoryType;
@@ -36,6 +37,9 @@ function previewUnknown(value: unknown, max = 180): string {
 }
 
 export default function MemoryPanel() {
+  const heartEmotion = useStore((s) => s.consciousness.soulFrame.currentEmotion);
+  const heartIntensity = useStore((s) => s.consciousness.soulFrame.emotionIntensity);
+
   const [stats, setStats] = useState<{ total: number; byType: Record<string, number> }>({
     total: 0,
     byType: {},
@@ -76,6 +80,7 @@ export default function MemoryPanel() {
             normalizedQuery,
             SEARCH_TOPK,
             filterType === 'all' ? undefined : filterType,
+            { emotion: heartEmotion, intensity: heartIntensity },
           );
           const mapped: DisplayMemory[] = results.map((r) => ({
             memory: r.memory,
@@ -105,7 +110,7 @@ export default function MemoryPanel() {
         setLoading(false);
       }
     },
-    [filterType, isSearching, normalizedQuery, sortBy, memories.length],
+    [filterType, isSearching, normalizedQuery, sortBy, memories.length, heartEmotion, heartIntensity],
   );
 
   useEffect(() => {

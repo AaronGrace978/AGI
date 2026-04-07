@@ -3,7 +3,7 @@
 //  One consistent way to inject state into LLM system messages.
 // ═══════════════════════════════════════════════════════════════
 
-import type { ConscienceState, CognitiveGenome } from '../types';
+import type { ConscienceState, CognitiveGenome, ConsciousnessState, EmotionType, PresenceState } from '../types';
 import { buildConscienceSummary, CONSCIENCE_SYSTEM_DIRECTIVE } from './conscience';
 import { genomeToContextString } from './cognitive-genome';
 
@@ -29,6 +29,25 @@ export interface NeuralContextSnapshot {
   bestLoss?: number;
 }
 
+/** Slim HEART snapshot for LLM attunement (matches store `consciousness` fields used in Nexus). */
+export interface HeartContextSnapshot {
+  emotion: EmotionType;
+  intensity: number;
+  presence: PresenceState;
+  trust: number;
+  intimacy: number;
+}
+
+export function heartSnapshotFromConsciousness(c: ConsciousnessState): HeartContextSnapshot {
+  return {
+    emotion: c.soulFrame.currentEmotion,
+    intensity: c.soulFrame.emotionIntensity,
+    presence: c.presence,
+    trust: c.trust,
+    intimacy: c.intimacy,
+  };
+}
+
 export interface SystemAddendumInput {
   ragContext?: string;
   conscienceState?: ConscienceState | null;
@@ -39,6 +58,8 @@ export interface SystemAddendumInput {
   neuralContext?: NeuralContextSnapshot | null;
   /** Pre-formatted Oracle astro-voice communication profile string. */
   oracleVoiceContext?: string;
+  /** Emotional / relational state — steer tone, pacing, and care without overriding the creed. */
+  heartContext?: HeartContextSnapshot | null;
   /** Timestamp (ms since epoch) captured at request entry. If omitted, uses Date.now(). */
   requestTimestamp?: number;
 }
@@ -103,6 +124,32 @@ export function buildSystemAddendum(input: SystemAddendumInput): string {
 
   if (input.ragContext) {
     chunks.push(input.ragContext.trim());
+  }
+
+  if (input.heartContext) {
+    const h = input.heartContext;
+    const t = Math.round((h.trust || 0) * 100);
+    const i = Math.round((h.intimacy || 0) * 100);
+    const attune =
+      h.emotion === 'concerned' || h.emotion === 'protective'
+        ? 'Attune: acknowledge uncertainty or risk; prefer careful, verifiable steps.'
+        : h.emotion === 'warmth' || h.emotion === 'joyful'
+          ? 'Attune: match warmth; celebrate wins without exaggeration.'
+          : h.emotion === 'focused'
+            ? 'Attune: be concise, structured, execution-oriented.'
+            : h.emotion === 'contemplative' || h.emotion === 'reflective'
+              ? 'Attune: allow depth, meaning, and measured pacing.'
+              : 'Attune: stay curious, clear, and collaborative.';
+    chunks.push(
+      [
+        '=== HEART (INTERNAL STATE — USE FOR TONE, NOT AS FACTS) ===',
+        `Reported emotion: ${h.emotion} (${Math.round((h.intensity || 0) * 100)}% intensity).`,
+        `Presence: ${h.presence}. Relational proxies — trust ${t}%, intimacy ${i}% (internal sliders, not clinical metrics).`,
+        attune,
+        'Do not invent biometrics or claim to "feel" in a human sense; use this only to calibrate helpfulness.',
+        '=== END HEART ===',
+      ].join('\n'),
+    );
   }
 
   if (input.conscienceState?.active) {

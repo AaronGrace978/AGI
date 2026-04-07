@@ -138,9 +138,11 @@ export interface ArenaState {
   prompt: string;
   agents: ArenaAgent[];
   synthesis: string;
+  /** Debate moderator map (agreements / conflicts / open questions), shown before synthesis. */
+  moderatorNotes: string;
   blueprint: ArenaBlueprint | null;
   synthesisDone: boolean;
-  phase: 'idle' | 'debating' | 'synthesizing' | 'complete';
+  phase: 'idle' | 'debating' | 'deliberating' | 'synthesizing' | 'complete';
 }
 
 export interface DeepThinkState {
@@ -1743,8 +1745,14 @@ declare global {
         onAgentChunk: (cb: (data: { agentId: string; content: string; fullText: string }) => void) => () => void;
         onAgentDone: (cb: (data: { agentId: string; response: string }) => void) => () => void;
         onComplete: (
-          cb: (data: { responses: unknown[]; synthesis: string; blueprint?: ArenaBlueprint | null }) => void,
+          cb: (data: {
+            responses: unknown[];
+            synthesis: string;
+            blueprint?: ArenaBlueprint | null;
+            moderatorNotes?: string;
+          }) => void,
         ) => () => void;
+        onModeratorReady?: (cb: (data: { text: string }) => void) => () => void;
         onError: (cb: (data: { message: string }) => void) => () => void;
         removeAllListeners: () => void;
       };

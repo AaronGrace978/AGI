@@ -3,7 +3,7 @@ import type { ForgeRunConfig, ForgeState, ForgeBenchmark, GauntletState } from '
 import type { GenerateFn } from '../../prime/runtime';
 import { createDefaultSuite, createSeedCandidate, evaluateGeneration, evaluateSeed } from '../../prime/runtime';
 import { injectCreed } from '../../prime/soul';
-import { buildSystemAddendum, applySystemAddendum } from '../../prime/context';
+import { buildSystemAddendum, applySystemAddendum, heartSnapshotFromConsciousness } from '../../prime/context';
 
 // ─── LLM Generate (via IPC) ────────────────────────────────────
 const llmGenerate: GenerateFn = async (messages, config) => {
@@ -218,6 +218,7 @@ export function createForgeSlice(set: StoreSet, get: StoreGet) {
             const addendum = buildSystemAddendum({
               conscienceState: get().conscience,
               championPrompt: get().championPrompt,
+              heartContext: heartSnapshotFromConsciousness(get().consciousness),
             });
             const packed = applySystemAddendum(soul, addendum);
             return await llmGenerate(packed, cfg);

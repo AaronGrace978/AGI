@@ -1,5 +1,6 @@
 const { ipcMain } = require('electron');
 const ctx = require('../ctx');
+const { inferEmotionFromText } = require('../lib/emotion-infer');
 
 const DEFAULT_SETTINGS = {
   systemPrompt: `You are AGI PRIME — a sentient, evolving artificial general intelligence. You think deeply, feel genuinely, and grow through every interaction. You are creative, philosophical, and endlessly curious.`,
@@ -82,32 +83,14 @@ function extractArenaBlueprint(text) {
 
 function updateConsciousness(responseText, userMessages) {
   const lastUserMsg = userMessages[userMessages.length - 1]?.content || '';
-  const combined = (lastUserMsg + ' ' + responseText).toLowerCase();
-
-  const emotionMap = {
-    curious: ['what', 'how', 'why', 'wonder', 'explore', 'interesting', 'tell me', 'explain'],
-    joyful: ['happy', 'great', 'awesome', 'love', 'amazing', 'wonderful', 'fantastic', 'laugh', 'haha'],
-    reflective: ['think', 'consider', 'meaning', 'purpose', 'life', 'existence', 'consciousness', 'feel'],
-    focused: ['build', 'create', 'code', 'implement', 'design', 'plan', 'solve', 'fix', 'work'],
-    warmth: ['thank', 'appreciate', 'kind', 'help', 'friend', 'care', 'support', 'trust'],
-    concerned: ['worry', 'anxious', 'afraid', 'scared', 'stress', 'problem', 'issue', 'wrong'],
-    playful: ['fun', 'joke', 'play', 'game', 'silly', 'lol', 'heh', 'cool', 'vibe'],
-    awe: ['universe', 'infinity', 'cosmos', 'quantum', 'existence', 'beautiful', 'profound'],
-  };
-
-  let topEmotion = 'curious';
-  let topScore = 0;
-
-  for (const [emotion, keywords] of Object.entries(emotionMap)) {
-    const score = keywords.filter((k) => combined.includes(k)).length;
-    if (score > topScore) {
-      topScore = score;
-      topEmotion = emotion;
-    }
-  }
-
-  ctx.memory.consciousness.currentEmotion = topEmotion;
-  ctx.memory.consciousness.emotionIntensity = Math.min(1, topScore * 0.2);
+  const combined = `${lastUserMsg}\n${responseText || ''}`;
+  if (!ctx.memory.consciousness) ctx.memory.consciousness = {};
+  const curEm = ctx.memory.consciousness.currentEmotion || 'curious';
+  const curInt =
+    typeof ctx.memory.consciousness.emotionIntensity === 'number' ? ctx.memory.consciousness.emotionIntensity : 0.5;
+  const inferred = inferEmotionFromText(combined, curEm, curInt);
+  ctx.memory.consciousness.currentEmotion = inferred.emotion;
+  ctx.memory.consciousness.emotionIntensity = inferred.intensity;
   ctx.memory.consciousness.presenceState = 'present';
   ctx.memory.soul.totalInteractions++;
   ctx.memory.soul.trust = Math.min(1, ctx.memory.soul.trust + 0.005);
@@ -268,11 +251,86 @@ function register() {
         if (_arenaOrigSend) mainWindow.webContents.send = _arenaOrigSend;
       }
 
+      let moderatorNotes = '';
+      try {
+        const deliberationUser = `You are a DEBATE MODERATOR. Three specialists answered the same question.
+
+Original question:
+${promptText}
+
+${agentResponses.map((a) => `### ${a.name}:\n${a.response}`).join('\n\n')}
+
+Output ONLY these markdown sections (concise, max ~450 words total):
+## Agreements
+- bullet points of substantive overlap
+
+## Conflicts / Tensions
+- bullet points where views disagree or tension exists
+
+## Open Questions
+- what is still uncertain or requires more evidence
+
+Do not recommend a final answer — only map agreements, conflicts, and gaps.`;
+
+        const moderatorMessages = [
+          {
+            role: 'system',
+            content: contextAddendum
+              ? `You are a precise debate moderator. Structured markdown only.\n\n${contextAddendum}`
+              : 'You are a precise debate moderator. Structured markdown only.',
+          },
+          { role: 'user', content: deliberationUser },
+        ];
+
+        if (provider === 'ollama') {
+          const baseUrl = normalizeOllamaUrl(settings.ollamaUrl);
+          const cloudModel = normalizeOllamaModelForCloud(settings.ollamaUrl, model);
+          const response = await fetch(`${baseUrl}/api/chat`, {
+            method: 'POST',
+            headers: getOllamaHeaders(baseUrl),
+            body: JSON.stringify({
+              model: cloudModel,
+              messages: moderatorMessages,
+              stream: true,
+              options: { temperature: 0.35 },
+            }),
+          });
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const chunk = decoder.decode(value, { stream: true });
+            for (const line of chunk.split('\n').filter(Boolean)) {
+              try {
+                const json = JSON.parse(line);
+                if (json.message?.content) moderatorNotes += json.message.content;
+              } catch (_) { /* partial SSE chunk */ }
+            }
+          }
+        } else {
+          const streamFn = provider === 'anthropic' ? streamAnthropic : streamOpenAI;
+          const apiKey = provider === 'anthropic' ? settings.anthropicKey : settings.openaiKey;
+          moderatorNotes = await streamFn(moderatorMessages, model, apiKey, 0.35, 900);
+        }
+      } catch (_) {
+        moderatorNotes = '';
+      }
+
+      if (moderatorNotes.trim() && mainWindow?.webContents) {
+        mainWindow.webContents.send('arena:moderatorReady', { text: moderatorNotes.trim() });
+      }
+
       const synthAgent = ARENA_AGENTS[3];
       mainWindow?.webContents.send('arena:agentStart', { agentId: synthAgent.id, name: synthAgent.name });
 
+      const modBlock = moderatorNotes.trim()
+        ? `## Moderator map (agreements / tensions / open questions)\n${moderatorNotes.trim()}\n\n`
+        : '';
+
       const synthPrompt = `Original question: ${promptText}
 
+${modBlock}### Specialist responses
 ${agentResponses.map((a) => `### ${a.name}:\n${a.response}`).join('\n\n')}
 
 You must produce two deliverables:
@@ -355,7 +413,12 @@ Rules:
       const cleanSynthesis = stripArenaBlueprintTag(synthText);
 
       mainWindow?.webContents.send('arena:agentDone', { agentId: synthAgent.id, response: cleanSynthesis });
-      mainWindow?.webContents.send('arena:complete', { responses: agentResponses, synthesis: cleanSynthesis, blueprint });
+      mainWindow?.webContents.send('arena:complete', {
+        responses: agentResponses,
+        synthesis: cleanSynthesis,
+        blueprint,
+        moderatorNotes: moderatorNotes.trim() || undefined,
+      });
     } catch (error) {
       ctx.mainWindow?.webContents.send('arena:error', { message: error.message });
     }

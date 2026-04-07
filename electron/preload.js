@@ -66,6 +66,11 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on('arena:complete', handler);
       return () => ipcRenderer.removeListener('arena:complete', handler);
     },
+    onModeratorReady: (callback) => {
+      const handler = (_event, data) => callback(data);
+      ipcRenderer.on('arena:moderatorReady', handler);
+      return () => ipcRenderer.removeListener('arena:moderatorReady', handler);
+    },
     onError: (callback) => {
       const handler = (_event, data) => callback(data);
       ipcRenderer.on('arena:error', handler);
@@ -76,6 +81,7 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.removeAllListeners('arena:agentChunk');
       ipcRenderer.removeAllListeners('arena:agentDone');
       ipcRenderer.removeAllListeners('arena:complete');
+      ipcRenderer.removeAllListeners('arena:moderatorReady');
       ipcRenderer.removeAllListeners('arena:error');
     },
   },

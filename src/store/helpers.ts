@@ -262,6 +262,7 @@ export const DEFAULT_ARENA: ArenaState = {
   prompt: '',
   agents: [],
   synthesis: '',
+  moderatorNotes: '',
   blueprint: null,
   synthesisDone: false,
   phase: 'idle',

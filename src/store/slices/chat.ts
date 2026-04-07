@@ -1,7 +1,7 @@
 import type { StoreSet, StoreGet } from '../types';
 import type { ChatMessage, Conversation, SparkGoal, DualBrainState } from '../../types';
 import { executiveRoute } from '../../prime/executive';
-import { buildSystemAddendum, applySystemAddendum } from '../../prime/context';
+import { buildSystemAddendum, applySystemAddendum, heartSnapshotFromConsciousness } from '../../prime/context';
 import { injectCreed } from '../../prime/soul';
 import { searchMemories, buildRAGContext, storeConversationMemory, storeMemory } from '../../prime/memory';
 import { routeToBrain, buildSlowBrainDirective } from '../../prime/router';
@@ -194,6 +194,7 @@ export function createChatSlice(set: StoreSet, get: StoreGet) {
               const contextAddendum = buildSystemAddendum({
                 conscienceState: get().conscience,
                 championPrompt: get().championPrompt,
+                heartContext: heartSnapshotFromConsciousness(get().consciousness),
                 requestTimestamp,
               });
               get().startCognitive({ goal, contextAddendum, origin: 'nexus' });
@@ -596,6 +597,7 @@ Output ONLY valid JSON:
                   ragContext: '',
                   conscienceState: get().conscience,
                   championPrompt: get().championPrompt || '',
+                  heartContext: heartSnapshotFromConsciousness(get().consciousness),
                 });
                 get().startCognitive({
                   goal: parsed.action,
@@ -673,7 +675,12 @@ Output ONLY valid JSON:
 
         let ragContext = '';
         try {
-          const memories = await searchMemories(content, 5);
+          const memories = await searchMemories(
+            content,
+            5,
+            undefined,
+            heartSnapshotFromConsciousness(get().consciousness),
+          );
           ragContext = buildRAGContext(memories);
         } catch {
           // RAG failure is non-fatal
@@ -782,6 +789,7 @@ Output ONLY valid JSON:
           pieContext: pieContextStr,
           neuralContext: neuralCtx,
           oracleVoiceContext,
+          heartContext: heartSnapshotFromConsciousness(get().consciousness),
           requestTimestamp,
         });
         soulHistory = applySystemAddendum(soulHistory, addendum);

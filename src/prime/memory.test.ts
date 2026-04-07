@@ -4,6 +4,7 @@ import {
   determineMemoryLayer,
   findAssociations,
   buildRAGContext,
+  rankMemoryResultsByHeart,
   type VectorMemory,
   type MemorySearchResult,
 } from './memory';
@@ -155,5 +156,16 @@ describe('buildRAGContext', () => {
     ];
     const context = buildRAGContext(results);
     expect(context).toContain('joyful');
+  });
+});
+
+describe('rankMemoryResultsByHeart', () => {
+  it('prioritizes emotion-matched memories when similarity is close', () => {
+    const results: MemorySearchResult[] = [
+      { memory: makeMem({ id: 'a', emotion: 'focused', content: 'alpha' }), similarity: 0.9 },
+      { memory: makeMem({ id: 'b', emotion: 'concerned', content: 'beta' }), similarity: 0.88 },
+    ];
+    const ranked = rankMemoryResultsByHeart(results, { emotion: 'concerned', intensity: 1 });
+    expect(ranked[0].memory.id).toBe('b');
   });
 });
