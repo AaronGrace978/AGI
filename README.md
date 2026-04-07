@@ -1,5 +1,9 @@
 # AGI PRIME
 
+<p align="center">
+  <img src="assets/agi-prime-hero.png" alt="AGI PRIME — neural lattice and heart-core light" width="920" />
+</p>
+
 AGI PRIME is a modular AI platform with:
 - a desktop runtime (`Electron` + `React`) for the full multi-panel cognitive system
 - a mobile companion app (`Expo` + `React Native`) for AGI PRIME on phone
@@ -13,6 +17,7 @@ This README explains what the project is, how it is organized, and how to run it
 - A desktop AI runtime (`Electron` + `React`) with a custom operating model for cognition.
 - A mobile companion app (`AGIPrime-Mobile`) built with `Expo` and `React Native`.
 - Not just a chat window: the app is split into modules for communication, memory, emotion, planning, action, safety, and evolution.
+- **Heart-aware cognition**: the same emotion inference drives the renderer and Electron memory snapshots; vector recall can be re-ranked by current mood; system prompts carry a **HEART** attunement block so tone matches relational state (without pretending to “feel” like a human).
 - Works with multiple model providers (`Ollama`, `Anthropic`, `OpenAI`).
 - Uses a centralized state store (`Zustand`) and a large main-process IPC/tooling layer in `electron/main.js`.
 - Includes SPARK autonomous web learning that can research curiosity questions against trusted science, government, university, and technical sources.
@@ -28,10 +33,10 @@ This README explains what the project is, how it is organized, and how to run it
 
 ## Main User Panels
 
-- `Nexus`: core chat interface, streaming output, and memory-aware responses
-- `Memory`: memory browser/search
-- `Heart`: emotional and relationship/consciousness state
-- `Mind`: multi-agent arena/debate mode
+- `Nexus`: core chat interface, streaming output, and memory-aware responses (RAG ranked with **Heart**)
+- `Memory`: memory browser/search (semantic search uses the same **Heart**-biased ranking as Nexus when you search)
+- `Heart`: emotional and relationship/consciousness state (feeds context, memory recall, and LLM attunement)
+- `Mind`: multi-agent arena — three specialist voices, a **debate moderator** pass (agreements / conflicts / open questions), then synthesizer + optional AGI blueprint JSON
 - `Hands`: ReAct-style action agent (observe/think/act/reflect)
 - `Forge`: candidate generation + evaluation loop
 - `Gauntlet`: benchmark/testing harness
@@ -44,6 +49,9 @@ This README explains what the project is, how it is organized, and how to run it
 
 ## Recent Additions
 
+- **Heart ↔ memory ↔ context**: shared `emotion-infer` in the renderer (`src/prime/emotion-infer.ts`) and Electron (`electron/lib/emotion-infer.js`) so persisted consciousness stays aligned with chat; `buildSystemAddendum` accepts `heartContext` via `heartSnapshotFromConsciousness()`; Forge, Sovereign, Spark autonomy, Nexus, and Mind arena all inject it.
+- **Emotion-conditioned recall**: `searchMemories` can re-rank vector hits using stored memory `emotion` tags; Nexus and the Memory panel pass current Heart state.
+- **Mind moderator UI**: after the three parallel agents finish, the main process runs a moderator pass and emits `arena:moderatorReady`; the Mind panel shows a **MODERATOR MAP** before synthesis, and the map can be stored as vector memory for later recall.
 - **Autonomous web learning in SPARK**: SPARK can now convert curiosity questions into research queries, search trusted sources, verify factual quality, and merge extracted entities/relations into its world model.
 - **Truth filtering pipeline**: new source-tiering, blocked-domain filtering, heuristic bias detection, and optional LLM verification reduce the chance of low-quality knowledge entering the system.
 - **Mobile app workspace**: `AGIPrime-Mobile` adds an Expo-based companion app with environment-backed provider settings, animated UI primitives, and mobile-safe LLM access patterns.
@@ -51,7 +59,9 @@ This README explains what the project is, how it is organized, and how to run it
 
 ## Core Engine Modules (`src/prime`)
 
-- `memory.ts`: vectorized memory and retrieval flow
+- `emotion-infer.ts`: fast deterministic emotion inference from text (shared semantics with Electron; re-exported from `spark.ts` for compatibility)
+- `context.ts`: shared system addendum (date, RAG, conscience, champion, SPARK snapshot, **HEART** block, NeuralCore, Oracle voice, etc.)
+- `memory.ts`: vectorized memory, retrieval, RAG formatting, optional **Heart** re-ranking, `injectRAGContext` helper
 - `conscience.ts`: ethical pre-checks and moral decision scoring
 - `agent.ts`: action/cognition loop and tool-driven execution
 - `router.ts`: fast/slow response routing
@@ -210,7 +220,11 @@ src/
 electron/
   main.js
   preload.js
+  lib/
+    emotion-infer.js
   input-helper.ps1
+assets/
+  agi-prime-hero.png
 AGIPrime-Mobile/
   app/
   src/
