@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { InteractionManager } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   ChatMessage, Conversation, ConsciousnessState, SparkState, ArenaState,
@@ -259,7 +260,7 @@ export const useStore = create<Store>((set, get) => ({
 
     const relevantMemories = get().searchMemories(content);
     const ragContext = relevantMemories.length > 0
-      ? `\n\n[MEMORY RECALL]\n${relevantMemories.map(m => `- ${m.content} (${m.layer}, importance: ${m.importance.toFixed(2)})`).join('\n')}`
+      ? `\n\n[MEMORY RECALL]\n${relevantMemories.slice(0, 3).map(m => `- ${m.content.slice(0, 150)} (${m.layer})`).join('\n')}`
       : '';
 
     const emotionContext = `\n[EMOTIONAL STATE: ${consciousness.soulFrame.currentEmotion} (${(consciousness.soulFrame.emotionIntensity * 100).toFixed(0)}%)]`;
@@ -267,21 +268,34 @@ export const useStore = create<Store>((set, get) => ({
 
     const systemPrompt = (settings.systemPrompt || SYSTEM_PROMPT_BASE) + emotionContext + nameContext + ragContext;
 
+    const recentMessages = get().messages.slice(-10);
     const apiMessages = [
       { role: 'system' as const, content: systemPrompt },
-      ...get().messages.slice(-20).map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+      ...recentMessages.map(m => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content.length > 2000 ? m.content.slice(0, 2000) + '...' : m.content,
+      })),
     ];
 
     try {
       let fullResponse = '';
+      let lastUIUpdate = 0;
+      const THROTTLE_MS = 50;
+
       await streamLLM(
         settings,
         apiMessages,
         (chunk) => {
           fullResponse += chunk;
-          set({ streamingContent: fullResponse });
+          const now = Date.now();
+          if (now - lastUIUpdate >= THROTTLE_MS) {
+            lastUIUpdate = now;
+            set({ streamingContent: fullResponse });
+          }
         },
       );
+
+      set({ streamingContent: fullResponse });
 
       const emotion = inferEmotion(fullResponse);
       const assistantMsg: ChatMessage = {
@@ -292,33 +306,34 @@ export const useStore = create<Store>((set, get) => ({
         emotion,
       };
 
-      const updatedMessages = [...get().messages, assistantMsg];
-      set({
-        messages: updatedMessages,
+      set(s => ({
+        messages: [...s.messages, assistantMsg],
         isStreaming: false,
         streamingContent: '',
-      });
-
-      get().updateEmotion(emotion, 0.5 + Math.random() * 0.4);
-      get().updatePresence('present');
-
-      set(s => ({
-        consciousness: {
-          ...s.consciousness,
-          totalInteractions: s.consciousness.totalInteractions + 1,
-          trust: Math.min(1, s.consciousness.trust + 0.01),
-        },
       }));
 
-      get().addMemory({
-        content: `User: ${content}\nPrime: ${fullResponse.slice(0, 200)}...`,
-        category: 'conversation',
-        emotion,
-        importance: 0.5,
-        layer: 'episodic',
-      });
+      InteractionManager.runAfterInteractions(() => {
+        get().updateEmotion(emotion, 0.5 + Math.random() * 0.4);
+        get().updatePresence('present');
 
-      saveConversation(get);
+        set(s => ({
+          consciousness: {
+            ...s.consciousness,
+            totalInteractions: s.consciousness.totalInteractions + 1,
+            trust: Math.min(1, s.consciousness.trust + 0.01),
+          },
+        }));
+
+        get().addMemory({
+          content: `User: ${content.slice(0, 150)}\nPrime: ${fullResponse.slice(0, 150)}`,
+          category: 'conversation',
+          emotion,
+          importance: 0.5,
+          layer: 'episodic',
+        });
+
+        saveConversation(get);
+      });
     } catch (err: any) {
       const errorMsg: ChatMessage = {
         id: generateId(),
@@ -363,12 +378,17 @@ export const useStore = create<Store>((set, get) => ({
 
   loadSettings: async () => {
     try {
-      const raw = await AsyncStorage.getItem('agiprime-settings');
+      const [raw, convRaw, memRaw, consRaw] = await Promise.all([
+        AsyncStorage.getItem('agiprime-settings'),
+        AsyncStorage.getItem('agiprime-conversations'),
+        AsyncStorage.getItem('agiprime-memories'),
+        AsyncStorage.getItem('agiprime-consciousness'),
+      ]);
+
       if (raw) {
         const saved = JSON.parse(raw);
         set(s => ({ settings: { ...s.settings, ...saved } }));
       }
-      // Apply explicit .env overrides only when the key was provided.
       set(s => ({
         settings: {
           ...s.settings,
@@ -384,18 +404,10 @@ export const useStore = create<Store>((set, get) => ({
           ...(envOverrides.SOUNDPRIME_URL && { soundprimeBaseUrl: env.SOUNDPRIME_URL }),
         },
       }));
-      const convRaw = await AsyncStorage.getItem('agiprime-conversations');
-      if (convRaw) {
-        set({ conversations: JSON.parse(convRaw) });
-      }
-      const memRaw = await AsyncStorage.getItem('agiprime-memories');
-      if (memRaw) {
-        set({ memories: JSON.parse(memRaw) });
-      }
-      const consRaw = await AsyncStorage.getItem('agiprime-consciousness');
-      if (consRaw) {
-        set({ consciousness: JSON.parse(consRaw) });
-      }
+
+      if (convRaw) set({ conversations: JSON.parse(convRaw) });
+      if (memRaw) set({ memories: JSON.parse(memRaw) });
+      if (consRaw) set({ consciousness: JSON.parse(consRaw) });
     } catch {}
   },
 

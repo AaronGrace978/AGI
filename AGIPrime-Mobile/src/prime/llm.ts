@@ -111,7 +111,7 @@ async function callAnthropic(settings: Settings, messages: LLMMessage[]): Promis
   const systemMsg = messages.find(m => m.role === 'system');
   const chatMsgs = messages.filter(m => m.role !== 'system');
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const res = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -146,7 +146,7 @@ async function streamAnthropic(
   const systemMsg = messages.find(m => m.role === 'system');
   const chatMsgs = messages.filter(m => m.role !== 'system');
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const res = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -204,7 +204,7 @@ async function streamAnthropic(
 
 async function callOpenAI(settings: Settings, messages: LLMMessage[]): Promise<string> {
   const model = resolveProviderModel('openai', settings.model);
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+  const res = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -233,7 +233,7 @@ async function streamOpenAI(
   onChunk: (chunk: string) => void,
 ): Promise<void> {
   const model = resolveProviderModel('openai', settings.model);
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+  const res = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

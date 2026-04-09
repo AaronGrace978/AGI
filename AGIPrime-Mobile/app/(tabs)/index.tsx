@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   View, Text, TextInput, FlatList, TouchableOpacity, StyleSheet,
   KeyboardAvoidingView, Platform, ActivityIndicator, Keyboard, Alert,
@@ -68,11 +68,23 @@ export default function NexusScreen() {
     sendMessage(trimmed);
   }, [input, isStreaming, sendMessage]);
 
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => {
     if (messages.length > 0) {
-      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+      if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
+      scrollTimerRef.current = setTimeout(
+        () => flatListRef.current?.scrollToEnd({ animated: true }),
+        150,
+      );
     }
-  }, [messages.length, streamingContent]);
+    return () => { if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current); };
+  }, [messages.length]);
+
+  useEffect(() => {
+    if (streamingContent) {
+      flatListRef.current?.scrollToEnd({ animated: false });
+    }
+  }, [streamingContent]);
 
   const handleDeleteConversation = (id: string) => {
     if (deleteConfirm === id) {
@@ -85,6 +97,11 @@ export default function NexusScreen() {
       setTimeout(() => setDeleteConfirm(null), 3000);
     }
   };
+
+  const visibleMessages = useMemo(
+    () => messages.filter(m => m.role !== 'system'),
+    [messages],
+  );
 
   const getSourceAvatar = (msg: ChatMessage) => {
     switch (msg.sourceModule) {
@@ -99,10 +116,11 @@ export default function NexusScreen() {
     const isUser = item.role === 'user';
     const { letter, color: avatarColor } = getSourceAvatar(item);
     const msgColor = item.emotion ? emotionColor(item.emotion) : accentColor;
+    const isRecent = index >= messages.length - 2;
 
     return (
       <Animated.View
-        entering={FadeInDown.delay(index * 30).duration(300)}
+        entering={isRecent ? FadeInDown.duration(250) : undefined}
         style={[styles.msgRow, isUser && styles.msgRowUser]}
       >
         {!isUser && (
@@ -294,7 +312,7 @@ export default function NexusScreen() {
       >
         <FlatList
           ref={flatListRef}
-          data={messages.filter(m => m.role !== 'system')}
+          data={visibleMessages}
           renderItem={renderMessage}
           keyExtractor={item => item.id}
           contentContainerStyle={[
@@ -304,6 +322,10 @@ export default function NexusScreen() {
           ListEmptyComponent={renderEmpty}
           ListFooterComponent={renderStreamingMessage}
           showsVerticalScrollIndicator={false}
+          maxToRenderPerBatch={8}
+          windowSize={7}
+          removeClippedSubviews={Platform.OS === 'android'}
+          initialNumToRender={10}
         />
 
         {/* Input */}

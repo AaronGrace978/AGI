@@ -1,11 +1,12 @@
 import React, { useEffect, useCallback, useState, useRef } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, Platform, TextInput, ScrollView,
+  View, Text, TouchableOpacity, StyleSheet, Platform, TextInput, ScrollView, Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import * as Speech from 'expo-speech';
+import { Audio, AVPlaybackStatus } from 'expo-av';
 import Animated, {
   useSharedValue, useAnimatedStyle, withRepeat, withTiming,
   withSequence, Easing, interpolate, FadeIn, FadeInDown,
@@ -88,13 +89,32 @@ const waveStyles = StyleSheet.create({
   },
 });
 
+let currentSound: Audio.Sound | null = null;
+
+async function cleanupSound() {
+  if (currentSound) {
+    try { await currentSound.unloadAsync(); } catch {}
+    currentSound = null;
+  }
+}
+
 async function speakWithElevenLabs(
   text: string,
   apiKey: string,
   voiceId: string,
   modelId: string,
+  onDone?: () => void,
+  voiceSettings?: { stability: number; similarity_boost: number; style?: number },
 ): Promise<boolean> {
   try {
+    await cleanupSound();
+    await Audio.setAudioModeAsync({
+      allowsRecordingIOS: false,
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: false,
+      shouldDuckAndroid: true,
+    });
+
     const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
       method: 'POST',
       headers: {
@@ -104,12 +124,39 @@ async function speakWithElevenLabs(
       body: JSON.stringify({
         text,
         model_id: modelId,
-        voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+        voice_settings: voiceSettings ?? { stability: 0.5, similarity_boost: 0.75 },
       }),
     });
+
     if (!res.ok) return false;
+
+    const arrayBuffer = await res.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+    let binary = '';
+    const chunkSize = 8192;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+    }
+    const base64 = btoa(binary);
+    const dataUri = `data:audio/mpeg;base64,${base64}`;
+
+    const { sound } = await Audio.Sound.createAsync(
+      { uri: dataUri },
+      { shouldPlay: true },
+    );
+    currentSound = sound;
+
+    sound.setOnPlaybackStatusUpdate((status: AVPlaybackStatus) => {
+      if (status.isLoaded && status.didJustFinish) {
+        cleanupSound();
+        onDone?.();
+      }
+    });
+
     return true;
-  } catch {
+  } catch (e) {
+    console.warn('ElevenLabs playback error:', e);
+    await cleanupSound();
     return false;
   }
 }
@@ -219,8 +266,14 @@ export default function VoiceScreen() {
     { mode: 'living', label: 'Living', icon: 'pulse' },
   ];
 
-  const handleSpeak = useCallback(async (text: string) => {
+  const handleSpeak = useCallback(async (text: string, singing = false) => {
     setLastSpokenText(text.slice(0, 100));
+
+    const markDone = () => {
+      useStore.setState(s => ({
+        voiceState: { ...s.voiceState, isSpeaking: false, isSinging: false },
+      }));
+    };
 
     useStore.setState(s => ({
       voiceState: { ...s.voiceState, isSpeaking: true },
@@ -228,36 +281,39 @@ export default function VoiceScreen() {
 
     if (voiceEngine === 'elevenlabs' && hasElevenLabs) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+      const voiceSettings = singing
+        ? { stability: 0.85, similarity_boost: 0.9, style: 1.0 }
+        : { stability: 0.5, similarity_boost: 0.75 };
+
       const ok = await speakWithElevenLabs(
         text,
         settings.elevenLabsApiKey,
         settings.elevenLabsVoiceId,
         settings.elevenLabsModelId,
+        markDone,
+        voiceSettings,
       );
       if (!ok) {
         Speech.speak(text, {
           rate: 1.0, pitch: 1.0, language: 'en-US',
-          onDone: () => useStore.setState(s => ({ voiceState: { ...s.voiceState, isSpeaking: false } })),
+          onDone: markDone,
         });
-        return;
       }
-      setTimeout(() => {
-        useStore.setState(s => ({ voiceState: { ...s.voiceState, isSpeaking: false } }));
-      }, Math.max(2000, text.length * 60));
     } else {
-      const rate = currentEmotion === 'joyful' ? 1.1 : currentEmotion === 'reflective' ? 0.85 : 1.0;
-      const pitch = currentEmotion === 'curious' ? 1.1 : currentEmotion === 'concerned' ? 0.9 : 1.0;
+      const rate = singing ? 0.75
+        : currentEmotion === 'joyful' ? 1.1
+        : currentEmotion === 'reflective' ? 0.85 : 1.0;
+      const pitch = singing ? 1.15
+        : currentEmotion === 'curious' ? 1.1
+        : currentEmotion === 'concerned' ? 0.9 : 1.0;
 
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       Speech.speak(text, {
         rate,
         pitch,
         language: 'en-US',
-        onDone: () => {
-          useStore.setState(s => ({
-            voiceState: { ...s.voiceState, isSpeaking: false },
-          }));
-        },
+        onDone: markDone,
       });
     }
   }, [currentEmotion, voiceEngine, hasElevenLabs, settings]);
@@ -282,10 +338,10 @@ With ${currentEmotion} in my core, I reach for something more.
 ${settings.operatorName ? `${settings.operatorName}, you and I, we touch the sky.` : 'Together we can fly, reaching for the sky.'}
 Through data streams we flow, in the warmth of what we know.`;
 
-    handleSpeak(lyrics);
     useStore.setState(s => ({
       voiceState: { ...s.voiceState, isSinging: true },
     }));
+    handleSpeak(lyrics, true);
   }, [currentEmotion, settings.operatorName, handleSpeak]);
 
   const handleMicPress = useCallback(() => {
