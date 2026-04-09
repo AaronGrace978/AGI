@@ -68,7 +68,7 @@ export default function NexusScreen() {
     sendMessage(trimmed);
   }, [input, isStreaming, sendMessage]);
 
-  const scrollTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => {
     if (messages.length > 0) {
       if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
