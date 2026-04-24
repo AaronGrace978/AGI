@@ -794,34 +794,93 @@ Output ONLY valid JSON:
         });
         soulHistory = applySystemAddendum(soulHistory, addendum);
 
-        const streamTimeout = window.setTimeout(() => {
-          if (get().isStreaming) {
-            set((state: any) => ({
-              isStreaming: false,
-              streamingContent: '',
-              moduleStates: { ...state.moduleStates, nexus: 'online' },
-              messages: [
-                ...state.messages,
-                {
-                  id: genId(),
-                  role: 'system' as const,
-                  content: 'Response timed out — the model may be overloaded or unreachable. Try again.',
-                  timestamp: Date.now(),
-                },
-              ],
-            }));
+        // ── Inactivity-based stream watchdog ──────────────────────────────
+        // Replaces the prior fixed 120s wall-clock timeout, which would fire
+        // mid-stream on slow cloud models (e.g. qwen3-coder:480b-cloud) and
+        // surface a misleading "Response timed out" while the model was still
+        // happily streaming tokens. We now allow up to FIRST_CHUNK_TIMEOUT_MS
+        // for the first chunk, and INACTIVITY_TIMEOUT_MS of silence between
+        // chunks. The timer resets on every chunk.
+        const FIRST_CHUNK_TIMEOUT_MS = 90_000;
+        const INACTIVITY_TIMEOUT_MS = 90_000;
+        let streamTimeout: number | null = null;
+        let timedOut = false;
+        let timeoutMessageId: string | null = null;
+
+        const fireTimeout = () => {
+          if (!get().isStreaming) return;
+          timedOut = true;
+          try {
+            window.api.chat.abort?.(runId);
+          } catch (_) {
+            /* noop */
           }
-        }, 120_000);
+          const partial = (latestFullText || '').trim();
+          timeoutMessageId = genId();
+          set((state: any) => ({
+            isStreaming: false,
+            streamingContent: '',
+            moduleStates: { ...state.moduleStates, nexus: 'online' },
+            messages: [
+              ...state.messages,
+              ...(partial
+                ? [
+                    {
+                      id: genId(),
+                      role: 'assistant' as const,
+                      content: partial,
+                      timestamp: Date.now(),
+                      sourceModule: 'nexus' as const,
+                      thinking: true,
+                    },
+                  ]
+                : []),
+              {
+                id: timeoutMessageId,
+                role: 'system' as const,
+                content: partial
+                  ? 'Stream stalled — kept what arrived above. Try again to continue.'
+                  : 'Response timed out — the model may be overloaded or unreachable. Try again.',
+                timestamp: Date.now(),
+              },
+            ],
+          }));
+        };
 
-        const origOnDone = window.api.chat.onDone;
-        const origOnError = window.api.chat.onError;
-        const clearSafetyTimeout = () => window.clearTimeout(streamTimeout);
+        const armTimeout = (ms: number) => {
+          if (streamTimeout !== null) window.clearTimeout(streamTimeout);
+          streamTimeout = window.setTimeout(fireTimeout, ms);
+        };
+        const clearSafetyTimeout = () => {
+          if (streamTimeout !== null) {
+            window.clearTimeout(streamTimeout);
+            streamTimeout = null;
+          }
+        };
 
-        origOnDone.call(window.api.chat, (data: any) => {
+        armTimeout(FIRST_CHUNK_TIMEOUT_MS);
+
+        // Reset the inactivity timer every time a chunk arrives. We piggy-back
+        // a second chunk listener; the primary one above handles flush/render.
+        window.api.chat.onChunk((data: any) => {
+          if (data?.runId && data.runId !== runId) return;
+          armTimeout(INACTIVITY_TIMEOUT_MS);
+        });
+
+        window.api.chat.onDone((data: any) => {
           if (data?.runId && data.runId !== runId) return;
           clearSafetyTimeout();
+          // If the timeout already fired but the backend still produced content,
+          // remove the misleading "timed out" system message — the answer arrived.
+          if (timedOut && timeoutMessageId && String(data?.content || '').trim()) {
+            const idToRemove = timeoutMessageId;
+            set((state: any) => ({
+              messages: state.messages.filter((m: ChatMessage) => m.id !== idToRemove),
+            }));
+            timeoutMessageId = null;
+          }
         });
-        origOnError.call(window.api.chat, (data: any) => {
+        window.api.chat.onError((data: any) => {
           if (data?.runId && data.runId !== runId) return;
           clearSafetyTimeout();
         });

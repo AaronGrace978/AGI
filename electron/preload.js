@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('api', {
   // ─── Chat ──────────────────────────────────────────────
   chat: {
     send: (messages, config) => ipcRenderer.send('chat:send', messages, config),
+    abort: (runId) => ipcRenderer.send('chat:abort', { runId: runId || null }),
     onChunk: (callback) => {
       const handler = (_event, data) => callback(data);
       ipcRenderer.on('chat:chunk', handler);

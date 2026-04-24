@@ -99,20 +99,40 @@ function updateConsciousness(responseText, userMessages) {
   ctx.saveJSON(ctx.memoryFile, ctx.memory);
 }
 
+// Active stream abort controllers keyed by runId so the renderer can cancel
+// in-flight chat streams (e.g. when the inactivity timeout trips).
+const activeChatAborts = new Map();
+
 function register() {
   const { streamOllama, streamAnthropic, streamOpenAI } = require('../llm');
   const { normalizeOllamaUrl, normalizeOllamaModelForCloud, getOllamaHeaders } = require('../llm');
 
   ctx.updateConsciousness = updateConsciousness;
 
+  ipcMain.on('chat:abort', (_event, payload) => {
+    const runId = payload?.runId || null;
+    if (runId && activeChatAborts.has(runId)) {
+      try { activeChatAborts.get(runId).abort(); } catch (_) { /* noop */ }
+      activeChatAborts.delete(runId);
+      return;
+    }
+    // No runId provided → abort everything (defensive).
+    for (const ctrl of activeChatAborts.values()) {
+      try { ctrl.abort(); } catch (_) { /* noop */ }
+    }
+    activeChatAborts.clear();
+  });
+
   ipcMain.on('chat:send', async (event, messages, config) => {
     const { settings, mainWindow, osBridgeEnabled } = ctx;
+    const runId = config?.runId || null;
+    const abortController = new AbortController();
+    if (runId) activeChatAborts.set(runId, abortController);
     try {
       const provider = config?.provider || settings.provider;
       const model = config?.model || settings.model;
       const temperature = config?.temperature ?? settings.temperature;
       const maxTokens = config?.maxTokens ?? settings.maxTokens;
-      const runId = config?.runId || null;
 
       const baseSystemPrompt = settings.systemPrompt || DEFAULT_SETTINGS.systemPrompt;
       const incoming = Array.isArray(messages) ? messages : [];
@@ -150,14 +170,16 @@ function register() {
       }
 
       if (provider === 'ollama') {
-        fullText = await streamOllama(fullMessages, model, settings.ollamaUrl, temperature, runId);
+        fullText = await streamOllama(fullMessages, model, settings.ollamaUrl, temperature, runId, maxTokens, abortController.signal);
       } else if (provider === 'anthropic') {
-        fullText = await streamAnthropic(fullMessages, model, settings.anthropicKey, temperature, maxTokens, runId);
+        fullText = await streamAnthropic(fullMessages, model, settings.anthropicKey, temperature, maxTokens, runId, abortController.signal);
       } else if (provider === 'openai') {
-        fullText = await streamOpenAI(fullMessages, model, settings.openaiKey, temperature, maxTokens, runId);
+        fullText = await streamOpenAI(fullMessages, model, settings.openaiKey, temperature, maxTokens, runId, abortController.signal);
       } else {
         throw new Error(`Unknown provider: ${provider}`);
       }
+
+      const aborted = abortController.signal.aborted;
 
       updateConsciousness(fullText, messages);
 
@@ -165,12 +187,26 @@ function register() {
       if (lastUserMsg) ctx.addToConversationBuffer('user', lastUserMsg.content);
       ctx.addToConversationBuffer('assistant', fullText);
 
-      mainWindow?.webContents.send('chat:done', { runId, content: fullText, model, provider });
+      mainWindow?.webContents.send('chat:done', { runId, content: fullText, model, provider, aborted });
     } catch (error) {
-      ctx.mainWindow?.webContents.send('chat:error', {
-        runId: config?.runId || null,
-        message: error.message || 'Unknown error occurred',
-      });
+      // Don't surface AbortError as a user-facing error — the renderer asked for it.
+      const isAbort = error?.name === 'AbortError' || abortController.signal.aborted;
+      if (!isAbort) {
+        ctx.mainWindow?.webContents.send('chat:error', {
+          runId,
+          message: error.message || 'Unknown error occurred',
+        });
+      } else {
+        ctx.mainWindow?.webContents.send('chat:done', {
+          runId,
+          content: '',
+          model: config?.model || ctx.settings.model,
+          provider: config?.provider || ctx.settings.provider,
+          aborted: true,
+        });
+      }
+    } finally {
+      if (runId) activeChatAborts.delete(runId);
     }
   });
 

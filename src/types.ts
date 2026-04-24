@@ -1678,9 +1678,16 @@ declare global {
     api: {
       chat: {
         send: (messages: Array<{ role: string; content: string }>, config?: Record<string, unknown>) => void;
+        abort: (runId?: string | null) => void;
         onChunk: (cb: (data: { runId?: string | null; content: string; fullText: string }) => void) => () => void;
         onDone: (
-          cb: (data: { runId?: string | null; content: string; model: string; provider: string }) => void,
+          cb: (data: {
+            runId?: string | null;
+            content: string;
+            model: string;
+            provider: string;
+            aborted?: boolean;
+          }) => void,
         ) => () => void;
         onError: (cb: (data: { runId?: string | null; message: string }) => void) => () => void;
         removeAllListeners: () => void;

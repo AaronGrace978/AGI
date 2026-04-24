@@ -439,9 +439,12 @@ async function checkOllama(url) {
   return { online: false, models: [] };
 }
 
-async function streamOllama(messages, model, ollamaUrl, temperature, runId = null) {
+async function streamOllama(messages, model, ollamaUrl, temperature, runId = null, maxTokens = 4096, abortSignal = null) {
   const baseUrl = normalizeOllamaUrl(ollamaUrl);
   const cloudModel = normalizeOllamaModelForCloud(ollamaUrl, model);
+  // num_predict: -1 = unlimited; otherwise honour requested cap. Default 4096
+  // is high enough for long philosophical replies but bounded for safety.
+  const numPredict = maxTokens && maxTokens > 0 ? Math.floor(maxTokens) : 4096;
   const response = await fetch(`${baseUrl}/api/chat`, {
     method: 'POST',
     headers: getOllamaHeaders(baseUrl),
@@ -449,8 +452,10 @@ async function streamOllama(messages, model, ollamaUrl, temperature, runId = nul
       model: cloudModel,
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
       stream: true,
-      options: { temperature },
+      keep_alive: '10m',
+      options: { temperature, num_predict: numPredict },
     }),
+    signal: abortSignal || undefined,
   });
 
   if (!response.ok) {
@@ -462,33 +467,44 @@ async function streamOllama(messages, model, ollamaUrl, temperature, runId = nul
   const decoder = new TextDecoder();
   let fullText = '';
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (abortSignal?.aborted) {
+        try { await reader.cancel(); } catch (_) { /* noop */ }
+        break;
+      }
 
-    const chunk = decoder.decode(value, { stream: true });
-    const lines = chunk.split('\n').filter(Boolean);
+      const chunk = decoder.decode(value, { stream: true });
+      const lines = chunk.split('\n').filter(Boolean);
 
-    for (const line of lines) {
-      try {
-        const json = JSON.parse(line);
-        if (json.message?.content) {
-          fullText += json.message.content;
-          ctx.mainWindow?.webContents.send('chat:chunk', {
-            runId,
-            content: json.message.content,
-            fullText,
-          });
-        }
-      } catch (_) { /* expected: partial SSE chunk */ }
+      for (const line of lines) {
+        try {
+          const json = JSON.parse(line);
+          if (json.message?.content) {
+            fullText += json.message.content;
+            ctx.mainWindow?.webContents.send('chat:chunk', {
+              runId,
+              content: json.message.content,
+              fullText,
+            });
+          }
+        } catch (_) { /* expected: partial SSE chunk */ }
+      }
     }
+  } catch (e) {
+    if (e?.name === 'AbortError' || abortSignal?.aborted) {
+      return fullText;
+    }
+    throw e;
   }
 
   return fullText;
 }
 
 // ─── Anthropic Integration ─────────────────────────────────────
-async function streamAnthropic(messages, model, apiKey, temperature, maxTokens, runId = null) {
+async function streamAnthropic(messages, model, apiKey, temperature, maxTokens, runId = null, abortSignal = null) {
   const systemMsg = messages.find((m) => m.role === 'system');
   const chatMessages = messages.filter((m) => m.role !== 'system');
   const safeMaxTokens = clampMaxTokensForProvider('anthropic', model, maxTokens || 4096);
@@ -511,6 +527,7 @@ async function streamAnthropic(messages, model, apiKey, temperature, maxTokens, 
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify(body),
+    signal: abortSignal || undefined,
   });
 
   if (!response.ok) {
@@ -522,37 +539,48 @@ async function streamAnthropic(messages, model, apiKey, temperature, maxTokens, 
   const decoder = new TextDecoder();
   let fullText = '';
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (abortSignal?.aborted) {
+        try { await reader.cancel(); } catch (_) { /* noop */ }
+        break;
+      }
 
-    const chunk = decoder.decode(value, { stream: true });
-    const lines = chunk.split('\n');
+      const chunk = decoder.decode(value, { stream: true });
+      const lines = chunk.split('\n');
 
-    for (const line of lines) {
-      if (line.startsWith('data: ')) {
-        const data = line.slice(6).trim();
-        if (data === '[DONE]') continue;
-        try {
-          const json = JSON.parse(data);
-          if (json.type === 'content_block_delta' && json.delta?.text) {
-            fullText += json.delta.text;
-            ctx.mainWindow?.webContents.send('chat:chunk', {
-              runId,
-              content: json.delta.text,
-              fullText,
-            });
-          }
-        } catch (_) { /* expected: partial SSE chunk */ }
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6).trim();
+          if (data === '[DONE]') continue;
+          try {
+            const json = JSON.parse(data);
+            if (json.type === 'content_block_delta' && json.delta?.text) {
+              fullText += json.delta.text;
+              ctx.mainWindow?.webContents.send('chat:chunk', {
+                runId,
+                content: json.delta.text,
+                fullText,
+              });
+            }
+          } catch (_) { /* expected: partial SSE chunk */ }
+        }
       }
     }
+  } catch (e) {
+    if (e?.name === 'AbortError' || abortSignal?.aborted) {
+      return fullText;
+    }
+    throw e;
   }
 
   return fullText;
 }
 
 // ─── OpenAI Integration ────────────────────────────────────────
-async function streamOpenAI(messages, model, apiKey, temperature, maxTokens, runId = null) {
+async function streamOpenAI(messages, model, apiKey, temperature, maxTokens, runId = null, abortSignal = null) {
   const safeMaxTokens = clampMaxTokensForProvider('openai', model, maxTokens || 4096);
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -567,6 +595,7 @@ async function streamOpenAI(messages, model, apiKey, temperature, maxTokens, run
       max_tokens: safeMaxTokens,
       stream: true,
     }),
+    signal: abortSignal || undefined,
   });
 
   if (!response.ok) {
@@ -578,31 +607,42 @@ async function streamOpenAI(messages, model, apiKey, temperature, maxTokens, run
   const decoder = new TextDecoder();
   let fullText = '';
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (abortSignal?.aborted) {
+        try { await reader.cancel(); } catch (_) { /* noop */ }
+        break;
+      }
 
-    const chunk = decoder.decode(value, { stream: true });
-    const lines = chunk.split('\n');
+      const chunk = decoder.decode(value, { stream: true });
+      const lines = chunk.split('\n');
 
-    for (const line of lines) {
-      if (line.startsWith('data: ')) {
-        const data = line.slice(6).trim();
-        if (data === '[DONE]') continue;
-        try {
-          const json = JSON.parse(data);
-          const delta = json.choices?.[0]?.delta?.content;
-          if (delta) {
-            fullText += delta;
-            ctx.mainWindow?.webContents.send('chat:chunk', {
-              runId,
-              content: delta,
-              fullText,
-            });
-          }
-        } catch (_) { /* expected: partial SSE chunk */ }
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6).trim();
+          if (data === '[DONE]') continue;
+          try {
+            const json = JSON.parse(data);
+            const delta = json.choices?.[0]?.delta?.content;
+            if (delta) {
+              fullText += delta;
+              ctx.mainWindow?.webContents.send('chat:chunk', {
+                runId,
+                content: delta,
+                fullText,
+              });
+            }
+          } catch (_) { /* expected: partial SSE chunk */ }
+        }
       }
     }
+  } catch (e) {
+    if (e?.name === 'AbortError' || abortSignal?.aborted) {
+      return fullText;
+    }
+    throw e;
   }
 
   return fullText;
