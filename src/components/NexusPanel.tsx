@@ -370,6 +370,7 @@ const Composer = memo(function Composer({
   const [input, setInput] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const resizeRaf = useRef<number>(0);
+  const abortStreaming = useStore((s) => s.abortStreaming);
 
   const handleInput = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const el = e.target;
@@ -389,14 +390,19 @@ const Composer = memo(function Composer({
     if (textareaRef.current) textareaRef.current.style.height = '24px';
   }, [input, isStreaming, onSend]);
 
+  const handleStop = useCallback(() => {
+    abortStreaming();
+  }, [abortStreaming]);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        handleSend();
+        if (isStreaming) handleStop();
+        else handleSend();
       }
     },
-    [handleSend],
+    [handleSend, handleStop, isStreaming],
   );
 
   useEffect(() => {
@@ -411,19 +417,33 @@ const Composer = memo(function Composer({
           value={input}
           onChange={handleInput}
           onKeyDown={handleKeyDown}
-          placeholder="Speak to AGI PRIME..."
+          placeholder={isStreaming ? 'AGI PRIME is responding — Esc or click ■ to stop' : 'Speak to AGI PRIME...'}
           rows={1}
           disabled={isStreaming}
         />
-        <Button variant="primary" className="send-btn" onClick={handleSend} disabled={!input.trim() || isStreaming}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M22 2L11 13" />
-            <path d="M22 2L15 22L11 13L2 9L22 2Z" />
-          </svg>
-        </Button>
+        {isStreaming ? (
+          <Button
+            type="button"
+            variant="danger"
+            className="send-btn stop-btn"
+            onClick={handleStop}
+            title="Stop generating (cancels the current response)"
+          >
+            <svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true">
+              <rect x="6" y="6" width="12" height="12" rx="2" />
+            </svg>
+          </Button>
+        ) : (
+          <Button variant="primary" className="send-btn" onClick={handleSend} disabled={!input.trim()}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M22 2L11 13" />
+              <path d="M22 2L15 22L11 13L2 9L22 2Z" />
+            </svg>
+          </Button>
+        )}
       </div>
       <div className="input-hint">
-        <span>Enter to send · Shift+Enter for new line</span>
+        <span>{isStreaming ? 'Esc or click ■ to stop' : 'Enter to send · Shift+Enter for new line'}</span>
         <span>Interactions: {totalInteractions}</span>
       </div>
     </div>
@@ -434,6 +454,19 @@ const Composer = memo(function Composer({
 export default function NexusPanel() {
   const sendMessage = useStore((s) => s.sendMessage);
   const isStreaming = useStore((s) => s.isStreaming);
+  const abortStreaming = useStore((s) => s.abortStreaming);
+
+  useEffect(() => {
+    if (!isStreaming) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        abortStreaming();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isStreaming, abortStreaming]);
   const activeConversationTitle = useStore((s) => s.activeConversationTitle);
   const currentEmotion = useStore((s) => s.consciousness.soulFrame.currentEmotion);
   const presence = useStore((s) => s.consciousness.presence);

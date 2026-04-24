@@ -56,6 +56,7 @@ export function createChatSlice(set: StoreSet, get: StoreGet) {
     messages: [] as ChatMessage[],
     isStreaming: false,
     streamingContent: '',
+    currentRunId: null as string | null,
     conversations: [] as Array<{
       id: string;
       title: string;
@@ -96,6 +97,7 @@ export function createChatSlice(set: StoreSet, get: StoreGet) {
         messages: [...state.messages, userMessage],
         isStreaming: true,
         streamingContent: '',
+        currentRunId: runId,
         moduleStates: { ...state.moduleStates, nexus: 'processing' },
         ...(isNewConversation
           ? {
@@ -152,6 +154,7 @@ export function createChatSlice(set: StoreSet, get: StoreGet) {
           set((state: any) => ({
             isStreaming: false,
             streamingContent: '',
+            currentRunId: null,
             moduleStates: { ...state.moduleStates, nexus: 'online' },
             messages: [
               ...state.messages,
@@ -341,6 +344,7 @@ export function createChatSlice(set: StoreSet, get: StoreGet) {
             messages: [...state.messages, assistantMessage, ...afterthoughts],
             isStreaming: false,
             streamingContent: '',
+            currentRunId: null,
             moduleStates: { ...state.moduleStates, nexus: 'online' },
             consciousness: {
               ...state.consciousness,
@@ -651,6 +655,7 @@ Output ONLY valid JSON:
             messages: [...state.messages, errorMessage],
             isStreaming: false,
             streamingContent: '',
+            currentRunId: null,
             moduleStates: { ...state.moduleStates, nexus: 'online' },
             spark: {
               ...state.spark,
@@ -751,6 +756,7 @@ Output ONLY valid JSON:
           set((s: any) => ({
             isStreaming: false,
             streamingContent: '',
+            currentRunId: null,
             moduleStates: { ...s.moduleStates, nexus: 'online' },
             messages: [...s.messages, assistantMsg],
             consciousness: { ...s.consciousness, presence: 'present' },
@@ -820,6 +826,7 @@ Output ONLY valid JSON:
           set((state: any) => ({
             isStreaming: false,
             streamingContent: '',
+            currentRunId: null,
             moduleStates: { ...state.moduleStates, nexus: 'online' },
             messages: [
               ...state.messages,
@@ -908,6 +915,44 @@ Output ONLY valid JSON:
           complexityThreshold: Math.max(0.05, Math.min(0.95, complexity)),
           uncertaintyThreshold: Math.max(0.05, Math.min(0.95, uncertainty)),
         },
+      }));
+    },
+
+    abortStreaming: () => {
+      const { isStreaming, currentRunId, streamingContent } = get();
+      if (!isStreaming) return;
+      try {
+        window.api.chat.abort?.(currentRunId || undefined);
+      } catch (_) {
+        /* noop */
+      }
+      const partial = String(streamingContent || '').trim();
+      set((state: any) => ({
+        isStreaming: false,
+        streamingContent: '',
+        currentRunId: null,
+        moduleStates: { ...state.moduleStates, nexus: 'online' },
+        messages: [
+          ...state.messages,
+          ...(partial
+            ? [
+                {
+                  id: genId(),
+                  role: 'assistant' as const,
+                  content: partial,
+                  timestamp: Date.now(),
+                  sourceModule: 'nexus' as const,
+                  thinking: true,
+                },
+              ]
+            : []),
+          {
+            id: genId(),
+            role: 'system' as const,
+            content: partial ? 'Stopped — kept what arrived above.' : 'Stopped before any response arrived.',
+            timestamp: Date.now(),
+          },
+        ],
       }));
     },
 

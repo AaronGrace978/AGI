@@ -81,8 +81,10 @@ export interface AGIStore {
   messages: ChatMessage[];
   isStreaming: boolean;
   streamingContent: string;
+  currentRunId: string | null;
   dualBrain: DualBrainState;
   sendMessage: (content: string) => void;
+  abortStreaming: () => void;
   setDualBrainEnabled: (enabled: boolean) => void;
   setDualBrainThresholds: (complexity: number, uncertainty: number) => void;
   clearMessages: () => void;
