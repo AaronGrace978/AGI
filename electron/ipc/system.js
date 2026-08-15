@@ -4,6 +4,7 @@
 const { ipcMain, shell, app } = require('electron');
 const { exec } = require('child_process');
 const ctx = require('../ctx');
+const { detectSteamDeck, hostLabel } = require('../platform');
 
 const UPDATE_MANIFEST_URL = process.env.AGIPRIME_UPDATE_MANIFEST_URL || '';
 
@@ -116,6 +117,10 @@ function register() {
       uptime,
       platform: process.platform,
       arch: process.arch,
+      version: app.getVersion(),
+      isPackaged: app.isPackaged,
+      isSteamDeck: detectSteamDeck(),
+      hostLabel: hostLabel(),
       nodeVersion: process.version,
       electronVersion: process.versions.electron,
       memory: process.memoryUsage(),

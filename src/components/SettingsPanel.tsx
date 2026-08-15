@@ -6,6 +6,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useStore } from '../store';
 import { Button, StatusDot } from './ui';
+import { getRuntimeInfo } from '../runtime';
 
 // ─── All Ollama Cloud models (https://ollama.com/search?c=cloud) ────
 const OLLAMA_CLOUD_MODELS = [
@@ -282,6 +283,14 @@ export default function SettingsPanel() {
   const [localSystemPrompt, setLocalSystemPrompt] = useState(settings.systemPrompt);
   const [localOperatorName, setLocalOperatorName] = useState(settings.operatorName || '');
   const maxTokensCap = settings.provider === 'anthropic' ? 32000 : 200000;
+  const runtime = getRuntimeInfo();
+  const [hostInfo, setHostInfo] = useState<{
+    version?: string;
+    hostLabel?: string;
+    platform?: string;
+    arch?: string;
+    electronVersion?: string;
+  } | null>(null);
 
   // Sync when settings load
   useEffect(() => {
@@ -302,6 +311,21 @@ export default function SettingsPanel() {
     setLocalSystemPrompt(settings.systemPrompt);
     setLocalOperatorName(settings.operatorName || '');
   }, [settings]);
+
+  useEffect(() => {
+    let cancelled = false;
+    window.api?.system
+      ?.info()
+      .then((info) => {
+        if (!cancelled) setHostInfo(info);
+      })
+      .catch(() => {
+        /* renderer-only fallback is enough */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const save = (overrides: Record<string, unknown> = {}) => {
     updateSettings({
@@ -328,6 +352,28 @@ export default function SettingsPanel() {
   return (
     <div className="settings-panel">
       <h2>⚙ SETTINGS</h2>
+
+      <div className="settings-section">
+        <div className="settings-section-title">ABOUT</div>
+        <div className="settings-row">
+          <div className="settings-label">
+            AGI PRIME
+            <small>
+              v{hostInfo?.version || runtime.version} · {hostInfo?.hostLabel || runtime.hostLabel}
+              {hostInfo?.arch ? ` · ${hostInfo.arch}` : runtime.arch ? ` · ${runtime.arch}` : ''}
+            </small>
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-dim)', textAlign: 'right', lineHeight: 1.5 }}>
+            Created by Aaron Grace
+            {hostInfo?.electronVersion ? (
+              <>
+                <br />
+                Electron {hostInfo.electronVersion}
+              </>
+            ) : null}
+          </div>
+        </div>
+      </div>
 
       {/* Ollama Status */}
       <div className={`ollama-status ${ollamaStatus.online ? 'online' : 'offline'}`}>
@@ -735,6 +781,22 @@ export default function SettingsPanel() {
               onChange={(e) => updateSettings({ performanceMode: e.target.checked })}
             />
             {settings.performanceMode ? 'ON — Fast' : 'OFF — Full'}
+          </label>
+        </div>
+        <div className="settings-row">
+          <div className="settings-label">
+            Compact Layout
+            <small>Tighter chrome for Steam Deck and small screens. Auto-on for Steam Deck.</small>
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={settings.compactMode === true || (settings.compactMode !== false && runtime.compact)}
+              onChange={(e) => updateSettings({ compactMode: e.target.checked })}
+            />
+            {settings.compactMode === true || (settings.compactMode !== false && runtime.compact)
+              ? 'ON — Compact'
+              : 'OFF — Comfortable'}
           </label>
         </div>
         <div

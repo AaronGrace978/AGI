@@ -1,0 +1,102 @@
+appId: com.agiprime.app
+productName: AGI PRIME
+copyright: Created by Aaron Grace
+asar: true
+compression: maximum
+removePackageScripts: true
+npmRebuild: false
+artifactName: AGI-PRIME-${version}-${os}-${arch}.${ext}
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/**/*
+  - electron/**/*
+  - package.json
+  - "!**/*.map"
+  - "!**/*.test.ts"
+  - "!**/__pycache__/**"
+
+extraResources:
+  - from: scripts/neuralcore
+    to: scripts/neuralcore
+    filter:
+      - "**/*"
+      - "!**/tests/**"
+      - "!**/__pycache__/**"
+      - "!**/*.pyc"
+  - from: electron/input-helper.ps1
+    to: electron/input-helper.ps1
+  - from: build/memory-seed/latest.json
+    to: memory-seed/latest.json
+
+linux:
+  icon: build/icons
+  category: Utility
+  executableName: agi-prime
+  synopsis: Modular AI consciousness platform
+  description: AGI PRIME is a desktop AI runtime with memory, reasoning, ethics, voice, and action tools.
+  desktop:
+    entry:
+      Name: AGI PRIME
+      Comment: Modular AI consciousness platform
+      Categories: Utility;Education;Science;
+      StartupWMClass: agi-prime
+      Terminal: "false"
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64
+
+mac:
+  icon: build/icon.icns
+  category: public.app-category.developer-tools
+  darkModeSupport: true
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  identity: null
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  extendInfo:
+    NSMicrophoneUsageDescription: AGI PRIME uses the microphone for voice conversations.
+    NSCameraUsageDescription: AGI PRIME may use the camera when you ask it to look at the world.
+  target:
+    - target: dmg
+      arch:
+        - universal
+    - target: zip
+      arch:
+        - universal
+
+dmg:
+  artifactName: AGI-PRIME-${version}-macOS-${arch}.${ext}
+
+win:
+  icon: build/icon.ico
+  target:
+    - nsis
+    - portable
+  artifactName: AGI-PRIME-${version}-Windows-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: AGI PRIME
+  uninstallDisplayName: AGI PRIME
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerHeaderIcon: build/icon.ico
+  artifactName: AGI-PRIME-${version}-Windows-Setup-${arch}.${ext}
+
+portable:
+  artifactName: AGI-PRIME-${version}-Windows-Portable-${arch}.${ext}
+
+publish: never

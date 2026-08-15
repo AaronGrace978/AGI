@@ -56,6 +56,7 @@ This README explains what the project is, how it is organized, and how to run it
 - **Truth filtering pipeline**: new source-tiering, blocked-domain filtering, heuristic bias detection, and optional LLM verification reduce the chance of low-quality knowledge entering the system.
 - **Mobile app workspace**: `AGIPrime-Mobile` adds an Expo-based companion app with environment-backed provider settings, animated UI primitives, and mobile-safe LLM access patterns.
 - **GitHub Repo Knowledge Ingestor**: new end-to-end pipeline that discovers repos, runs 3-layer quality gates, distills codebase knowledge, deduplicates against vector memory, stores accepted insights, and can optionally commit/push memory updates.
+- **Release packaging**: Windows (NSIS + portable), macOS universal DMG, Linux/Steam Deck AppImage + deb, with a dedicated icon set and GitHub Actions **Release** workflow.
 
 ## Core Engine Modules (`src/prime`)
 
@@ -179,14 +180,48 @@ You can then open the Expo project in Expo Go, an emulator, or a simulator.
 
 If you plan to use EAS commands, keep your Expo token in `AGIPrime-Mobile/.expo-token`. The repo includes `AGIPrime-Mobile/.expo-token.example` as a placeholder template only.
 
+## Release 1.1.0 — Windows, macOS, Steam Deck
+
+Packaged desktop builds live in `release/` after you run the dist scripts (or download GitHub Actions artifacts from the **Release** workflow).
+
+| Platform | Artifact | How to run |
+| --- | --- | --- |
+| **Windows** | `AGI-PRIME-1.1.0-Windows-Setup-x64.exe` | Installer with Start Menu + desktop shortcut. Portable: `AGI-PRIME-1.1.0-Windows-Portable-x64.exe` |
+| **macOS** | `AGI-PRIME-1.1.0-macOS-universal.dmg` | Universal (Apple Silicon + Intel). First open: right-click the app → **Open** (unsigned build). |
+| **Steam Deck / Linux** | `AGI-PRIME-1.1.0-Linux-x64.AppImage` | Desktop Mode: mark executable and double-click. Game Mode: add as a non-Steam game, or use `scripts/steamdeck-launch.sh`. Also ships a `.deb`. |
+
+Local packaging:
+
+```bash
+npm run dist:win         # Windows NSIS + portable
+npm run dist:mac         # macOS DMG + zip (run on macOS)
+npm run dist:linux       # AppImage + deb
+npm run dist:steamdeck   # AppImage only
+```
+
+CI: `.github/workflows/release.yml` builds all three OS families on version tags (`v1.1.0`) or **workflow_dispatch**.
+
+Steam Deck notes:
+- Uses compact chrome and performance mode by default (less background LLM chatter on the APU).
+- Toggle **Compact Layout** in Settings if you want the full desktop density.
+- Wrapper: `scripts/steamdeck-launch.sh /path/to/AGI-PRIME.AppImage`
+
 ## Build and Run
 
 ### Desktop
 
 ```bash
-npm run build      # builds renderer
-npm start          # runs Electron app
-npm run dist       # creates distributable (electron-builder)
+npm install
+npm run dev            # Vite + Electron
+# or
+./LAUNCH.sh            # macOS / Linux
+LAUNCH.bat             # Windows
+```
+
+```bash
+npm run build          # renderer only
+npm start              # Electron against dist/
+npm run dist           # current-OS installer into release/
 ```
 
 ### Mobile
@@ -213,6 +248,7 @@ Test config is in `vitest.config.ts`, and focuses coverage on `src/prime/**`.
 ```text
 src/
   App.tsx
+  runtime.ts
   store.ts
   types.ts
   components/
@@ -220,11 +256,20 @@ src/
 electron/
   main.js
   preload.js
+  platform.js
+  icon.png
   lib/
     emotion-infer.js
   input-helper.ps1
+build/
+  icon.png
+  icon.ico
+  icon.icns
+  icons/
 assets/
   agi-prime-hero.png
+scripts/
+  steamdeck-launch.sh
 AGIPrime-Mobile/
   app/
   src/

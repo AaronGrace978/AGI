@@ -8,6 +8,7 @@ import { useStore } from './store';
 import Sidebar from './components/Sidebar';
 import agiPrimeLogo from './assets/agi-prime-logo.svg';
 import { AppErrorBoundary } from './components/AppErrorBoundary';
+import { getRuntimeInfo, shouldUseCompactChrome } from './runtime';
 
 const NexusPanel = lazy(() => import('./components/NexusPanel'));
 const MemoryPanel = lazy(() => import('./components/MemoryPanel'));
@@ -33,6 +34,9 @@ function PanelLoader() {
 }
 
 function TitleBar() {
+  const runtime = getRuntimeInfo();
+  const nativeTrafficLights = runtime.platform === 'darwin';
+
   return (
     <div className="titlebar">
       <div className="titlebar-drag">
@@ -41,27 +45,29 @@ function TitleBar() {
             <img src={agiPrimeLogo} alt="AGI PRIME logo" className="titlebar-logo-image" />
           </div>
           <span className="titlebar-text">AGI PRIME</span>
-          <span className="titlebar-version">v1.0</span>
+          <span className="titlebar-version">v{runtime.version}</span>
         </div>
       </div>
-      <div className="titlebar-controls">
-        <button className="titlebar-btn minimize" onClick={() => window.api.window.minimize()}>
-          <svg width="10" height="1">
-            <rect width="10" height="1" fill="currentColor" />
-          </svg>
-        </button>
-        <button className="titlebar-btn maximize" onClick={() => window.api.window.maximize()}>
-          <svg width="10" height="10">
-            <rect width="10" height="10" fill="none" stroke="currentColor" strokeWidth="1" />
-          </svg>
-        </button>
-        <button className="titlebar-btn close" onClick={() => window.api.window.close()}>
-          <svg width="10" height="10">
-            <line x1="0" y1="0" x2="10" y2="10" stroke="currentColor" strokeWidth="1.2" />
-            <line x1="10" y1="0" x2="0" y2="10" stroke="currentColor" strokeWidth="1.2" />
-          </svg>
-        </button>
-      </div>
+      {!nativeTrafficLights && (
+        <div className="titlebar-controls">
+          <button className="titlebar-btn minimize" aria-label="Minimize" onClick={() => window.api?.window.minimize()}>
+            <svg width="10" height="1">
+              <rect width="10" height="1" fill="currentColor" />
+            </svg>
+          </button>
+          <button className="titlebar-btn maximize" aria-label="Maximize" onClick={() => window.api?.window.maximize()}>
+            <svg width="10" height="10">
+              <rect width="10" height="10" fill="none" stroke="currentColor" strokeWidth="1" />
+            </svg>
+          </button>
+          <button className="titlebar-btn close" aria-label="Close" onClick={() => window.api?.window.close()}>
+            <svg width="10" height="10">
+              <line x1="0" y1="0" x2="10" y2="10" stroke="currentColor" strokeWidth="1.2" />
+              <line x1="10" y1="0" x2="0" y2="10" stroke="currentColor" strokeWidth="1.2" />
+            </svg>
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -123,10 +129,18 @@ const ActivePanel = memo(function ActivePanel() {
 export default function App() {
   const initialize = useStore((s) => s.initialize);
   const initialized = useStore((s) => s.initialized);
+  const compactMode = useStore((s) => s.settings.compactMode);
 
   useEffect(() => {
     initialize();
   }, [initialize]);
+
+  useEffect(() => {
+    const runtime = getRuntimeInfo();
+    document.documentElement.dataset.platform = runtime.platform;
+    document.documentElement.dataset.host = runtime.isSteamDeck ? 'steamdeck' : runtime.platform;
+    document.documentElement.dataset.density = shouldUseCompactChrome(compactMode) ? 'compact' : 'comfortable';
+  }, [compactMode]);
 
   return (
     <div className="app">

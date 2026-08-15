@@ -1,4 +1,15 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, app } = require('electron');
+const { detectSteamDeck, hostLabel } = require('./platform');
+
+contextBridge.exposeInMainWorld('agiRuntime', {
+  platform: process.platform,
+  arch: process.arch,
+  version: app.getVersion(),
+  isPackaged: app.isPackaged,
+  isSteamDeck: detectSteamDeck(),
+  hostLabel: hostLabel(),
+  compact: detectSteamDeck(),
+});
 
 contextBridge.exposeInMainWorld('api', {
   // ─── Chat ──────────────────────────────────────────────

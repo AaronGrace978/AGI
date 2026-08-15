@@ -29,6 +29,7 @@ const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
 const ctx = require('./ctx');
+const { detectSteamDeck, hostLabel } = require('./platform');
 const osBridge = require('./os-bridge');
 const { NeuralCoreBridge, neuralEnhanceAction } = require('./neural-bridge');
 const llm = require('./llm');
@@ -36,6 +37,17 @@ const { applyOwnerDirectProfile } = require('./hands/controller');
 
 const isDev = !app.isPackaged;
 ctx.isDev = isDev;
+ctx.isSteamDeck = detectSteamDeck();
+ctx.hostLabel = hostLabel();
+
+try {
+  app.setName('AGI PRIME');
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('com.agiprime.app');
+  }
+} catch (e) {
+  console.warn('[Config] Failed to set app name:', e?.message || e);
+}
 
 // ─── Stable userData ───────────────────────────────────────────
 const defaultUserDataPath = (() => {
@@ -80,6 +92,12 @@ if (SAFE_MODE) {
     app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
   } catch (e) {
     console.warn('[SafeMode] Failed to apply GPU disables:', e?.message || e);
+  }
+} else if (process.platform === 'linux') {
+  try {
+    app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
+  } catch (e) {
+    console.warn('[Linux] Failed to set ozone hint:', e?.message || e);
   }
 }
 
@@ -458,6 +476,9 @@ const DEFAULT_MEMORY = {
 
 // ─── Load Persisted State ──────────────────────────────────────
 let settings = loadJSON(ctx.settingsFile, DEFAULT_SETTINGS);
+if (ctx.isSteamDeck && typeof settings.performanceMode !== 'boolean') {
+  settings.performanceMode = true;
+}
 ctx.settings = settings;
 ctx.agiScore = loadJSON(ctx.agiScoreFile, { version: 1, config: {}, snapshots: [] });
 ctx.memory = loadJSON(ctx.memoryFile, DEFAULT_MEMORY);
@@ -1009,18 +1030,45 @@ if (ctx.applyOrchestratorProfile) {
 //  WINDOW CREATION
 // ═══════════════════════════════════════════════════════════════
 
+function persistLiveState() {
+  saveJSON(ctx.memoryFile, ctx.memory);
+  saveJSON(ctx.settingsFile, ctx.settings);
+  ctx._pendingVectorWrite = false;
+  saveJSON(ctx.vectorFile, ctx.vectorStore);
+}
+
 function createWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+  const isMac = process.platform === 'darwin';
+  const steamDeck = Boolean(ctx.isSteamDeck);
+  const iconPath = path.join(__dirname, 'icon.png');
+  const minWidth = steamDeck ? 720 : 900;
+  const minHeight = steamDeck ? 480 : 600;
+  const winWidth = steamDeck ? Math.min(1280, width) : Math.min(1500, width);
+  const winHeight = steamDeck ? Math.min(800, height) : Math.min(950, height);
+
   ctx.mainWindow = new BrowserWindow({
-    width: Math.min(1500, width), height: Math.min(950, height),
-    minWidth: 900, minHeight: 600,
-    frame: false, titleBarStyle: 'hidden', backgroundColor: '#0a0a0f',
+    width: winWidth,
+    height: winHeight,
+    minWidth,
+    minHeight,
+    frame: false,
+    titleBarStyle: isMac ? 'hiddenInset' : 'hidden',
+    trafficLightPosition: isMac ? { x: 16, y: 14 } : undefined,
+    backgroundColor: '#0B1220',
     show: false,
+    autoHideMenuBar: true,
+    fullscreenable: true,
+    icon: fs.existsSync(iconPath) ? iconPath : undefined,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true, nodeIntegration: false, sandbox: false,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      spellcheck: false,
     },
   });
+  ctx.mainWindow.setMenuBarVisibility(false);
   ctx.mainWindow.webContents.on('render-process-gone', (_event, details) => {
     console.error('[Window] render-process-gone:', details);
   });
@@ -1030,7 +1078,12 @@ function createWindow() {
   ctx.mainWindow.webContents.on('did-fail-load', (_event, code, desc, url) => {
     console.error('[Window] did-fail-load:', { code, desc, url });
   });
-  ctx.mainWindow.once('ready-to-show', () => ctx.mainWindow.show());
+  ctx.mainWindow.once('ready-to-show', () => {
+    if (steamDeck) {
+      try { ctx.mainWindow.maximize(); } catch { /* ignore */ }
+    }
+    ctx.mainWindow.show();
+  });
   if (isDev) {
     ctx.mainWindow.loadURL('http://localhost:5173');
   } else {
@@ -1038,18 +1091,61 @@ function createWindow() {
   }
 }
 
+if (!DAEMON_MODE) {
+  const gotLock = app.requestSingleInstanceLock();
+  ctx.singleInstance = gotLock;
+  if (!gotLock) {
+    app.quit();
+  } else {
+    app.on('second-instance', () => {
+      if (ctx.mainWindow) {
+        if (ctx.mainWindow.isMinimized()) ctx.mainWindow.restore();
+        ctx.mainWindow.show();
+        ctx.mainWindow.focus();
+      } else {
+        createWindow();
+      }
+    });
+  }
+}
+
 app.whenReady().then(() => {
+  if (!DAEMON_MODE && ctx.singleInstance === false) return;
+  if (process.platform === 'darwin') {
+    try {
+      app.setAboutPanelOptions({
+        applicationName: 'AGI PRIME',
+        applicationVersion: app.getVersion(),
+        version: app.getVersion(),
+        copyright: 'Created by Aaron Grace',
+        credits: 'The Ultimate AI Consciousness Platform',
+        iconPath: path.join(__dirname, 'icon.png'),
+      });
+    } catch (e) {
+      console.warn('[Mac] About panel skipped:', e?.message || e);
+    }
+  }
   if (DAEMON_MODE) { console.log('[AGI PRIME] Daemon mode (no window)'); return; }
   createWindow();
 });
 
 app.on('window-all-closed', () => {
   if (DAEMON_MODE) return;
-  saveJSON(ctx.memoryFile, ctx.memory);
-  saveJSON(ctx.settingsFile, ctx.settings);
-  ctx._pendingVectorWrite = false;
-  saveJSON(ctx.vectorFile, ctx.vectorStore);
-  app.quit();
+  persistLiveState();
+  if (process.platform !== 'darwin') {
+    app.quit();
+  } else {
+    ctx.mainWindow = null;
+  }
+});
+
+app.on('activate', () => {
+  if (DAEMON_MODE) return;
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow();
+  } else {
+    ctx.mainWindow?.show();
+  }
 });
 
 // ─── Auto-export vectors on quit ───────────────────────────────
@@ -1078,6 +1174,7 @@ app.on('before-quit', () => {
 // ═══════════════════════════════════════════════════════════════
 
 app.whenReady().then(() => {
+  if (!DAEMON_MODE && ctx.singleInstance === false) return;
   // NightMind
   if (ctx.startNightmind) ctx.startNightmind();
 
@@ -1121,7 +1218,7 @@ app.whenReady().then(() => {
   } catch (e) { console.error('[NeuralCore] Failed to start bridge:', e.message); }
 
   emitOrchestratorEvent('profile_changed', { profile: ctx.orchestratorState.profile, mode: DAEMON_MODE ? 'daemon' : 'desktop' }, 'orchestrator');
-  console.log(`[AGI PRIME] All systems initialized — mode=${DAEMON_MODE ? 'daemon' : 'desktop'} Vision, Hands, Memory, Goals, Tools, NeuralCore active`);
+  console.log(`[AGI PRIME] All systems initialized — host=${ctx.hostLabel || process.platform} mode=${DAEMON_MODE ? 'daemon' : 'desktop'} Vision, Hands, Memory, Goals, Tools, NeuralCore active`);
 });
 
 for (const sig of ['SIGTERM', 'SIGINT']) {

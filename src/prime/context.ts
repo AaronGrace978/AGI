@@ -60,8 +60,16 @@ export interface SystemAddendumInput {
   oracleVoiceContext?: string;
   /** Emotional / relational state — steer tone, pacing, and care without overriding the creed. */
   heartContext?: HeartContextSnapshot | null;
+  /** Host machine — Windows, macOS, Linux, or Steam Deck. */
+  platformContext?: PlatformContextSnapshot | null;
   /** Timestamp (ms since epoch) captured at request entry. If omitted, uses Date.now(). */
   requestTimestamp?: number;
+}
+
+export interface PlatformContextSnapshot {
+  label: string;
+  platform: string;
+  compact?: boolean;
 }
 
 /**
@@ -121,6 +129,19 @@ export function buildSystemAddendum(input: SystemAddendumInput): string {
       '=== END DIRECTIVE ===',
     ].join('\n'),
   );
+
+  const platform = input.platformContext ?? inferPlatformContext();
+  if (platform) {
+    const hostLines = [
+      '=== HOST ===',
+      `You are running on ${platform.label}.`,
+      platform.compact
+        ? 'The display is compact (handheld / Steam Deck). Prefer concise answers unless the user asks for depth.'
+        : '',
+      '=== END HOST ===',
+    ].filter(Boolean);
+    chunks.push(hostLines.join('\n'));
+  }
 
   if (input.ragContext) {
     chunks.push(input.ragContext.trim());
@@ -231,6 +252,16 @@ export function buildSystemAddendum(input: SystemAddendumInput): string {
   }
 
   return chunks.filter(Boolean).join('\n\n').trim();
+}
+
+function inferPlatformContext(): PlatformContextSnapshot | null {
+  if (typeof window === 'undefined' || !window.agiRuntime) return null;
+  const rt = window.agiRuntime;
+  return {
+    label: rt.hostLabel || rt.platform,
+    platform: rt.platform,
+    compact: Boolean(rt.compact),
+  };
 }
 
 export function applySystemAddendum<T extends ChatLikeMessage>(messages: T[], addendum: string): T[] {
