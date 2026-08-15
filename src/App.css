@@ -144,7 +144,6 @@ select:focus-visible {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  contain: layout style;
 }
 
 .panel-loader {
@@ -314,6 +313,7 @@ select:focus-visible {
   flex-shrink: 0;
   min-height: 0;
   overflow: hidden;
+  -webkit-app-region: no-drag;
 }
 
 .sidebar-top {
@@ -351,6 +351,7 @@ select:focus-visible {
   transition: var(--transition-normal);
   position: relative;
   font-size: 18px;
+  -webkit-app-region: no-drag;
 }
 
 .sidebar-btn:hover {
@@ -945,7 +946,6 @@ select:focus-visible {
   inset: 0;
   z-index: 99;
   background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(2px);
   animation: convo-fade-in 0.15s ease-out;
 }
 @keyframes convo-fade-in {
@@ -2354,8 +2354,7 @@ select:focus-visible {
 .hands-settings-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(4px);
+  background: rgba(11, 18, 32, 0.72);
   z-index: 10;
   animation: drawerFadeIn 250ms ease;
 }
@@ -2374,7 +2373,6 @@ select:focus-visible {
   width: 420px;
   max-width: 90%;
   background: linear-gradient(180deg, rgba(26, 34, 54, 0.97) 0%, rgba(17, 24, 39, 0.99) 100%);
-  backdrop-filter: blur(8px);
   border-left: 1px solid rgba(167, 139, 250, 0.1);
   z-index: 11;
   display: flex;

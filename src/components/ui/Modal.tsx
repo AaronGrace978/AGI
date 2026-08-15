@@ -1,4 +1,5 @@
 import { memo, useEffect, useCallback, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 interface ModalProps {
   open: boolean;
@@ -24,15 +25,22 @@ export const Modal = memo(function Modal({ open, onClose, title, children, actio
     }
   }, [open, handleKeyDown]);
 
-  if (!open) return null;
+  if (!open || typeof document === 'undefined') return null;
 
-  return (
-    <div className="ui-modal__backdrop" onClick={onClose}>
-      <div className="ui-modal" style={width ? { maxWidth: width } : undefined} onClick={(e) => e.stopPropagation()}>
+  return createPortal(
+    <div className="ui-modal__backdrop" onClick={onClose} role="presentation">
+      <div
+        className="ui-modal"
+        style={width ? { maxWidth: width } : undefined}
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title || 'Dialog'}
+      >
         {title && (
           <div className="ui-modal__header">
             <h2 className="ui-modal__title">{title}</h2>
-            <button className="ui-modal__close" onClick={onClose} aria-label="Close">
+            <button type="button" className="ui-modal__close" onClick={onClose} aria-label="Close">
               ×
             </button>
           </div>
@@ -40,6 +48,7 @@ export const Modal = memo(function Modal({ open, onClose, title, children, actio
         <div className="ui-modal__body">{children}</div>
         {actions && <div className="ui-modal__actions">{actions}</div>}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 });

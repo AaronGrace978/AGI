@@ -400,8 +400,8 @@ export default function SettingsPanel() {
             Graphics
             <small>
               {gpuOff
-                ? 'Software rasterizer (Windows default). Avoids GPU-driver kernel crashes. Opt in with AGI_PRIME_ENABLE_GPU=1.'
-                : 'Hardware acceleration on. If the machine bluescreens, restart with --safe-mode or AGI_PRIME_DISABLE_GPU=1.'}
+                ? 'Software rasterizer (--safe-mode / AGI_PRIME_DISABLE_GPU=1).'
+                : 'Hardware acceleration on. If a kernel bugcheck returns, restart with --safe-mode.'}
             </small>
           </div>
         </div>
@@ -718,7 +718,7 @@ export default function SettingsPanel() {
           <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <input
               type="checkbox"
-              checked={dualBrain.enabled}
+              checked={!!dualBrain?.enabled}
               onChange={(e) => setDualBrainEnabled(e.target.checked)}
             />
             Enabled
@@ -736,10 +736,12 @@ export default function SettingsPanel() {
               min="0.05"
               max="0.95"
               step="0.05"
-              value={dualBrain.complexityThreshold}
-              onChange={(e) => setDualBrainThresholds(parseFloat(e.target.value), dualBrain.uncertaintyThreshold)}
+              value={dualBrain?.complexityThreshold ?? 0.45}
+              onChange={(e) =>
+                setDualBrainThresholds(parseFloat(e.target.value), dualBrain?.uncertaintyThreshold ?? 0.35)
+              }
             />
-            <span className="settings-slider-value">{dualBrain.complexityThreshold.toFixed(2)}</span>
+            <span className="settings-slider-value">{(dualBrain?.complexityThreshold ?? 0.45).toFixed(2)}</span>
           </div>
         </div>
         <div className="settings-row">
@@ -754,10 +756,12 @@ export default function SettingsPanel() {
               min="0.05"
               max="0.95"
               step="0.05"
-              value={dualBrain.uncertaintyThreshold}
-              onChange={(e) => setDualBrainThresholds(dualBrain.complexityThreshold, parseFloat(e.target.value))}
+              value={dualBrain?.uncertaintyThreshold ?? 0.35}
+              onChange={(e) =>
+                setDualBrainThresholds(dualBrain?.complexityThreshold ?? 0.45, parseFloat(e.target.value))
+              }
             />
-            <span className="settings-slider-value">{dualBrain.uncertaintyThreshold.toFixed(2)}</span>
+            <span className="settings-slider-value">{(dualBrain?.uncertaintyThreshold ?? 0.35).toFixed(2)}</span>
           </div>
         </div>
         <div className="settings-row">
@@ -769,7 +773,7 @@ export default function SettingsPanel() {
             <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <input
                 type="checkbox"
-                checked={forge.strictEvalMode}
+                checked={!!forge?.strictEvalMode}
                 onChange={(e) => setForgeStrictEvalMode(e.target.checked)}
               />
               Strict Eval
@@ -777,7 +781,7 @@ export default function SettingsPanel() {
             <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <input
                 type="checkbox"
-                checked={forge.verifierFirst}
+                checked={!!forge?.verifierFirst}
                 onChange={(e) => setForgeVerifierFirst(e.target.checked)}
               />
               Verifier-First
@@ -785,8 +789,8 @@ export default function SettingsPanel() {
           </div>
         </div>
         <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>
-          Memory consolidation runs: {memoryConsolidation.totalRuns} · pending episodes:{' '}
-          {memoryConsolidation.pendingEpisodes.length}
+          Memory consolidation runs: {memoryConsolidation?.totalRuns ?? 0} · pending episodes:{' '}
+          {memoryConsolidation?.pendingEpisodes?.length ?? 0}
         </div>
       </div>
 

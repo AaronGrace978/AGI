@@ -1,13 +1,15 @@
 // ═══════════════════════════════════════════════════════════════
 //  GPU / Chromium policy
 //
-//  Windows bugcheck 0x139 (KERNEL_SECURITY_CHECK_VIOLATION) with
-//  parameter 0x1d has been observed when Chromium hardware
-//  acceleration hits a GPU / display driver. Hardware acceleration
-//  is therefore OFF by default on Windows.
+//  1.1.1 disabled GPU compositing on Windows by default. That
+//  painted a white slab over the window and froze Hands Settings
+//  (backdrop-filter + position:fixed with no compositor).
 //
-//  Opt in:  AGI_PRIME_ENABLE_GPU=1
-//  Force off: --safe-mode  or  AGI_PRIME_DISABLE_GPU=1
+//  Default: GPU stays ON. Windows only disables the native
+//  occlusion feature that can freeze frameless Electron windows.
+//
+//  Force off (after a real kernel bugcheck): --safe-mode
+//  or AGI_PRIME_DISABLE_GPU=1
 // ═══════════════════════════════════════════════════════════════
 
 function envEnabled(env, key) {
@@ -15,15 +17,18 @@ function envEnabled(env, key) {
   return v === '1' || v === 'true' || v === 'TRUE' || v === 'yes';
 }
 
+function windowsStabilitySwitches() {
+  // Prevents some frameless Electron windows from freezing on Windows 10/11.
+  return [['disable-features', 'CalculateNativeWinOcclusion']];
+}
+
 function gpuOffSwitches(platform) {
-  const switches = [
-    ['disable-gpu'],
-    ['disable-gpu-compositing'],
-    ['disable-gpu-shader-disk-cache'],
-  ];
+  // disableHardwareAcceleration() already implies --disable-gpu.
+  // Do NOT add disable-gpu-compositing or disable-direct-composition:
+  // those leave unpainted white regions and lock the UI.
+  const switches = [['disable-gpu-shader-disk-cache']];
   if (platform === 'win32') {
-    // Avoid DWM / DirectComposition paths that have triggered kernel checks.
-    switches.push(['disable-direct-composition']);
+    switches.push(...windowsStabilitySwitches());
   }
   return switches;
 }
@@ -51,19 +56,18 @@ function resolveGpuPolicy(input = {}) {
     return {
       disableHardwareAcceleration: false,
       reason: 'opt-in',
-      switches: [],
+      switches: platform === 'win32' ? windowsStabilitySwitches() : [],
     };
   }
 
   if (platform === 'win32') {
     return {
-      disableHardwareAcceleration: true,
+      disableHardwareAcceleration: false,
       reason: 'windows-default',
-      switches: gpuOffSwitches(platform),
+      switches: windowsStabilitySwitches(),
     };
   }
 
-  // Do not set ozone-platform-hint=auto — that path has crashed NVIDIA Linux stacks.
   return {
     disableHardwareAcceleration: false,
     reason: 'default',
@@ -88,6 +92,7 @@ function applyGpuPolicy(app, policy) {
 module.exports = {
   envEnabled,
   gpuOffSwitches,
+  windowsStabilitySwitches,
   resolveGpuPolicy,
   applyGpuPolicy,
 };
