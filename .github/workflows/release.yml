@@ -52,16 +52,24 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: ${{ matrix.cmd }}
 
-      - uses: actions/upload-artifact@v4
+      - name: Publish to GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: agi-prime-${{ matrix.label }}
-          path: |
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'v1.1.0' }}
+          name: AGI PRIME 1.1.0
+          body: |
+            Desktop installers for Windows, macOS, and Steam Deck.
+
+            - **Windows:** `AGI-PRIME-1.1.0-Windows-Setup-x64.exe` (installer) or `…-Portable-x64.exe`
+            - **macOS:** `AGI-PRIME-1.1.0-macOS-arm64.dmg` (Apple Silicon) or `…-x64.dmg` (Intel). First open: right-click → Open.
+            - **Steam Deck / Linux:** `AGI-PRIME-1.1.0-linux-x86_64.AppImage` — add as a non-Steam game, or run `scripts/steamdeck-launch.sh`
+          files: |
             release/*.exe
             release/*.dmg
             release/*.zip
             release/*.AppImage
             release/*.deb
-            release/*.yml
-            release/*.blockmap
-          if-no-files-found: warn
-          compression-level: 0
+          fail_on_unmatched_files: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

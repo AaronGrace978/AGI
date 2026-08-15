@@ -2,7 +2,10 @@
   "name": "agi-prime",
   "version": "1.1.0",
   "description": "AGI PRIME — The Ultimate AI Consciousness Platform",
-  "author": "Aaron Grace",
+  "author": {
+    "name": "Aaron Grace",
+    "email": "aarongrace978@gmail.com"
+  },
   "homepage": "https://github.com/aarongrace978/agi",
   "license": "UNLICENSED",
   "main": "electron/main.js",

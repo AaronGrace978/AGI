@@ -38,6 +38,7 @@ linux:
   icon: build/icons
   category: Utility
   executableName: agi-prime
+  maintainer: Aaron Grace <aarongrace978@gmail.com>
   synopsis: Modular AI consciousness platform
   description: AGI PRIME is a desktop AI runtime with memory, reasoning, ethics, voice, and action tools.
   desktop:
@@ -70,10 +71,12 @@ mac:
   target:
     - target: dmg
       arch:
-        - universal
+        - x64
+        - arm64
     - target: zip
       arch:
-        - universal
+        - x64
+        - arm64
 
 dmg:
   artifactName: AGI-PRIME-${version}-macOS-${arch}.${ext}
