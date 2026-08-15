@@ -188,7 +188,7 @@ Packaged desktop builds live in `release/` after you run the dist scripts (or do
 | --- | --- | --- |
 | **Windows** | `AGI-PRIME-1.1.0-Windows-Setup-x64.exe` | Installer with Start Menu + desktop shortcut. Portable: `AGI-PRIME-1.1.0-Windows-Portable-x64.exe` |
 | **macOS** | `AGI-PRIME-1.1.0-macOS-universal.dmg` | Universal (Apple Silicon + Intel). First open: right-click the app → **Open** (unsigned build). |
-| **Steam Deck / Linux** | `AGI-PRIME-1.1.0-Linux-x64.AppImage` | Desktop Mode: mark executable and double-click. Game Mode: add as a non-Steam game, or use `scripts/steamdeck-launch.sh`. Also ships a `.deb`. |
+| **Steam Deck / Linux** | `AGI-PRIME-1.1.0-linux-x86_64.AppImage` | Desktop Mode: mark executable and double-click. Game Mode: add as a non-Steam game, or use `scripts/steamdeck-launch.sh`. Also ships a `.deb`. |
 
 Local packaging:
 

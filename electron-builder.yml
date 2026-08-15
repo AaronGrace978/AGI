@@ -5,6 +5,8 @@ asar: true
 compression: maximum
 removePackageScripts: true
 npmRebuild: false
+electronLanguages:
+  - en
 artifactName: AGI-PRIME-${version}-${os}-${arch}.${ext}
 
 directories:
@@ -98,5 +100,3 @@ nsis:
 
 portable:
   artifactName: AGI-PRIME-${version}-Windows-Portable-${arch}.${ext}
-
-publish: never
