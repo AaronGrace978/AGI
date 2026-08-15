@@ -8,9 +8,11 @@ export interface RuntimeInfo {
   isSteamDeck: boolean;
   hostLabel: string;
   compact: boolean;
+  gpuHardwareAcceleration?: boolean;
+  gpuPolicyReason?: string;
 }
 
-const PACKAGE_VERSION = '1.1.0';
+const PACKAGE_VERSION = '1.1.1';
 
 function fallbackRuntime(): RuntimeInfo {
   return {
@@ -38,6 +40,8 @@ export function getRuntimeInfo(): RuntimeInfo {
     isSteamDeck: Boolean(rt.isSteamDeck),
     hostLabel: rt.hostLabel || platform,
     compact: Boolean(rt.compact),
+    gpuHardwareAcceleration: rt.gpuHardwareAcceleration,
+    gpuPolicyReason: rt.gpuPolicyReason,
   };
 }
 

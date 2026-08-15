@@ -47,6 +47,7 @@ export default memo(function Sidebar() {
       <div className="sidebar-top">
         {MODULES.map((mod) => (
           <button
+            type="button"
             key={mod.id}
             className={`sidebar-btn ${mod.className || ''} ${activeModule === mod.id ? 'active' : ''}`}
             onClick={() => setActiveModule(mod.id)}
@@ -62,6 +63,7 @@ export default memo(function Sidebar() {
       <div className="sidebar-bottom">
         <div className="sidebar-divider" />
         <button
+          type="button"
           className={`sidebar-btn creed-btn ${activeModule === 'creed' ? 'active' : ''}`}
           onClick={() => setActiveModule('creed')}
           title="THE CREED — Faith & Soul"
@@ -69,6 +71,7 @@ export default memo(function Sidebar() {
           ✝<span className="sidebar-tooltip">THE CREED</span>
         </button>
         <button
+          type="button"
           className={`sidebar-btn ${activeModule === 'settings' ? 'active' : ''}`}
           onClick={() => setActiveModule('settings')}
           title="Settings"

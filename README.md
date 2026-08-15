@@ -56,7 +56,8 @@ This README explains what the project is, how it is organized, and how to run it
 - **Truth filtering pipeline**: new source-tiering, blocked-domain filtering, heuristic bias detection, and optional LLM verification reduce the chance of low-quality knowledge entering the system.
 - **Mobile app workspace**: `AGIPrime-Mobile` adds an Expo-based companion app with environment-backed provider settings, animated UI primitives, and mobile-safe LLM access patterns.
 - **GitHub Repo Knowledge Ingestor**: new end-to-end pipeline that discovers repos, runs 3-layer quality gates, distills codebase knowledge, deduplicates against vector memory, stores accepted insights, and can optionally commit/push memory updates.
-- **Release packaging**: Windows (NSIS + portable), macOS universal DMG, Linux/Steam Deck AppImage + deb, with a dedicated icon set and GitHub Actions **Release** workflow.
+- **Release packaging**: Windows (NSIS + portable), macOS per-arch DMG, Linux/Steam Deck AppImage + deb, with a dedicated icon set and GitHub Actions **Release** workflow.
+- **Windows kernel-crash hotfix (1.1.1)**: hardware acceleration is off by default on Windows after a `0x139` bugcheck when opening Settings; `system:info` no longer ships soul/consciousness over IPC; Settings gear stays pinned in the sidebar.
 
 ## Core Engine Modules (`src/prime`)
 
@@ -180,15 +181,15 @@ You can then open the Expo project in Expo Go, an emulator, or a simulator.
 
 If you plan to use EAS commands, keep your Expo token in `AGIPrime-Mobile/.expo-token`. The repo includes `AGIPrime-Mobile/.expo-token.example` as a placeholder template only.
 
-## Release 1.1.0 — Windows, macOS, Steam Deck
+## Release 1.1.1 — Windows, macOS, Steam Deck
 
 Packaged desktop builds live in `release/` after you run the dist scripts (or download GitHub Actions artifacts from the **Release** workflow).
 
 | Platform | Artifact | How to run |
 | --- | --- | --- |
-| **Windows** | `AGI-PRIME-1.1.0-Windows-Setup-x64.exe` | Installer with Start Menu + desktop shortcut. Portable: `AGI-PRIME-1.1.0-Windows-Portable-x64.exe` |
-| **macOS** | `AGI-PRIME-1.1.0-macOS-arm64.dmg` (Apple Silicon) or `…-x64.dmg` (Intel) | First open: right-click the app → **Open** (unsigned build). |
-| **Steam Deck / Linux** | `AGI-PRIME-1.1.0-linux-x86_64.AppImage` | Desktop Mode: mark executable and double-click. Game Mode: add as a non-Steam game, or use `scripts/steamdeck-launch.sh`. Also ships a `.deb`. |
+| **Windows** | `AGI-PRIME-1.1.1-Windows-Setup-x64.exe` | Installer with Start Menu + desktop shortcut. Portable: `AGI-PRIME-1.1.1-Windows-Portable-x64.exe`. GPU is off by default. |
+| **macOS** | `AGI-PRIME-1.1.1-macOS-arm64.dmg` (Apple Silicon) or `…-x64.dmg` (Intel) | First open: right-click the app → **Open** (unsigned build). |
+| **Steam Deck / Linux** | `AGI-PRIME-1.1.1-linux-x86_64.AppImage` | Desktop Mode: mark executable and double-click. Game Mode: add as a non-Steam game, or use `scripts/steamdeck-launch.sh`. Also ships a `.deb`. |
 
 Local packaging:
 
@@ -199,7 +200,7 @@ npm run dist:linux       # AppImage + deb
 npm run dist:steamdeck   # AppImage only
 ```
 
-CI: `.github/workflows/release.yml` builds all three OS families on version tags (`v1.1.0`) or **workflow_dispatch**.
+CI: `.github/workflows/release.yml` builds all three OS families on version tags (`v1.1.1`) or **workflow_dispatch**.
 
 Steam Deck notes:
 - Uses compact chrome and performance mode by default (less background LLM chatter on the APU).

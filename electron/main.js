@@ -30,6 +30,7 @@ const os = require('os');
 const crypto = require('crypto');
 const ctx = require('./ctx');
 const { detectSteamDeck, hostLabel } = require('./platform');
+const { resolveGpuPolicy, applyGpuPolicy } = require('./gpu-policy');
 const osBridge = require('./os-bridge');
 const { NeuralCoreBridge, neuralEnhanceAction } = require('./neural-bridge');
 const llm = require('./llm');
@@ -76,29 +77,25 @@ try {
   console.warn('[Cache] Failed to set cache dir:', e?.message || e);
 }
 
-// ─── Safe Mode ─────────────────────────────────────────────────
+// ─── Safe Mode / GPU policy ────────────────────────────────────
 const SAFE_MODE = process.argv.includes('--safe-mode') || process.env.AGI_PRIME_DISABLE_GPU === '1';
 const DAEMON_MODE = process.argv.includes('--daemon') || process.env.AGI_PRIME_DAEMON === '1';
 const DEFAULT_ORCHESTRATOR_PROFILE = process.env.AGI_PRIME_PROFILE || (DAEMON_MODE ? 'autonomous-limited' : 'sovereign-desktop');
 ctx.SAFE_MODE = SAFE_MODE;
 ctx.DAEMON_MODE = DAEMON_MODE;
 
-if (SAFE_MODE) {
-  try {
-    console.warn('[SafeMode] Disabling hardware acceleration');
-    app.disableHardwareAcceleration();
-    app.commandLine.appendSwitch('disable-gpu');
-    app.commandLine.appendSwitch('disable-gpu-compositing');
-    app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
-  } catch (e) {
-    console.warn('[SafeMode] Failed to apply GPU disables:', e?.message || e);
-  }
-} else if (process.platform === 'linux') {
-  try {
-    app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
-  } catch (e) {
-    console.warn('[Linux] Failed to set ozone hint:', e?.message || e);
-  }
+const gpuPolicy = resolveGpuPolicy({
+  platform: process.platform,
+  env: process.env,
+  argv: process.argv,
+});
+ctx.gpuHardwareAcceleration = !gpuPolicy.disableHardwareAcceleration;
+ctx.gpuPolicyReason = gpuPolicy.reason;
+try {
+  applyGpuPolicy(app, gpuPolicy);
+  console.log(`[GPU] policy=${gpuPolicy.reason} hardwareAcceleration=${ctx.gpuHardwareAcceleration}`);
+} catch (e) {
+  console.warn('[GPU] Failed to apply policy:', e?.message || e);
 }
 
 // ─── Crash / Exception Diagnostics ─────────────────────────────

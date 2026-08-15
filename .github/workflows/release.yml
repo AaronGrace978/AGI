@@ -46,6 +46,11 @@ jobs:
 
       - run: npm ci
 
+      - name: Read package version
+        id: ver
+        shell: bash
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
       - name: Build distributable
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -55,14 +60,16 @@ jobs:
       - name: Publish to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'v1.1.0' }}
-          name: AGI PRIME 1.1.0
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', steps.ver.outputs.version) }}
+          name: AGI PRIME ${{ steps.ver.outputs.version }}
           body: |
             Desktop installers for Windows, macOS, and Steam Deck.
 
-            - **Windows:** `AGI-PRIME-1.1.0-Windows-Setup-x64.exe` (installer) or `…-Portable-x64.exe`
-            - **macOS:** `AGI-PRIME-1.1.0-macOS-arm64.dmg` (Apple Silicon) or `…-x64.dmg` (Intel). First open: right-click → Open.
-            - **Steam Deck / Linux:** `AGI-PRIME-1.1.0-linux-x86_64.AppImage` — add as a non-Steam game, or run `scripts/steamdeck-launch.sh`
+            Windows builds disable GPU hardware acceleration by default (kernel crash hotfix). Set `AGI_PRIME_ENABLE_GPU=1` to opt in.
+
+            - **Windows:** `AGI-PRIME-${{ steps.ver.outputs.version }}-Windows-Setup-x64.exe` (installer) or portable `.exe`
+            - **macOS:** `AGI-PRIME-${{ steps.ver.outputs.version }}-macOS-arm64.dmg` (Apple Silicon) or `…-x64.dmg` (Intel). First open: right-click → Open.
+            - **Steam Deck / Linux:** `AGI-PRIME-${{ steps.ver.outputs.version }}-linux-x86_64.AppImage` — add as a non-Steam game, or run `scripts/steamdeck-launch.sh`
           files: |
             release/*.exe
             release/*.dmg

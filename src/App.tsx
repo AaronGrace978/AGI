@@ -117,7 +117,11 @@ const ActivePanel = memo(function ActivePanel() {
       panel = <CreedPanel />;
       break;
     case 'settings':
-      panel = <SettingsPanel />;
+      panel = (
+        <AppErrorBoundary resetKey="settings">
+          <SettingsPanel />
+        </AppErrorBoundary>
+      );
       break;
     default:
       panel = <NexusPanel />;
@@ -130,6 +134,7 @@ export default function App() {
   const initialize = useStore((s) => s.initialize);
   const initialized = useStore((s) => s.initialized);
   const compactMode = useStore((s) => s.settings.compactMode);
+  const activeModule = useStore((s) => s.activeModule);
 
   useEffect(() => {
     initialize();
@@ -149,7 +154,7 @@ export default function App() {
         <AppErrorBoundary>
           <Sidebar />
         </AppErrorBoundary>
-        <AppErrorBoundary>
+        <AppErrorBoundary resetKey={activeModule}>
           <main className="main-content">
             {initialized ? (
               <ActivePanel />

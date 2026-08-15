@@ -144,7 +144,6 @@ select:focus-visible {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  will-change: contents;
   contain: layout style;
 }
 
@@ -313,6 +312,8 @@ select:focus-visible {
   padding: 14px 0;
   z-index: 50;
   flex-shrink: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .sidebar-top {
@@ -321,7 +322,9 @@ select:focus-visible {
   align-items: center;
   gap: 4px;
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   width: 100%;
 }
 
@@ -330,6 +333,8 @@ select:focus-visible {
   flex-direction: column;
   align-items: center;
   gap: 4px;
+  flex-shrink: 0;
+  padding-top: 4px;
 }
 
 .sidebar-btn {

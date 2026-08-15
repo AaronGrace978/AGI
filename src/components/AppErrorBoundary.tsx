@@ -1,14 +1,27 @@
 import React from 'react';
 
+interface AppErrorBoundaryProps {
+  resetKey?: string | number;
+}
+
 interface AppErrorBoundaryState {
   hasError: boolean;
   error: string | null;
 }
 
-export class AppErrorBoundary extends React.Component<React.PropsWithChildren, AppErrorBoundaryState> {
-  constructor(props: React.PropsWithChildren) {
+export class AppErrorBoundary extends React.Component<
+  React.PropsWithChildren<AppErrorBoundaryProps>,
+  AppErrorBoundaryState
+> {
+  constructor(props: React.PropsWithChildren<AppErrorBoundaryProps>) {
     super(props);
     this.state = { hasError: false, error: null };
+  }
+
+  componentDidUpdate(prevProps: Readonly<React.PropsWithChildren<AppErrorBoundaryProps>>): void {
+    if (prevProps.resetKey !== this.props.resetKey && this.state.hasError) {
+      this.setState({ hasError: false, error: null });
+    }
   }
 
   static getDerivedStateFromError(error: Error): AppErrorBoundaryState {

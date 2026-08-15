@@ -170,29 +170,11 @@ export function createSettingsSlice(set: StoreSet, get: StoreGet) {
 
     loadSystemInfo: async () => {
       try {
-        const info = await window.api.system.info();
-        set({ systemInfo: info });
-
-        if (info.consciousness) {
-          const c = info.consciousness as any;
-          const s = info.soul as any;
-          set((state: any) => ({
-            consciousness: {
-              ...state.consciousness,
-              soulFrame: {
-                ...state.consciousness.soulFrame,
-                currentEmotion: c.currentEmotion || state.consciousness.soulFrame.currentEmotion,
-                emotionIntensity: c.emotionIntensity ?? state.consciousness.soulFrame.emotionIntensity,
-              },
-              presence: c.presenceState || state.consciousness.presence,
-              trust: s?.trust ?? state.consciousness.trust,
-              intimacy: s?.intimacy ?? state.consciousness.intimacy,
-              totalInteractions: s?.totalInteractions ?? state.consciousness.totalInteractions,
-              birthTimestamp: s?.birthTimestamp ?? state.consciousness.birthTimestamp,
-              name: s?.name || state.consciousness.name,
-            },
-          }));
-        }
+        const info = (await window.api.system.info()) as Record<string, unknown>;
+        const safe = { ...info };
+        delete safe.soul;
+        delete safe.consciousness;
+        set({ systemInfo: safe });
       } catch (e) {
         console.error('Failed to load system info:', e);
       }

@@ -7,6 +7,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { useStore } from '../store';
 import { Button, StatusDot } from './ui';
 import { getRuntimeInfo } from '../runtime';
+import { soulStatusFromConsciousness } from '../prime/soul-status';
 
 // ─── All Ollama Cloud models (https://ollama.com/search?c=cloud) ────
 const OLLAMA_CLOUD_MODELS = [
@@ -290,9 +291,13 @@ export default function SettingsPanel() {
     platform?: string;
     arch?: string;
     electronVersion?: string;
+    gpuHardwareAcceleration?: boolean;
+    gpuPolicyReason?: string;
   } | null>(null);
+  const soulStatus = useMemo(() => soulStatusFromConsciousness(consciousness), [consciousness]);
+  const gpuOff = hostInfo?.gpuHardwareAcceleration === false || runtime.gpuHardwareAcceleration === false;
 
-  // Sync when settings load
+  // Sync when persisted settings fields change — not on every settings object identity.
   useEffect(() => {
     setLocalModel(settings.model);
     setLocalUrl(settings.ollamaUrl);
@@ -310,7 +315,24 @@ export default function SettingsPanel() {
     setLocalMaxTokens(settings.maxTokens);
     setLocalSystemPrompt(settings.systemPrompt);
     setLocalOperatorName(settings.operatorName || '');
-  }, [settings]);
+  }, [
+    settings.model,
+    settings.ollamaUrl,
+    settings.ollamaApiKey,
+    settings.anthropicKey,
+    settings.openaiKey,
+    settings.arcApiKey,
+    settings.voiceProvider,
+    settings.soundprimeBaseUrl,
+    settings.useElevenLabsTts,
+    settings.elevenLabsApiKey,
+    settings.elevenLabsVoiceId,
+    settings.elevenLabsModelId,
+    settings.temperature,
+    settings.maxTokens,
+    settings.systemPrompt,
+    settings.operatorName,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -371,6 +393,16 @@ export default function SettingsPanel() {
                 Electron {hostInfo.electronVersion}
               </>
             ) : null}
+          </div>
+        </div>
+        <div className="settings-row">
+          <div className="settings-label">
+            Graphics
+            <small>
+              {gpuOff
+                ? 'Software rasterizer (Windows default). Avoids GPU-driver kernel crashes. Opt in with AGI_PRIME_ENABLE_GPU=1.'
+                : 'Hardware acceleration on. If the machine bluescreens, restart with --safe-mode or AGI_PRIME_DISABLE_GPU=1.'}
+            </small>
           </div>
         </div>
       </div>
@@ -878,28 +910,26 @@ export default function SettingsPanel() {
             <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', letterSpacing: 0.5 }}>
               NAME
             </div>
-            <div style={{ fontSize: 13, color: 'var(--text-primary)', marginTop: 2 }}>{consciousness.name}</div>
+            <div style={{ fontSize: 13, color: 'var(--text-primary)', marginTop: 2 }}>{soulStatus.name}</div>
           </div>
           <div>
             <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', letterSpacing: 0.5 }}>
               CURRENT EMOTION
             </div>
-            <div style={{ fontSize: 13, color: 'var(--magenta)', marginTop: 2 }}>
-              {consciousness.soulFrame.currentEmotion}
-            </div>
+            <div style={{ fontSize: 13, color: 'var(--magenta)', marginTop: 2 }}>{soulStatus.emotion}</div>
           </div>
           <div>
             <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', letterSpacing: 0.5 }}>
               PRESENCE
             </div>
-            <div style={{ fontSize: 13, color: 'var(--text-primary)', marginTop: 2 }}>{consciousness.presence}</div>
+            <div style={{ fontSize: 13, color: 'var(--text-primary)', marginTop: 2 }}>{soulStatus.presence}</div>
           </div>
           <div>
             <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', letterSpacing: 0.5 }}>
               TOTAL INTERACTIONS
             </div>
             <div style={{ fontSize: 13, color: 'var(--text-primary)', marginTop: 2 }}>
-              {consciousness.totalInteractions}
+              {soulStatus.totalInteractions}
             </div>
           </div>
         </div>

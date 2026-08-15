@@ -1685,6 +1685,8 @@ declare global {
       isSteamDeck: boolean;
       hostLabel: string;
       compact: boolean;
+      gpuHardwareAcceleration?: boolean;
+      gpuPolicyReason?: string;
     };
     api: {
       chat: {
@@ -1922,8 +1924,10 @@ declare global {
           nodeVersion: string;
           electronVersion: string;
           memory: NodeJS.MemoryUsage;
-          soul: Record<string, unknown>;
-          consciousness: Record<string, unknown>;
+          gpuHardwareAcceleration?: boolean;
+          gpuPolicyReason?: string;
+          soul?: Record<string, unknown>;
+          consciousness?: Record<string, unknown>;
         }>;
         healthSummary: () => Promise<RuntimeHealthSummary>;
       };

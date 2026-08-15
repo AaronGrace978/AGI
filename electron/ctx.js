@@ -25,6 +25,8 @@ module.exports = {
   isAGIPrimeOS: false,
   DAEMON_MODE: false,
   SAFE_MODE: false,
+  gpuHardwareAcceleration: true,
+  gpuPolicyReason: '',
 
   // ─── Paths ───────────────────────────────────────────────────
   dataDir: '',
