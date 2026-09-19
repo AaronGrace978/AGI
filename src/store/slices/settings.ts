@@ -191,14 +191,42 @@ export function createSettingsSlice(set: StoreSet, get: StoreGet) {
       }
 
       initializeInFlight = (async () => {
-        await get().loadSettings();
-        await get().loadConversations();
-        await get().checkOllama();
-        await get().loadSystemInfo();
-        await get().agiScoreLoad();
-        await get().loadRuntimeHealth();
+        try {
+          await get().loadSettings();
+        } catch (error) {
+          logNonFatal('settings.startup', error);
+        }
+        try {
+          await get().loadConversations();
+        } catch (error) {
+          logNonFatal('conversations.startup', error);
+        }
+        try {
+          await get().checkOllama();
+        } catch (error) {
+          logNonFatal('ollama.startup', error);
+        }
+        try {
+          await get().loadSystemInfo();
+        } catch (error) {
+          logNonFatal('system.startup', error);
+        }
+        try {
+          await get().agiScoreLoad();
+        } catch (error) {
+          logNonFatal('agiScore.startup', error);
+        }
+        try {
+          await get().loadRuntimeHealth();
+        } catch (error) {
+          logNonFatal('runtime.health.startup', error);
+        }
 
-        await get().loadOperatorProfile();
+        try {
+          await get().loadOperatorProfile();
+        } catch (error) {
+          logNonFatal('operator.startup', error);
+        }
         if (get().settings?.resumeSynthesisOnStartup) {
           setTimeout(() => get().synthesisStart(15000), 1500);
         }

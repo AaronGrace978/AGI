@@ -146,6 +146,38 @@ select:focus-visible {
   min-height: 0;
 }
 
+.panel-recovery {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 12px;
+  flex: 1;
+  min-height: 200px;
+  padding: 32px 40px;
+  background: #1e293b;
+  color: #e2e8f0;
+}
+.panel-recovery-title {
+  font-family: var(--font-mono, monospace);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  font-size: 13px;
+  color: #f8fafc;
+}
+.panel-recovery-body {
+  font-size: 13px;
+  color: #94a3b8;
+  max-width: 520px;
+  line-height: 1.5;
+}
+.panel-recovery-error {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: #fca5a5;
+  max-width: 640px;
+  word-break: break-word;
+}
 .panel-loader {
   display: flex;
   align-items: center;
@@ -3096,7 +3128,6 @@ select:focus-visible {
   padding: 12px 20px 16px;
   border-top: 1px solid var(--border-subtle);
   background: var(--bg-glass);
-  backdrop-filter: blur(6px);
   flex-shrink: 0;
 }
 
@@ -5675,8 +5706,6 @@ select:focus-visible {
   flex-shrink: 0;
   background:
     linear-gradient(135deg, rgba(10, 25, 47, 0.6), rgba(15, 30, 55, 0.45));
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
   box-shadow:
     0 2px 16px rgba(0, 0, 0, 0.25),
     inset 0 1px 0 rgba(56, 189, 248, 0.06);
@@ -5727,8 +5756,6 @@ select:focus-visible {
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.25s;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
 }
 
 .voice-settings-btn:hover {
@@ -5750,8 +5777,6 @@ select:focus-visible {
   border-radius: 14px;
   background:
     linear-gradient(135deg, rgba(10, 25, 47, 0.5), rgba(15, 30, 55, 0.35));
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
   box-shadow:
     0 4px 24px rgba(0, 0, 0, 0.2),
     inset 0 1px 0 rgba(56, 189, 248, 0.04);
@@ -5960,8 +5985,6 @@ select:focus-visible {
   color: var(--voice-bright);
   text-shadow: 0 0 16px var(--voice-glow);
   background: rgba(2, 10, 22, 0.8);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
   padding: 8px 18px;
   border-radius: 10px;
   border: 1px solid rgba(56, 189, 248, 0.2);
@@ -6078,8 +6101,6 @@ select:focus-visible {
   flex-shrink: 0;
   background:
     linear-gradient(135deg, rgba(10, 25, 47, 0.7), rgba(15, 30, 55, 0.55));
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
   box-shadow:
     0 -4px 24px rgba(0, 0, 0, 0.3),
     inset 0 1px 0 rgba(56, 189, 248, 0.05);
@@ -7017,7 +7038,6 @@ select:focus-visible {
   border: 1px solid rgba(167, 139, 250, 0.16);
   border-radius: 14px;
   padding: 18px 20px;
-  backdrop-filter: blur(12px);
   transition: border-color var(--transition-normal), box-shadow var(--transition-normal);
 }
 

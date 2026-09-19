@@ -107,6 +107,16 @@ process.on('unhandledRejection', (reason) => {
 });
 app.on('child-process-gone', (_event, details) => {
   console.error('[Electron] child-process-gone:', details);
+  const type = String(details?.type || '').toLowerCase();
+  if (type.includes('gpu') && typeof ctx.recoverRenderer === 'function') {
+    ctx.recoverRenderer(`gpu-gone:${type}`);
+  }
+});
+app.on('gpu-process-crashed', (_event, killed) => {
+  console.error('[Electron] gpu-process-crashed:', { killed });
+  if (typeof ctx.recoverRenderer === 'function') {
+    ctx.recoverRenderer('gpu-process-crashed');
+  }
 });
 app.on('render-process-gone', (_event, _webContents, details) => {
   console.error('[Electron] render-process-gone:', details);
@@ -1066,8 +1076,34 @@ function createWindow() {
     },
   });
   ctx.mainWindow.setMenuBarVisibility(false);
+  try {
+    ctx.mainWindow.webContents.setBackgroundThrottling(false);
+  } catch (e) {
+    console.warn('[Window] setBackgroundThrottling skipped:', e?.message || e);
+  }
+
+  let lastRendererRecoverAt = 0;
+  const recoverRenderer = (reason) => {
+    if (!ctx.mainWindow || ctx.mainWindow.isDestroyed()) return;
+    const now = Date.now();
+    if (now - lastRendererRecoverAt < 4000) return;
+    lastRendererRecoverAt = now;
+    console.error('[Window] recovering renderer:', reason);
+    try {
+      ctx.mainWindow.webContents.reloadIgnoringCache();
+    } catch (e) {
+      console.error('[Window] reload failed:', e?.message || e);
+    }
+  };
+
+  ctx.recoverRenderer = recoverRenderer;
+
   ctx.mainWindow.webContents.on('render-process-gone', (_event, details) => {
     console.error('[Window] render-process-gone:', details);
+    const reason = String(details?.reason || '');
+    if (reason === 'crashed' || reason === 'oom' || reason === 'killed' || reason === 'abnormal-exit') {
+      recoverRenderer(reason);
+    }
   });
   ctx.mainWindow.webContents.on('unresponsive', () => {
     console.warn('[Window] renderer unresponsive');

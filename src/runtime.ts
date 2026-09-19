@@ -12,7 +12,7 @@ export interface RuntimeInfo {
   gpuPolicyReason?: string;
 }
 
-const PACKAGE_VERSION = '1.1.2';
+const PACKAGE_VERSION = '1.1.3';
 
 function fallbackRuntime(): RuntimeInfo {
   return {
