@@ -1627,6 +1627,8 @@ export interface Settings {
   /** Performance mode: skip post-response LLM calls (self-eval, action extraction)
    *  and delay title generation. Eliminates API contention for snappier chat. */
   performanceMode?: boolean;
+  /** Compact chrome for small screens. Undefined = auto (on for Steam Deck). */
+  compactMode?: boolean;
 }
 
 export type BrainRoute = 'fast' | 'slow';
@@ -1675,6 +1677,17 @@ export interface OllamaStatus {
 
 declare global {
   interface Window {
+    agiRuntime?: {
+      platform: string;
+      arch: string;
+      version: string;
+      isPackaged: boolean;
+      isSteamDeck: boolean;
+      hostLabel: string;
+      compact: boolean;
+      gpuHardwareAcceleration?: boolean;
+      gpuPolicyReason?: string;
+    };
     api: {
       chat: {
         send: (messages: Array<{ role: string; content: string }>, config?: Record<string, unknown>) => void;
@@ -1904,11 +1917,17 @@ declare global {
           uptime: number;
           platform: string;
           arch: string;
+          version?: string;
+          isPackaged?: boolean;
+          isSteamDeck?: boolean;
+          hostLabel?: string;
           nodeVersion: string;
           electronVersion: string;
           memory: NodeJS.MemoryUsage;
-          soul: Record<string, unknown>;
-          consciousness: Record<string, unknown>;
+          gpuHardwareAcceleration?: boolean;
+          gpuPolicyReason?: string;
+          soul?: Record<string, unknown>;
+          consciousness?: Record<string, unknown>;
         }>;
         healthSummary: () => Promise<RuntimeHealthSummary>;
       };

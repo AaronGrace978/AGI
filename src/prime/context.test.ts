@@ -79,4 +79,13 @@ describe('context pack', () => {
     expect(out[0].role).toBe('system');
     expect(out[0].content).toContain('extra');
   });
+
+  it('buildSystemAddendum includes host platform when provided', () => {
+    const add = buildSystemAddendum({
+      platformContext: { label: 'Steam Deck', platform: 'linux', compact: true },
+    });
+    expect(add).toContain('=== HOST ===');
+    expect(add).toContain('Steam Deck');
+    expect(add).toMatch(/compact|concise/i);
+  });
 });

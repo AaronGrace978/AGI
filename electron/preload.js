@@ -1,4 +1,24 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, app } = require('electron');
+const { detectSteamDeck, hostLabel } = require('./platform');
+const { resolveGpuPolicy } = require('./gpu-policy');
+
+const gpuPolicy = resolveGpuPolicy({
+  platform: process.platform,
+  env: process.env,
+  argv: process.argv,
+});
+
+contextBridge.exposeInMainWorld('agiRuntime', {
+  platform: process.platform,
+  arch: process.arch,
+  version: app.getVersion(),
+  isPackaged: app.isPackaged,
+  isSteamDeck: detectSteamDeck(),
+  hostLabel: hostLabel(),
+  compact: detectSteamDeck(),
+  gpuHardwareAcceleration: !gpuPolicy.disableHardwareAcceleration,
+  gpuPolicyReason: gpuPolicy.reason,
+});
 
 contextBridge.exposeInMainWorld('api', {
   // ─── Chat ──────────────────────────────────────────────

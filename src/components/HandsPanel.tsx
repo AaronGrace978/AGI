@@ -244,14 +244,6 @@ export default memo(function HandsPanel() {
   useEffect(() => {
     void syncRuntimeControls();
   }, [syncRuntimeControls]);
-  useEffect(() => {
-    if (!showSettings || desktopIntelLoading || desktopIntel) return;
-    void loadDesktopIntel();
-  }, [showSettings, desktopIntelLoading, desktopIntel]);
-  useEffect(() => {
-    if (!showSettings || handsDoctorLoading || handsDoctorMetrics) return;
-    void refreshHandsDoctor();
-  }, [showSettings, handsDoctorLoading, handsDoctorMetrics]);
 
   const handleSubmit = useCallback(() => {
     const trimmed = input.trim();

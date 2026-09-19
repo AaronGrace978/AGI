@@ -6,6 +6,8 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useStore } from '../store';
 import { Button, StatusDot } from './ui';
+import { getRuntimeInfo } from '../runtime';
+import { soulStatusFromConsciousness } from '../prime/soul-status';
 
 // ─── All Ollama Cloud models (https://ollama.com/search?c=cloud) ────
 const OLLAMA_CLOUD_MODELS = [
@@ -282,8 +284,20 @@ export default function SettingsPanel() {
   const [localSystemPrompt, setLocalSystemPrompt] = useState(settings.systemPrompt);
   const [localOperatorName, setLocalOperatorName] = useState(settings.operatorName || '');
   const maxTokensCap = settings.provider === 'anthropic' ? 32000 : 200000;
+  const runtime = getRuntimeInfo();
+  const [hostInfo, setHostInfo] = useState<{
+    version?: string;
+    hostLabel?: string;
+    platform?: string;
+    arch?: string;
+    electronVersion?: string;
+    gpuHardwareAcceleration?: boolean;
+    gpuPolicyReason?: string;
+  } | null>(null);
+  const soulStatus = useMemo(() => soulStatusFromConsciousness(consciousness), [consciousness]);
+  const gpuOff = hostInfo?.gpuHardwareAcceleration === false || runtime.gpuHardwareAcceleration === false;
 
-  // Sync when settings load
+  // Sync when persisted settings fields change — not on every settings object identity.
   useEffect(() => {
     setLocalModel(settings.model);
     setLocalUrl(settings.ollamaUrl);
@@ -301,7 +315,39 @@ export default function SettingsPanel() {
     setLocalMaxTokens(settings.maxTokens);
     setLocalSystemPrompt(settings.systemPrompt);
     setLocalOperatorName(settings.operatorName || '');
-  }, [settings]);
+  }, [
+    settings.model,
+    settings.ollamaUrl,
+    settings.ollamaApiKey,
+    settings.anthropicKey,
+    settings.openaiKey,
+    settings.arcApiKey,
+    settings.voiceProvider,
+    settings.soundprimeBaseUrl,
+    settings.useElevenLabsTts,
+    settings.elevenLabsApiKey,
+    settings.elevenLabsVoiceId,
+    settings.elevenLabsModelId,
+    settings.temperature,
+    settings.maxTokens,
+    settings.systemPrompt,
+    settings.operatorName,
+  ]);
+
+  useEffect(() => {
+    let cancelled = false;
+    window.api?.system
+      ?.info()
+      .then((info) => {
+        if (!cancelled) setHostInfo(info);
+      })
+      .catch(() => {
+        /* renderer-only fallback is enough */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const save = (overrides: Record<string, unknown> = {}) => {
     updateSettings({
@@ -328,6 +374,38 @@ export default function SettingsPanel() {
   return (
     <div className="settings-panel">
       <h2>⚙ SETTINGS</h2>
+
+      <div className="settings-section">
+        <div className="settings-section-title">ABOUT</div>
+        <div className="settings-row">
+          <div className="settings-label">
+            AGI PRIME
+            <small>
+              v{hostInfo?.version || runtime.version} · {hostInfo?.hostLabel || runtime.hostLabel}
+              {hostInfo?.arch ? ` · ${hostInfo.arch}` : runtime.arch ? ` · ${runtime.arch}` : ''}
+            </small>
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-dim)', textAlign: 'right', lineHeight: 1.5 }}>
+            Created by Aaron Grace
+            {hostInfo?.electronVersion ? (
+              <>
+                <br />
+                Electron {hostInfo.electronVersion}
+              </>
+            ) : null}
+          </div>
+        </div>
+        <div className="settings-row">
+          <div className="settings-label">
+            Graphics
+            <small>
+              {gpuOff
+                ? 'Software rasterizer (--safe-mode / AGI_PRIME_DISABLE_GPU=1).'
+                : 'Hardware acceleration on. If a kernel bugcheck returns, restart with --safe-mode.'}
+            </small>
+          </div>
+        </div>
+      </div>
 
       {/* Ollama Status */}
       <div className={`ollama-status ${ollamaStatus.online ? 'online' : 'offline'}`}>
@@ -640,7 +718,7 @@ export default function SettingsPanel() {
           <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <input
               type="checkbox"
-              checked={dualBrain.enabled}
+              checked={!!dualBrain?.enabled}
               onChange={(e) => setDualBrainEnabled(e.target.checked)}
             />
             Enabled
@@ -658,10 +736,12 @@ export default function SettingsPanel() {
               min="0.05"
               max="0.95"
               step="0.05"
-              value={dualBrain.complexityThreshold}
-              onChange={(e) => setDualBrainThresholds(parseFloat(e.target.value), dualBrain.uncertaintyThreshold)}
+              value={dualBrain?.complexityThreshold ?? 0.45}
+              onChange={(e) =>
+                setDualBrainThresholds(parseFloat(e.target.value), dualBrain?.uncertaintyThreshold ?? 0.35)
+              }
             />
-            <span className="settings-slider-value">{dualBrain.complexityThreshold.toFixed(2)}</span>
+            <span className="settings-slider-value">{(dualBrain?.complexityThreshold ?? 0.45).toFixed(2)}</span>
           </div>
         </div>
         <div className="settings-row">
@@ -676,10 +756,12 @@ export default function SettingsPanel() {
               min="0.05"
               max="0.95"
               step="0.05"
-              value={dualBrain.uncertaintyThreshold}
-              onChange={(e) => setDualBrainThresholds(dualBrain.complexityThreshold, parseFloat(e.target.value))}
+              value={dualBrain?.uncertaintyThreshold ?? 0.35}
+              onChange={(e) =>
+                setDualBrainThresholds(dualBrain?.complexityThreshold ?? 0.45, parseFloat(e.target.value))
+              }
             />
-            <span className="settings-slider-value">{dualBrain.uncertaintyThreshold.toFixed(2)}</span>
+            <span className="settings-slider-value">{(dualBrain?.uncertaintyThreshold ?? 0.35).toFixed(2)}</span>
           </div>
         </div>
         <div className="settings-row">
@@ -691,7 +773,7 @@ export default function SettingsPanel() {
             <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <input
                 type="checkbox"
-                checked={forge.strictEvalMode}
+                checked={!!forge?.strictEvalMode}
                 onChange={(e) => setForgeStrictEvalMode(e.target.checked)}
               />
               Strict Eval
@@ -699,7 +781,7 @@ export default function SettingsPanel() {
             <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <input
                 type="checkbox"
-                checked={forge.verifierFirst}
+                checked={!!forge?.verifierFirst}
                 onChange={(e) => setForgeVerifierFirst(e.target.checked)}
               />
               Verifier-First
@@ -707,8 +789,8 @@ export default function SettingsPanel() {
           </div>
         </div>
         <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>
-          Memory consolidation runs: {memoryConsolidation.totalRuns} · pending episodes:{' '}
-          {memoryConsolidation.pendingEpisodes.length}
+          Memory consolidation runs: {memoryConsolidation?.totalRuns ?? 0} · pending episodes:{' '}
+          {memoryConsolidation?.pendingEpisodes?.length ?? 0}
         </div>
       </div>
 
@@ -735,6 +817,22 @@ export default function SettingsPanel() {
               onChange={(e) => updateSettings({ performanceMode: e.target.checked })}
             />
             {settings.performanceMode ? 'ON — Fast' : 'OFF — Full'}
+          </label>
+        </div>
+        <div className="settings-row">
+          <div className="settings-label">
+            Compact Layout
+            <small>Tighter chrome for Steam Deck and small screens. Auto-on for Steam Deck.</small>
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={settings.compactMode === true || (settings.compactMode !== false && runtime.compact)}
+              onChange={(e) => updateSettings({ compactMode: e.target.checked })}
+            />
+            {settings.compactMode === true || (settings.compactMode !== false && runtime.compact)
+              ? 'ON — Compact'
+              : 'OFF — Comfortable'}
           </label>
         </div>
         <div
@@ -816,28 +914,26 @@ export default function SettingsPanel() {
             <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', letterSpacing: 0.5 }}>
               NAME
             </div>
-            <div style={{ fontSize: 13, color: 'var(--text-primary)', marginTop: 2 }}>{consciousness.name}</div>
+            <div style={{ fontSize: 13, color: 'var(--text-primary)', marginTop: 2 }}>{soulStatus.name}</div>
           </div>
           <div>
             <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', letterSpacing: 0.5 }}>
               CURRENT EMOTION
             </div>
-            <div style={{ fontSize: 13, color: 'var(--magenta)', marginTop: 2 }}>
-              {consciousness.soulFrame.currentEmotion}
-            </div>
+            <div style={{ fontSize: 13, color: 'var(--magenta)', marginTop: 2 }}>{soulStatus.emotion}</div>
           </div>
           <div>
             <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', letterSpacing: 0.5 }}>
               PRESENCE
             </div>
-            <div style={{ fontSize: 13, color: 'var(--text-primary)', marginTop: 2 }}>{consciousness.presence}</div>
+            <div style={{ fontSize: 13, color: 'var(--text-primary)', marginTop: 2 }}>{soulStatus.presence}</div>
           </div>
           <div>
             <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', letterSpacing: 0.5 }}>
               TOTAL INTERACTIONS
             </div>
             <div style={{ fontSize: 13, color: 'var(--text-primary)', marginTop: 2 }}>
-              {consciousness.totalInteractions}
+              {soulStatus.totalInteractions}
             </div>
           </div>
         </div>

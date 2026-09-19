@@ -4,6 +4,8 @@
 const { ipcMain, shell, app } = require('electron');
 const { exec } = require('child_process');
 const ctx = require('../ctx');
+const { detectSteamDeck, hostLabel } = require('../platform');
+const { buildSystemInfo } = require('../system-info');
 
 const UPDATE_MANIFEST_URL = process.env.AGIPRIME_UPDATE_MANIFEST_URL || '';
 
@@ -111,11 +113,14 @@ function emitOpsSnapshot() {
 
 function register() {
   ipcMain.handle('system:info', () => {
-    const uptime = process.uptime();
-    return {
-      uptime,
+    return buildSystemInfo({
+      uptime: process.uptime(),
       platform: process.platform,
       arch: process.arch,
+      version: app.getVersion(),
+      isPackaged: app.isPackaged,
+      isSteamDeck: detectSteamDeck(),
+      hostLabel: hostLabel(),
       nodeVersion: process.version,
       electronVersion: process.versions.electron,
       memory: process.memoryUsage(),
@@ -126,11 +131,10 @@ function register() {
         vectorFile: ctx.vectorFile,
         settingsFile: ctx.settingsFile,
         sparkFile: ctx.sparkFile,
-        legacyUserData: null,
       },
-      soul: ctx.memory.soul,
-      consciousness: ctx.memory.consciousness,
-    };
+      gpuHardwareAcceleration: ctx.gpuHardwareAcceleration !== false,
+      gpuPolicyReason: ctx.gpuPolicyReason || '',
+    });
   });
 
   ipcMain.handle('system:healthSummary', () => {

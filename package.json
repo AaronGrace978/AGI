@@ -1,16 +1,24 @@
 {
   "name": "agi-prime",
-  "version": "1.0.0",
+  "version": "1.1.2",
   "description": "AGI PRIME — The Ultimate AI Consciousness Platform",
+  "author": {
+    "name": "Aaron Grace",
+    "email": "aarongrace978@gmail.com"
+  },
+  "homepage": "https://github.com/aarongrace978/agi",
+  "license": "UNLICENSED",
   "main": "electron/main.js",
   "scripts": {
     "dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && electron .\"",
     "build": "vite build",
     "start": "electron .",
     "start:daemon": "electron . --daemon",
-    "dist": "vite build && electron-builder",
-    "dist:win": "vite build && electron-builder --win",
-    "dist:linux": "vite build && electron-builder --linux",
+    "dist": "vite build && electron-builder --publish never",
+    "dist:win": "vite build && electron-builder --win --x64 --publish never",
+    "dist:mac": "vite build && electron-builder --mac --publish never",
+    "dist:linux": "vite build && electron-builder --linux --x64 --publish never",
+    "dist:steamdeck": "vite build && electron-builder --linux AppImage --x64 --publish never",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -62,49 +70,5 @@
     "vite": "^6.0.3",
     "vitest": "^4.0.18",
     "wait-on": "^8.0.1"
-  },
-  "build": {
-    "appId": "com.agiprime.app",
-    "productName": "AGI PRIME",
-    "icon": "src/assets/app-icon.ico",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "dist/**/*",
-      "electron/**/*"
-    ],
-    "extraResources": [
-      {
-        "from": "scripts/neuralcore",
-        "to": "scripts/neuralcore",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "electron/input-helper.ps1",
-        "to": "electron/input-helper.ps1"
-      },
-      {
-        "from": "Memory/latest.json",
-        "to": "memory-seed/latest.json"
-      }
-    ],
-    "win": {
-      "target": "nsis",
-      "icon": "src/assets/app-icon.ico"
-    },
-    "nsis": {
-      "installerIcon": "src/assets/app-icon.ico",
-      "uninstallerIcon": "src/assets/app-icon.ico"
-    },
-    "linux": {
-      "target": [
-        "AppImage",
-        "deb"
-      ],
-      "category": "Utility"
-    }
   }
 }
