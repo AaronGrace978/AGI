@@ -33,6 +33,7 @@ export function createChatSlice(set: StoreSet, get: StoreGet) {
   return {
     // ─── Navigation ────────────────────────────────────────
     activeModule: 'nexus',
+    // Navigation only — never start Forge/Gauntlet/Hands from a sidebar click.
     setActiveModule: (m: string) => set({ activeModule: m }),
 
     moduleStates: {

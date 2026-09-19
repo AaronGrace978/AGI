@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../store';
 import { Button, Card } from './ui';
 
@@ -9,9 +10,59 @@ function msToDuration(ms: number): string {
   return `${mins}m ${rem}s`;
 }
 
-export default function ForgePanel() {
-  const forge = useStore((s) => s.forge);
-  const gauntlet = useStore((s) => s.gauntlet);
+function pct(value: number | undefined | null): string {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '0.0%';
+  return `${(n * 100).toFixed(1)}%`;
+}
+
+export default memo(function ForgePanel() {
+  const {
+    phase,
+    startedAt,
+    finishedAt,
+    config,
+    strictEvalMode,
+    verifierFirst,
+    bestCandidate,
+    baselineSuiteLength,
+    currentGeneration,
+    generationsLength,
+    verifierChecksLength,
+    verifierPassCount,
+    logs,
+    stopReason,
+    gauntletPassRate,
+    gauntletLastResultCount,
+    hasGauntletHistory,
+  } = useStore(
+    useShallow((s) => {
+      const forge = s.forge;
+      const gauntlet = s.gauntlet;
+      const checks = forge?.verifierChecks ?? [];
+      const history = gauntlet?.history ?? [];
+      const lastResults = history[0]?.results;
+      return {
+        phase: forge?.phase ?? 'idle',
+        startedAt: forge?.startedAt ?? null,
+        finishedAt: forge?.finishedAt ?? null,
+        config: forge?.config,
+        strictEvalMode: !!forge?.strictEvalMode,
+        verifierFirst: !!forge?.verifierFirst,
+        bestCandidate: forge?.bestCandidate ?? null,
+        baselineSuiteLength: forge?.baselineSuite?.length ?? 0,
+        currentGeneration: forge?.currentGeneration ?? 0,
+        generationsLength: forge?.generations?.length ?? 0,
+        verifierChecksLength: checks.length,
+        verifierPassCount: checks.reduce((n, c) => n + (c.passed ? 1 : 0), 0),
+        logs: forge?.logs ?? [],
+        stopReason: forge?.stopReason ?? null,
+        gauntletPassRate: gauntlet?.passRate ?? 0,
+        gauntletLastResultCount: Array.isArray(lastResults) ? lastResults.length : 0,
+        hasGauntletHistory: history.length > 0,
+      };
+    }),
+  );
   const setActiveModule = useStore((s) => s.setActiveModule);
   const startForge = useStore((s) => s.startForge);
   const cancelForge = useStore((s) => s.cancelForge);
@@ -19,44 +70,53 @@ export default function ForgePanel() {
   const setStrictEval = useStore((s) => s.setForgeStrictEvalMode);
   const setVerifierFirst = useStore((s) => s.setForgeVerifierFirst);
 
-  const [maxGenerations, setMaxGenerations] = useState<number>(forge.config.maxGenerations);
-  const [candidatesPerGeneration, setCandidatesPerGeneration] = useState<number>(forge.config.candidatesPerGeneration);
-  const [mutationRate, setMutationRate] = useState<number>(forge.config.mutationRate);
-  const [maxDurationSeconds, setMaxDurationSeconds] = useState<number>(Math.round(forge.config.maxDurationMs / 1000));
+  const [maxGenerations, setMaxGenerations] = useState<number>(config?.maxGenerations ?? 8);
+  const [candidatesPerGeneration, setCandidatesPerGeneration] = useState<number>(config?.candidatesPerGeneration ?? 5);
+  const [mutationRate, setMutationRate] = useState<number>(config?.mutationRate ?? 0.24);
+  const [maxDurationSeconds, setMaxDurationSeconds] = useState<number>(
+    Math.round((config?.maxDurationMs ?? 300000) / 1000),
+  );
 
-  const running = forge.phase === 'running';
+  const running = phase === 'running';
   const elapsed = useMemo(() => {
-    if (!forge.startedAt) return '0m 0s';
-    const end = forge.finishedAt ?? Date.now();
-    return msToDuration(end - forge.startedAt);
-  }, [forge.startedAt, forge.finishedAt, forge.phase, forge.generations.length]);
+    if (!startedAt) return '0m 0s';
+    const end = finishedAt ?? Date.now();
+    return msToDuration(end - startedAt);
+  }, [startedAt, finishedAt]);
 
-  const handleRun = () => {
+  const visibleLogs = logs.length > 80 ? logs.slice(-80) : logs;
+  const verifierPass = verifierChecksLength > 0 ? pct(verifierPassCount / verifierChecksLength) : 'n/a';
+
+  const handleRun = useCallback(() => {
     if (running) return;
-    startForge({
-      maxGenerations: Math.max(1, Math.floor(maxGenerations)),
-      candidatesPerGeneration: Math.max(2, Math.floor(candidatesPerGeneration)),
-      mutationRate: Math.min(0.75, Math.max(0.05, mutationRate)),
-      maxDurationMs: Math.max(3000, Math.floor(maxDurationSeconds * 1000)),
-    });
-  };
+    // Defer so the click frame paints; never run the pipeline synchronously
+    // inside the sidebar/module click handler.
+    window.setTimeout(() => {
+      void startForge({
+        maxGenerations: Math.max(1, Math.floor(maxGenerations)),
+        candidatesPerGeneration: Math.max(2, Math.floor(candidatesPerGeneration)),
+        mutationRate: Math.min(0.75, Math.max(0.05, mutationRate)),
+        maxDurationMs: Math.max(3000, Math.floor(maxDurationSeconds * 1000)),
+      });
+    }, 0);
+  }, [running, startForge, maxGenerations, candidatesPerGeneration, mutationRate, maxDurationSeconds]);
 
   return (
     <div className="forge-panel">
       <div className="forge-header">
         <div>
-          <h2>⚒ FORGE MODULE</h2>
+          <h2>FORGE MODULE</h2>
           <p>Bounded autonomy pipeline with evaluation and mutation sandbox</p>
         </div>
-        <div className={`forge-status ${forge.phase}`}>{forge.phase.toUpperCase()}</div>
+        <div className={`forge-status ${phase}`}>{String(phase).toUpperCase()}</div>
       </div>
 
       <div className="forge-grid">
         <Card title="Run Configuration" glow="cyan" className="forge-card">
           <p className="forge-stop">
-            Latest gauntlet pass rate: {(gauntlet.passRate * 100).toFixed(1)}%
-            {gauntlet.history.length > 0
-              ? ` across ${gauntlet.history[0].results.length} capabilities.`
+            Latest gauntlet pass rate: {pct(gauntletPassRate)}
+            {hasGauntletHistory
+              ? ` across ${gauntletLastResultCount} capabilities.`
               : ' (run GAUNTLET first for adaptive benchmarks).'}
           </p>
           <label>
@@ -107,7 +167,7 @@ export default function ForgePanel() {
           <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <input
               type="checkbox"
-              checked={forge.strictEvalMode}
+              checked={strictEvalMode}
               onChange={(e) => setStrictEval(e.target.checked)}
               disabled={running}
             />
@@ -116,7 +176,7 @@ export default function ForgePanel() {
           <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <input
               type="checkbox"
-              checked={forge.verifierFirst}
+              checked={verifierFirst}
               onChange={(e) => setVerifierFirst(e.target.checked)}
               disabled={running}
             />
@@ -139,31 +199,31 @@ export default function ForgePanel() {
         </Card>
 
         <Card title="Best Candidate" glow="green" className="forge-card">
-          {forge.bestCandidate ? (
+          {bestCandidate ? (
             <div className="forge-metrics">
               <div>
                 <span>Candidate</span>
-                <strong>{forge.bestCandidate.id}</strong>
+                <strong>{bestCandidate.id}</strong>
               </div>
               <div>
                 <span>Score</span>
-                <strong>{(forge.bestCandidate.score * 100).toFixed(1)}%</strong>
+                <strong>{pct(bestCandidate.score)}</strong>
               </div>
               <div>
                 <span>Pass rate</span>
-                <strong>{(forge.bestCandidate.passRate * 100).toFixed(1)}%</strong>
+                <strong>{pct(bestCandidate.passRate)}</strong>
               </div>
               <div>
                 <span>Benchmark score</span>
-                <strong>{(forge.bestCandidate.benchmarkScore * 100).toFixed(1)}%</strong>
+                <strong>{pct(bestCandidate.benchmarkScore)}</strong>
               </div>
               <div>
                 <span>Temperature</span>
-                <strong>{forge.bestCandidate.temperature.toFixed(2)}</strong>
+                <strong>{Number(bestCandidate.temperature || 0).toFixed(2)}</strong>
               </div>
               <div>
                 <span>Tool budget</span>
-                <strong>{forge.bestCandidate.toolBudget}</strong>
+                <strong>{bestCandidate.toolBudget}</strong>
               </div>
             </div>
           ) : (
@@ -175,15 +235,15 @@ export default function ForgePanel() {
           <div className="forge-metrics">
             <div>
               <span>Suite tests</span>
-              <strong>{forge.baselineSuite.length}</strong>
+              <strong>{baselineSuiteLength}</strong>
             </div>
             <div>
               <span>Generation</span>
-              <strong>{forge.currentGeneration}</strong>
+              <strong>{currentGeneration}</strong>
             </div>
             <div>
               <span>History entries</span>
-              <strong>{forge.generations.length}</strong>
+              <strong>{generationsLength}</strong>
             </div>
             <div>
               <span>Elapsed</span>
@@ -191,26 +251,19 @@ export default function ForgePanel() {
             </div>
             <div>
               <span>Verifier checks</span>
-              <strong>{forge.verifierChecks.length}</strong>
+              <strong>{verifierChecksLength}</strong>
             </div>
             <div>
               <span>Verifier pass</span>
-              <strong>
-                {forge.verifierChecks.length > 0
-                  ? `${(
-                      (forge.verifierChecks.filter((c) => c.passed).length / forge.verifierChecks.length) *
-                      100
-                    ).toFixed(1)}%`
-                  : 'n/a'}
-              </strong>
+              <strong>{verifierPass}</strong>
             </div>
           </div>
-          <p className="forge-stop">{forge.stopReason ?? 'Bounded loop active. No stop event yet.'}</p>
+          <p className="forge-stop">{stopReason ?? 'Bounded loop active. No stop event yet.'}</p>
         </Card>
 
         <Card title="Pipeline Log" className="forge-card forge-log-card">
           <div className="forge-log">
-            {forge.logs.map((entry, index) => (
+            {visibleLogs.map((entry, index) => (
               <div key={`${index}-${entry}`} className="forge-log-line">
                 {entry}
               </div>
@@ -220,4 +273,4 @@ export default function ForgePanel() {
       </div>
     </div>
   );
-}
+});

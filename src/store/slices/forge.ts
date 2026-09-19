@@ -158,6 +158,18 @@ export function buildForgeAdaptiveSuite(
 
 // ─── FORGE Slice ────────────────────────────────────────────────
 
+export function yieldToRenderer(ms: number = 0): Promise<void> {
+  return new Promise((resolve) => {
+    const schedule = typeof window !== 'undefined' ? window.setTimeout : setTimeout;
+    schedule(() => resolve(), ms);
+  });
+}
+
+function capLogs(logs: string[], extra: string | string[] = []): string[] {
+  const more = Array.isArray(extra) ? extra : [extra];
+  return [...logs, ...more].slice(-200);
+}
+
 export function createForgeSlice(set: StoreSet, get: StoreGet) {
   return {
     // ─── FORGE — Self-Improvement (Real LLM Evaluation) ────
@@ -174,12 +186,8 @@ export function createForgeSlice(set: StoreSet, get: StoreGet) {
       };
       const seed = Date.now();
       const startTime = Date.now();
-      const ledgerBenchmarks = await deriveForgeBenchmarksFromLedgers(3);
-      const baseSuite = [...ledgerBenchmarks, ...current.baselineSuite];
-      const adaptive = buildForgeAdaptiveSuite(baseSuite, get().gauntlet, get().agiScore);
       const strictEvalMode = current.strictEvalMode;
       const verifierFirst = current.verifierFirst;
-
       const hasLLM = !!window.api?.llm?.generate;
       const evalMode = hasLLM ? 'REAL LLM EVALUATION' : 'KEYWORD FALLBACK';
 
@@ -191,10 +199,46 @@ export function createForgeSlice(set: StoreSet, get: StoreGet) {
           finishedAt: null,
           seed,
           config,
-          baselineSuite: adaptive.suite,
           generations: [],
-          logs: [
-            `FORGE run started (${runToken}).`,
+          logs: [`FORGE run started (${runToken}). Preparing suite…`],
+          currentGeneration: 0,
+          stopReason: null,
+          verifierChecks: [],
+        },
+        moduleStates: { ...state.moduleStates, forge: 'processing' },
+      }));
+      await yieldToRenderer(0);
+
+      let adaptive: { suite: ForgeBenchmark[]; adaptiveCount: number };
+      let ledgerBenchmarks: ForgeBenchmark[] = [];
+      try {
+        ledgerBenchmarks = await deriveForgeBenchmarksFromLedgers(3);
+        const live = get().forge;
+        if (live.phase !== 'running') return;
+        const baseSuite = [
+          ...ledgerBenchmarks,
+          ...(live.baselineSuite?.length ? live.baselineSuite : current.baselineSuite),
+        ];
+        adaptive = buildForgeAdaptiveSuite(baseSuite, get().gauntlet, get().agiScore);
+      } catch (error) {
+        set((state: any) => ({
+          forge: {
+            ...state.forge,
+            phase: 'failed',
+            finishedAt: Date.now(),
+            stopReason: 'Failed while preparing the evaluation suite.',
+            logs: capLogs(state.forge.logs, `Suite error: ${(error as Error)?.message || error}`),
+          },
+          moduleStates: { ...state.moduleStates, forge: 'online' },
+        }));
+        return;
+      }
+
+      set((state: any) => ({
+        forge: {
+          ...state.forge,
+          baselineSuite: adaptive.suite,
+          logs: capLogs(state.forge.logs, [
             `Mode: ${evalMode}`,
             `Strict eval: ${strictEvalMode ? 'ON' : 'off'} | Verifier-first: ${verifierFirst ? 'ON' : 'off'}`,
             `Boundaries: ${config.maxGenerations} generations, ${config.candidatesPerGeneration} candidates/gen, ${Math.round(config.maxDurationMs / 1000)}s max.`,
@@ -204,13 +248,10 @@ export function createForgeSlice(set: StoreSet, get: StoreGet) {
             adaptive.adaptiveCount > 0
               ? `Adaptive suite: +${adaptive.adaptiveCount} gauntlet-derived benchmark(s).`
               : 'Adaptive suite: no gauntlet deficits injected.',
-          ],
-          currentGeneration: 0,
-          stopReason: null,
-          verifierChecks: [],
+          ]),
         },
-        moduleStates: { ...state.moduleStates, forge: 'processing' },
       }));
+      await yieldToRenderer(0);
 
       const generate: GenerateFn | undefined = hasLLM
         ? async (messages, cfg) => {
@@ -225,59 +266,8 @@ export function createForgeSlice(set: StoreSet, get: StoreGet) {
           }
         : undefined;
 
-      let best = await evaluateSeed(createSeedCandidate(seed), adaptive.suite, seed, generate, {
-        strictEvalMode,
-        verifierFirst,
-        onVerifierCheck: (check) => {
-          set((state: any) => ({
-            forge: {
-              ...state.forge,
-              verifierChecks: [...state.forge.verifierChecks.slice(-199), check],
-            },
-          }));
-        },
-      });
-      set((state: any) => ({
-        forge: {
-          ...state.forge,
-          bestCandidate: best,
-          logs: [...state.forge.logs, `Seed candidate scored ${(best.score * 100).toFixed(1)}%.`],
-        },
-      }));
-
-      for (let generation = 1; generation <= config.maxGenerations; generation += 1) {
-        const live = get().forge;
-        if (live.phase !== 'running') break;
-
-        const elapsedMs = Date.now() - startTime;
-        if (elapsedMs >= config.maxDurationMs) {
-          set((state: any) => ({
-            forge: {
-              ...state.forge,
-              phase: 'completed',
-              finishedAt: Date.now(),
-              stopReason: `Time budget reached (${Math.round(config.maxDurationMs / 1000)}s).`,
-              logs: [...state.forge.logs, 'Stopped: time budget reached.'],
-            },
-            moduleStates: { ...state.moduleStates, forge: 'online' },
-          }));
-          return;
-        }
-
-        set((state: any) => ({
-          forge: {
-            ...state.forge,
-            logs: [...state.forge.logs, `G${generation}: Evaluating candidates${hasLLM ? ' via LLM' : ''}...`],
-          },
-        }));
-
-        const { candidates, report } = await evaluateGeneration({
-          parent: best,
-          generation,
-          config,
-          suite: live.baselineSuite,
-          seed,
-          generate,
+      try {
+        let best = await evaluateSeed(createSeedCandidate(seed), adaptive.suite, seed, generate, {
           strictEvalMode,
           verifierFirst,
           onVerifierCheck: (check) => {
@@ -288,43 +278,110 @@ export function createForgeSlice(set: StoreSet, get: StoreGet) {
               },
             }));
           },
-          shouldStop: () => get().forge.phase !== 'running',
         });
-        const leader = candidates[0];
-        if (leader && leader.score > best.score) {
-          best = leader;
-        }
-
+        if (get().forge.phase !== 'running') return;
         set((state: any) => ({
           forge: {
             ...state.forge,
             bestCandidate: best,
-            currentGeneration: generation,
-            generations: [...state.forge.generations, report],
-            logs: [
-              ...state.forge.logs,
-              `G${generation}: best ${(report.bestScore * 100).toFixed(1)}% | avg ${(report.averageScore * 100).toFixed(1)}%.`,
-            ],
+            logs: capLogs(state.forge.logs, `Seed candidate scored ${(best.score * 100).toFixed(1)}%.`),
           },
         }));
+        await yieldToRenderer(0);
 
-        await new Promise<void>((resolve) => {
-          window.setTimeout(() => resolve(), 120);
-        });
+        for (let generation = 1; generation <= config.maxGenerations; generation += 1) {
+          const live = get().forge;
+          if (live.phase !== 'running') break;
+
+          const elapsedMs = Date.now() - startTime;
+          if (elapsedMs >= config.maxDurationMs) {
+            set((state: any) => ({
+              forge: {
+                ...state.forge,
+                phase: 'completed',
+                finishedAt: Date.now(),
+                stopReason: `Time budget reached (${Math.round(config.maxDurationMs / 1000)}s).`,
+                logs: capLogs(state.forge.logs, 'Stopped: time budget reached.'),
+              },
+              moduleStates: { ...state.moduleStates, forge: 'online' },
+            }));
+            return;
+          }
+
+          set((state: any) => ({
+            forge: {
+              ...state.forge,
+              logs: capLogs(state.forge.logs, `G${generation}: Evaluating candidates${hasLLM ? ' via LLM' : ''}...`),
+            },
+          }));
+          await yieldToRenderer(0);
+
+          const { candidates, report } = await evaluateGeneration({
+            parent: best,
+            generation,
+            config,
+            suite: live.baselineSuite,
+            seed,
+            generate,
+            strictEvalMode,
+            verifierFirst,
+            onVerifierCheck: (check) => {
+              set((state: any) => ({
+                forge: {
+                  ...state.forge,
+                  verifierChecks: [...state.forge.verifierChecks.slice(-199), check],
+                },
+              }));
+            },
+            shouldStop: () => get().forge.phase !== 'running',
+          });
+          const leader = candidates[0];
+          if (leader && leader.score > best.score) {
+            best = leader;
+          }
+
+          set((state: any) => ({
+            forge: {
+              ...state.forge,
+              bestCandidate: best,
+              currentGeneration: generation,
+              generations: [...state.forge.generations, report],
+              logs: capLogs(
+                state.forge.logs,
+                `G${generation}: best ${(report.bestScore * 100).toFixed(1)}% | avg ${(report.averageScore * 100).toFixed(1)}%.`,
+              ),
+            },
+          }));
+
+          await yieldToRenderer(120);
+        }
+
+        const latest = get().forge;
+        const wasCancelled = latest.phase === 'cancelled';
+        set((state: any) => ({
+          forge: {
+            ...state.forge,
+            phase: wasCancelled ? 'cancelled' : 'completed',
+            finishedAt: Date.now(),
+            stopReason: wasCancelled ? state.forge.stopReason : 'Completed configured generation budget.',
+            logs: wasCancelled
+              ? state.forge.logs
+              : capLogs(state.forge.logs, 'FORGE completed all configured generations.'),
+          },
+          moduleStates: { ...state.moduleStates, forge: 'online' },
+        }));
+      } catch (error) {
+        set((state: any) => ({
+          forge: {
+            ...state.forge,
+            phase: 'failed',
+            finishedAt: Date.now(),
+            stopReason: 'FORGE run failed.',
+            logs: capLogs(state.forge.logs, `Error: ${(error as Error)?.message || error}`),
+          },
+          moduleStates: { ...state.moduleStates, forge: 'online' },
+        }));
       }
-
-      const latest = get().forge;
-      const wasCancelled = latest.phase === 'cancelled';
-      set((state: any) => ({
-        forge: {
-          ...state.forge,
-          phase: wasCancelled ? 'cancelled' : 'completed',
-          finishedAt: Date.now(),
-          stopReason: wasCancelled ? state.forge.stopReason : 'Completed configured generation budget.',
-          logs: wasCancelled ? state.forge.logs : [...state.forge.logs, 'FORGE completed all configured generations.'],
-        },
-        moduleStates: { ...state.moduleStates, forge: 'online' },
-      }));
     },
 
     cancelForge: () => {
