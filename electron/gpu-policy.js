@@ -5,8 +5,9 @@
 //  painted a white slab over the window and froze Hands Settings
 //  (backdrop-filter + position:fixed with no compositor).
 //
-//  Default: GPU stays ON. Windows only disables the native
-//  occlusion feature that can freeze frameless Electron windows.
+//  Default: GPU stays ON. Disable Chromium native-window occlusion
+//  so frameless windows do not freeze/paint black when another
+//  display or window is clicked.
 //
 //  Force off (after a real kernel bugcheck): --safe-mode
 //  or AGI_PRIME_DISABLE_GPU=1
@@ -17,8 +18,9 @@ function envEnabled(env, key) {
   return v === '1' || v === 'true' || v === 'TRUE' || v === 'yes';
 }
 
-function windowsStabilitySwitches() {
-  // Prevents some frameless Electron windows from freezing on Windows 10/11.
+function compositorStabilitySwitches() {
+  // Frameless Electron windows can freeze and paint black when Chromium
+  // thinks the window is occluded (including clicking another display).
   return [['disable-features', 'CalculateNativeWinOcclusion']];
 }
 
@@ -27,9 +29,7 @@ function gpuOffSwitches(platform) {
   // Do NOT add disable-gpu-compositing or disable-direct-composition:
   // those leave unpainted white regions and lock the UI.
   const switches = [['disable-gpu-shader-disk-cache']];
-  if (platform === 'win32') {
-    switches.push(...windowsStabilitySwitches());
-  }
+  switches.push(...compositorStabilitySwitches());
   return switches;
 }
 
@@ -56,7 +56,7 @@ function resolveGpuPolicy(input = {}) {
     return {
       disableHardwareAcceleration: false,
       reason: 'opt-in',
-      switches: platform === 'win32' ? windowsStabilitySwitches() : [],
+      switches: compositorStabilitySwitches(),
     };
   }
 
@@ -64,14 +64,14 @@ function resolveGpuPolicy(input = {}) {
     return {
       disableHardwareAcceleration: false,
       reason: 'windows-default',
-      switches: windowsStabilitySwitches(),
+      switches: compositorStabilitySwitches(),
     };
   }
 
   return {
     disableHardwareAcceleration: false,
     reason: 'default',
-    switches: [],
+    switches: compositorStabilitySwitches(),
   };
 }
 
@@ -92,7 +92,8 @@ function applyGpuPolicy(app, policy) {
 module.exports = {
   envEnabled,
   gpuOffSwitches,
-  windowsStabilitySwitches,
+  compositorStabilitySwitches,
+  windowsStabilitySwitches: compositorStabilitySwitches,
   resolveGpuPolicy,
   applyGpuPolicy,
 };

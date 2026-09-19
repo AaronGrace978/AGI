@@ -42,11 +42,13 @@ export class AppErrorBoundary extends React.Component<
   render(): React.ReactNode {
     if (!this.state.hasError) return this.props.children;
     return (
-      <div className="boot-screen">
-        <div className="boot-text">RECOVERY MODE</div>
-        <div className="boot-status">A renderer component failed. You can retry without restarting the app.</div>
-        <div className="boot-status">{this.state.error || 'Unknown error'}</div>
-        <button className="hardening-btn primary" onClick={this.retry}>
+      <div className="panel-recovery">
+        <div className="panel-recovery-title">This screen failed to render</div>
+        <div className="panel-recovery-body">
+          The rest of AGI PRIME is still running. Switch modules in the sidebar or retry this one.
+        </div>
+        <div className="panel-recovery-error">{this.state.error || 'Unknown error'}</div>
+        <button type="button" className="hardening-btn primary" onClick={this.retry}>
           RETRY PANEL
         </button>
       </div>

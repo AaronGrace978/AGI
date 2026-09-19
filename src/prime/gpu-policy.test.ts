@@ -25,12 +25,12 @@ describe('resolveGpuPolicy', () => {
     expect(resolveGpuPolicy({ platform: 'darwin', env: {}, argv: ['electron'] })).toMatchObject({
       disableHardwareAcceleration: false,
       reason: 'default',
-      switches: [],
+      switches: [['disable-features', 'CalculateNativeWinOcclusion']],
     });
     expect(resolveGpuPolicy({ platform: 'linux', env: {}, argv: ['electron'] })).toMatchObject({
       disableHardwareAcceleration: false,
       reason: 'default',
-      switches: [],
+      switches: [['disable-features', 'CalculateNativeWinOcclusion']],
     });
   });
 

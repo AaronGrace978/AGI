@@ -59,6 +59,7 @@ This README explains what the project is, how it is organized, and how to run it
 - **Release packaging**: Windows (NSIS + portable), macOS per-arch DMG, Linux/Steam Deck AppImage + deb, with a dedicated icon set and GitHub Actions **Release** workflow.
 - **Windows kernel-crash hotfix (1.1.1)**: slim `system:info` IPC (no soul/consciousness over the wire); Settings gear stays pinned in the sidebar.
 - **Hands Settings unfreeze (1.1.2)**: 1.1.1 turned off GPU compositing on Windows and painted a white slab / locked the app when the Hands gear opened a blurred modal. GPU is back on; `--safe-mode` still disables it. Modals portal to `document.body` without `backdrop-filter`.
+- **Release screen lockup (1.1.3)**: packaged builds no longer lazy-load each sidebar screen (a stalled chunk left a dark empty pane). Remaining `backdrop-filter` blurs are gone, Chromium window-occlusion is disabled on every OS, and a crashed renderer reloads instead of staying black.
 
 ## Core Engine Modules (`src/prime`)
 
@@ -182,15 +183,15 @@ You can then open the Expo project in Expo Go, an emulator, or a simulator.
 
 If you plan to use EAS commands, keep your Expo token in `AGIPrime-Mobile/.expo-token`. The repo includes `AGIPrime-Mobile/.expo-token.example` as a placeholder template only.
 
-## Release 1.1.2 — Windows, macOS, Steam Deck
+## Release 1.1.3 — Windows, macOS, Steam Deck
 
 Packaged desktop builds live in `release/` after you run the dist scripts (or download GitHub Actions artifacts from the **Release** workflow).
 
 | Platform | Artifact | How to run |
 | --- | --- | --- |
-| **Windows** | `AGI-PRIME-1.1.2-Windows-Setup-x64.exe` | Installer with Start Menu + desktop shortcut. Portable: `AGI-PRIME-1.1.2-Windows-Portable-x64.exe`. |
-| **macOS** | `AGI-PRIME-1.1.2-macOS-arm64.dmg` (Apple Silicon) or `…-x64.dmg` (Intel) | First open: right-click the app → **Open** (unsigned build). |
-| **Steam Deck / Linux** | `AGI-PRIME-1.1.2-linux-x86_64.AppImage` | Desktop Mode: mark executable and double-click. Game Mode: add as a non-Steam game, or use `scripts/steamdeck-launch.sh`. Also ships a `.deb`. |
+| **Windows** | `AGI-PRIME-1.1.3-Windows-Setup-x64.exe` | Installer with Start Menu + desktop shortcut. Portable: `AGI-PRIME-1.1.3-Windows-Portable-x64.exe`. |
+| **macOS** | `AGI-PRIME-1.1.3-macOS-arm64.dmg` (Apple Silicon) or `…-x64.dmg` (Intel) | First open: right-click the app → **Open** (unsigned build). |
+| **Steam Deck / Linux** | `AGI-PRIME-1.1.3-linux-x86_64.AppImage` | Desktop Mode: mark executable and double-click. Game Mode: add as a non-Steam game, or use `scripts/steamdeck-launch.sh`. Also ships a `.deb`. |
 
 Local packaging:
 
@@ -201,7 +202,7 @@ npm run dist:linux       # AppImage + deb
 npm run dist:steamdeck   # AppImage only
 ```
 
-CI: `.github/workflows/release.yml` builds all three OS families on version tags (`v1.1.2`) or **workflow_dispatch**.
+CI: `.github/workflows/release.yml` builds all three OS families on version tags (`v1.1.3`) or **workflow_dispatch**.
 
 Steam Deck notes:
 - Uses compact chrome and performance mode by default (less background LLM chatter on the APU).
