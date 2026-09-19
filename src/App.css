@@ -3329,6 +3329,8 @@ select:focus-visible {
   z-index: 1;
   position: relative;
   overflow: hidden;
+  min-height: 0;
+  min-width: 0;
 }
 
 .forge-header {
@@ -3390,6 +3392,8 @@ select:focus-visible {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   padding: 16px 20px;
+  min-height: 0;
+  min-width: 0;
 }
 
 .forge-card {

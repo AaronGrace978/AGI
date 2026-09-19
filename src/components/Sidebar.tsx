@@ -3,7 +3,7 @@
 //  Each icon is an independent OS module of the AGI
 // ═══════════════════════════════════════════════════════════════
 
-import { memo } from 'react';
+import { memo, startTransition } from 'react';
 import { useStore } from '../store';
 import { useShallow } from 'zustand/react/shallow';
 import type { ModuleId } from '../types';
@@ -50,7 +50,7 @@ export default memo(function Sidebar() {
             type="button"
             key={mod.id}
             className={`sidebar-btn ${mod.className || ''} ${activeModule === mod.id ? 'active' : ''}`}
-            onClick={() => setActiveModule(mod.id)}
+            onClick={() => startTransition(() => setActiveModule(mod.id))}
             title={mod.label}
           >
             {mod.icon}
@@ -65,7 +65,7 @@ export default memo(function Sidebar() {
         <button
           type="button"
           className={`sidebar-btn creed-btn ${activeModule === 'creed' ? 'active' : ''}`}
-          onClick={() => setActiveModule('creed')}
+          onClick={() => startTransition(() => setActiveModule('creed'))}
           title="THE CREED — Faith & Soul"
         >
           ✝<span className="sidebar-tooltip">THE CREED</span>
@@ -73,7 +73,7 @@ export default memo(function Sidebar() {
         <button
           type="button"
           className={`sidebar-btn ${activeModule === 'settings' ? 'active' : ''}`}
-          onClick={() => setActiveModule('settings')}
+          onClick={() => startTransition(() => setActiveModule('settings'))}
           title="Settings"
         >
           ⚙<span className="sidebar-tooltip">SETTINGS</span>

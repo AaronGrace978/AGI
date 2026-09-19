@@ -65,7 +65,7 @@ jobs:
           body: |
             Desktop installers for Windows, macOS, and Steam Deck.
 
-            Windows builds disable GPU hardware acceleration by default (kernel crash hotfix). Set `AGI_PRIME_ENABLE_GPU=1` to opt in.
+            GPU stays on by default. Use `--safe-mode` or `AGI_PRIME_DISABLE_GPU=1` only after a real GPU crash.
 
             - **Windows:** `AGI-PRIME-${{ steps.ver.outputs.version }}-Windows-Setup-x64.exe` (installer) or portable `.exe`
             - **macOS:** `AGI-PRIME-${{ steps.ver.outputs.version }}-macOS-arm64.dmg` (Apple Silicon) or `…-x64.dmg` (Intel). First open: right-click → Open.

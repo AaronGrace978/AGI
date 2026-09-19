@@ -12,5 +12,6 @@ describe('packaged sidebar navigation', () => {
     expect(appSource).toContain("import SettingsPanel from './components/SettingsPanel'");
     expect(appSource).toContain("import HandsPanel from './components/HandsPanel'");
     expect(appSource).toContain("import VoiceBox from './components/VoiceBox'");
+    expect(appSource).toContain("import ForgePanel from './components/ForgePanel'");
   });
 });
